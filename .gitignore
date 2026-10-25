@@ -1,0 +1,10 @@
+**/.env
+**/secrets.txt
+**/secrets.h
+**/secrets.json
+
+.vscode/
+*.code-workspace
+*.vsix
+
+.zed/
