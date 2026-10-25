@@ -1,8 +1,8 @@
 # System Communication Interfaces (`interface/`)
 
-This directory contains the central interface contracts defining all inter-device and inter-service communications across the SmarterFridge ecosystem.
+This directory contains the central interface contracts defining all inter-device and inter-service communications across the **SmarterFridge** ecosystem.
 
-Because the system spans multiple programming languages (**C++/FreeRTOS** on microcontrollers, **Python** on the edge gateway, and **TypeScript** on the cloud backend), each boundary contract is documented as a markdown specification (`.md`) providing exact memory layouts and schemas in the corresponding languages.
+Because the system spans multiple programming languages (**C++/FreeRTOS** on microcontrollers, **Python 3.11** on the edge gateway, and **TypeScript** on the cloud backend), each boundary contract is documented as a markdown specification (`.md`) providing exact memory layouts and schemas in the corresponding languages.
 
 > [!IMPORTANT]
 > **Reference Only — Do Not Cross-Link or Directly Import:**
@@ -18,7 +18,7 @@ Every interface file follows a 3-letter naming format:
 `<Source ID>` + `<Directionality>` + `<Destination ID>` + `.md`
 
 ### System & Node IDs
-* **`C`** — **Camera** Logger & Edge Gateway (Pi-top [4] / Raspberry Pi)
+* **`C`** — **Camera** Logger & Edge Gateway (Pi-top [4] / Raspberry Pi 4)
 * **`F`** — **Fridge** Internal Sensor Node (KidBright32)
 * **`D`** — **Door** Closer Actuator Node (KidBright32)
 * **`S`** — **Server** Cloud Backend (Firebase / Cloud Functions)
@@ -41,12 +41,26 @@ Interface contracts strictly define packet structures, data types, memory layout
 ### B. Secrets & Key Storage
 * **Decoupled Secrets:** Keys, passwords, and tokens are **never** hardcoded in interface files or committed to Git.
 * **Storage Standard:**
-  * **C++ Microcontroller Firmware:** Defined in `secrets.h` (e.g. `extern const uint8_t AES_KEY[16];`).
-  * **Python / TypeScript:** Defined in `.env` (e.g. `os.environ["AES_KEY"]` / `process.env.AES_KEY`).
+  * **C++ Microcontroller Firmware:** Defined in `secrets.h` (template at [`../secrets.h.example`](../secrets.h.example)).
+  * **Python / TypeScript:** Defined in `.env` (template at [`../.env.example`](../.env.example)).
 * **Consistent Identifier Naming:** All shared secrets must use identical reference names across all nodes and languages (e.g. `AES_KEY`, `MQTT_TLS_CA_CERT`, `LINE_CHANNEL_ACCESS_TOKEN`).
 
 ### C. Second-Accurate Timestamps
- All timestamps across all interfaces must use **Second precision** and (if applicable) store them as uint64s.
+All timestamps across all interfaces must use **Second precision** and (if applicable) store them as `uint64_t` / `uint64` values.
+
+### D. Null Values
+Reserve the highest possible number for unsigned integers and lowest possible
+number for signed integers as their respective null sentinals.
+**Example:** `int32_t` -> `0x8000` `uint64_t`
+
+### E. Endianness Standard (Little-Endian)
+All inter-process, inter-device, and over-the-wire binary communications across the system must **always use Little-Endian byte order** for multi-byte numeric primitives (`uint16_t`, `uint32_t`, `uint64_t`, `int16_t`, etc.). Both the ESP32 (Xtensa 32-bit LX6) and Raspberry Pi 4 (ARM Cortex-A72) are natively little-endian architectures; standardizing on little-endian eliminates byte-swapping overhead and guarantees direct struct compatibility. In Python serialization routines, multi-byte formats must explicitly specify little-endian (e.g. `<Q`, `<H`, `<h` via `struct`).
+
+### F. Bilingual Data Contracts & Localization Policy
+The SmarterFridge system features two primary user-facing interfaces: the local PyQt LCD on Node `'C'` and the mobile-responsive web dashboard on Server `'S'`. To support seamless bilingual user interaction:
+* **Bilingual Food Metadata:** Inter-service interfaces communicating food items ([`CBS.md`](CBS.md), [`SBG.md`](SBG.md)) must explicitly provide both Thai and English fields (`name_th`, `name_en`, `storage_recommendation_th`, `storage_recommendation_en`).
+* **Canonical Categories:** Categories are represented by canonical English keys (`Dairy`, `Produce`, `Meat`, etc.) across schemas and database storage, with bidirectional translation tables used by client applications.
+* **Date & Time Localization:** All timestamps use second-precision UTC epochs (`timestamp_s`) and ISO 8601 strings (`YYYY-MM-DD`), localized at the presentation layer (Thai Buddhist Era `พ.ศ.` on Thai interfaces, Western Gregorian `CE` on English interfaces).
 
 ---
 
@@ -54,9 +68,19 @@ Interface contracts strictly define packet structures, data types, memory layout
 
 | File | Endpoints | Direction | Transport & Security | Description |
 |---|---|---|---|---|
-| [`FUC.md`](file:///home/sirat/Code/SmarterFridge/interface/FUC.md) | Fridge → Camera | Unidirectional (`U`) | BLE Beacon (AES-128-GCM) | Encrypted telemetry: temperature (LM73), VOC index (SGP40), light reading (LDR), and packet counter. |
-| [`CBF.md`](file:///home/sirat/Code/SmarterFridge/interface/CBF.md) | Camera ↔ Fridge | Bidirectional (`B`) | MQTT over TLS | Bootup time synchronization: 64-bit Unix timestamp calibration for Node `'F'` internal RTC. |
-| [`CBD.md`](file:///home/sirat/Code/SmarterFridge/interface/CBD.md) | Camera ↔ Door | Bidirectional (`B`) | MQTT over TLS | Door actuation commands (`CLOSE_DOOR`, `ABORT`) and door status/safety events (`DOOR_OPEN`, `SUCCESS`, `OBSTRUCTION_ERROR`). |
-| [`CBS.md`](file:///home/sirat/Code/SmarterFridge/interface/CBS.md) | Camera ↔ Server | Bidirectional / Client-Server (`B`) | HTTPS | Telemetry sync, check-in cropped images, check-out verification requests, and door event logs. |
-| [`SBG.md`](file:///home/sirat/Code/SmarterFridge/interface/SBG.md) | Server ↔ Gemini | Bidirectional (`B`) | HTTPS (Gen AI SDK) | Context-enriched prompt calls to Gemini 3.5 Flash Lite and structured JSON responses (`name`, `category`, `estimated_expiry_date`). |
-| [`SUL.md`](file:///home/sirat/Code/SmarterFridge/interface/SUL.md) | Server → LINE | Unidirectional (`U`) | HTTPS POST | Outbound user alerts for food expiration, spoilage VOC spikes, door ajar warnings, and obstruction aborts. |
+| [`FUC.md`](FUC.md) | Fridge → Camera | Unidirectional (`U`) | BLE Beacon (AES-128-GCM) | Encrypted telemetry: temperature (LM73), VOC index (SGP40), light reading (LDR), and packet counter. |
+| [`CBF.md`](CBF.md) | Camera ↔ Fridge | Bidirectional (`B`) | MQTT over TLS | Bootup time synchronization: 0-byte request to 8-byte little-endian 64-bit Unix timestamp response for Node `'F'` RTC recalibration. |
+| [`CBD.md`](CBD.md) | Camera ↔ Door | Bidirectional (`B`) | MQTT over TLS | Door actuation commands (`CLOSE_DOOR`, `ABORT`) and door status/safety events (`DOOR_OPEN`, `SUCCESS`, `OBSTRUCTION_ERROR`). |
+| [`CBS.md`](CBS.md) | Camera ↔ Server | Bidirectional / Client-Server (`B`) | HTTPS (Bearer Token) | Telemetry sync, check-in cropped images returning bilingual metadata (`name_th`, `name_en`), check-out FEFO verification, and door event logs. |
+| [`SBG.md`](SBG.md) | Server ↔ Gemini | Bidirectional (`B`) | HTTPS (Gen AI SDK) | Context-enriched prompt calls to Gemini 3.5 Flash Lite returning bilingual metadata (`name_th`, `name_en`, `category`, `estimated_expiry_date`). |
+| [`SUL.md`](SUL.md) | Server → LINE | Unidirectional (`U`) | HTTPS POST | Outbound user alerts for food expiration, spoilage VOC spikes, door ajar warnings, and obstruction aborts. |
+
+---
+
+## 4. Subproject & System Documentation Index
+
+* **Root Documentation:** [`SUMMARY.md`](../SUMMARY.md) | [`AGENTS.md`](../AGENTS.md) | [`RUBRIC.md`](../RUBRIC.md)
+* **Node `'C'` (`camera/`):** [`README.md`](../camera/README.md) | [`ARCHITECTURE.md`](../camera/ARCHITECTURE.md) | [`GOAL.md`](../camera/GOAL.md)
+* **Node `'F'` (`fridge/`):** [`README.md`](../fridge/README.md) | [`ARCHITECTURE.md`](../fridge/ARCHITECTURE.md) | [`GOAL.md`](../fridge/GOAL.md)
+* **Node `'D'` (`door/`):** [`README.md`](../door/README.md) | [`ARCHITECTURE.md`](../door/ARCHITECTURE.md) | [`GOAL.md`](../door/GOAL.md)
+* **Server `'S'` (`server/`):** [`README.md`](../server/README.md) | [`ARCHITECTURE.md`](../server/ARCHITECTURE.md) | [`GOAL.md`](../server/GOAL.md)

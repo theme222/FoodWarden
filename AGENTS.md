@@ -7,8 +7,8 @@ Welcome! This file is the primary context and operating manual for all AI coding
 ## 1. Project Reference & System Architecture
 
 Before writing or modifying code, familiarize yourself with:
-* **[SUMMARY.md](file:///home/sirat/Code/SmarterFridge/SUMMARY.md):** System architecture, inter-device communication protocols, data flows, and core values.
-* **[RUBRIC.md](file:///home/sirat/Code/SmarterFridge/RUBRIC.md):** Academic grading criteria and requirements. (Engineering constraints are summarized below).
+* **[SUMMARY.md](SUMMARY.md):** System architecture, inter-device communication protocols, data flows, and core values.
+* **[RUBRIC.md](RUBRIC.md):** Academic grading criteria and requirements. (Engineering constraints are summarized below).
 
 ### System Entity & Node IDs
 * **`'C'` — Camera & Gateway:** Pi-top [4] (Raspberry Pi 4) edge processor.
@@ -20,13 +20,15 @@ Before writing or modifying code, familiarize yourself with:
 
 ### Repository Directory Structure
 The repository is split into decoupled subprojects and shared interface definitions:
-* **[`interface/`](file:///home/sirat/Code/SmarterFridge/interface):** Shared interface contracts defining payloads, packet formats, schemas, and bitwise structures across all system boundaries (`CBD.md`, `FUC.md`, `CBS.md`, `SBG.md`, `SUL.md`).
-* **[`camera/`](file:///home/sirat/Code/SmarterFridge/camera) (Node `'C'` — Gateway):** Runs on Pi-top [4] (Raspberry Pi 4) in **Python**. Handles local YOLO vision, Mosquitto TLS broker, BLE beacon decoding/decryption, LCD display UI, and Firebase HTTPS client.
-* **[`fridge/`](file:///home/sirat/Code/SmarterFridge/fridge) (Node `'F'` — Fridge Sensor):** Runs on KidBright32 (ESP32) in **C++/FreeRTOS**. Battery-powered internal sensor using deep sleep, sampling LM73 (temp), SGP40 (VOC), and LDR (door light), broadcasting AES-128-GCM encrypted BLE beacons.
-* **[`door/`](file:///home/sirat/Code/SmarterFridge/door) (Node `'D'` — Door Closer):** Runs on KidBright32 (ESP32) in **C++/FreeRTOS**. 12V mains-powered actuator driving worm gear motor via TB6612FNG driver, with INA219 current obstruction detection, limit switch ISR, optical IR closed sensor, and MQTT over TLS.
-* **[`server/`](file:///home/sirat/Code/SmarterFridge/server) (Server `'S'` — Cloud Backend):** Runs on **Firebase** using **TypeScript**. Cloud Functions orchestrate Gemini 3.5 Flash Lite (`'G'`) with inventory context, manage Firestore database, enforce security rules, and send LINE (`'L'`) alerts.
+* **[`interface/`](interface/README.md):** Shared interface contracts defining payloads, packet formats, schemas, and bitwise structures across all system boundaries (`CBD.md`, `FUC.md`, `CBS.md`, `SBG.md`, `SUL.md`). **ASK FOR APPROVAL BEFORE MAKING ANY CHANGES TO FILES IN THIS DIRECTORY**
+* **[`camera/`](camera/README.md) (Node `'C'` — Gateway):** Runs on Pi-top [4] (Raspberry Pi 4) in **Python**. Handles local YOLO vision, Mosquitto TLS broker, BLE beacon decoding/decryption, LCD display UI, and Firebase HTTPS client.
+* **[`fridge/`](fridge/README.md) (Node `'F'` — Fridge Sensor):** Runs on KidBright32 (ESP32) in **C++/FreeRTOS**. Battery-powered internal sensor using deep sleep, sampling LM73 (temp), SGP40 (VOC), and LDR (door light), broadcasting AES-128-GCM encrypted BLE beacons.
+* **[`door/`](door/README.md) (Node `'D'` — Door Closer):** Runs on KidBright32 (ESP32) in **C++/FreeRTOS**. 12V mains-powered actuator driving worm gear motor via TB6612FNG driver, with INA219 current obstruction detection, limit switch ISR, optical IR closed sensor, and MQTT over TLS.
+* **[`server/`](server/README.md) (Server `'S'` — Cloud Backend):** Runs on **Firebase** using **TypeScript**. Cloud Functions orchestrate Gemini 3.5 Flash Lite (`'G'`) with inventory context, manage Firestore database, enforce security rules, and send LINE (`'L'`) alerts.
 
 *(Each directory will contain its own localized README, build configuration, and pinout/hardware diagrams.)*
+
+Keep related changes scoped within a subsystem. Do not modify multiple systems at once without **explicit** permission.
 
 ---
 
@@ -63,21 +65,23 @@ The AI must program defensively and account for all edge cases and failure modes
 * **Camera Glitches:** Dropped frames or camera disconnects in OpenCV/YOLO must be handled safely without segmentation faults.
 
 ### B. User Experience (Target Audience: Non-Tech-Savvy)
-* The UI and interaction model must be **completely intuitive and friction-free ("brain-dead easy")**:
+* The UI and interaction model must be **completely intuitive and friction-free**:
   * One-button check-in and check-out workflows.
   * Clear visual prompts on the 8-inch LCD with minimal clutter.
   * Automatic selection of items based on First Expired, First Out (FEFO) default with simple confirmation.
   * Human-readable notifications dispatched via **LINE** (e.g., "Milk expires in 2 days", "Door was left open and safely closed", "Door obstruction detected").
 
 ### C. Strong Typing & Decoupled Reference Interfaces
-* **Single Source of Truth:** All cross-system message contracts, schemas, and byte/bitwise structures must be maintained in [`interface/`](file:///home/sirat/Code/SmarterFridge/interface).
+* **Single Source of Truth:** All cross-system message contracts, schemas, and byte/bitwise structures must be maintained in [`interface/`](interface/README.md).
 * **Reference Only — No Direct Linking:** Files in `interface/` serve strictly as canonical reference models. Subprojects (`camera/`, `fridge/`, `door/`, `server/`) must **NEVER** directly import or symlink across folders to `interface/`. Each subproject must copy and mirror its required schemas locally into its own directory (converting into Python dataclasses/typing, C++ structs/byte buffers, or local TypeScript modules).
 * **TypeScript:** Strictly type all Firebase Cloud Functions, Firestore data documents, and API responses. Disallow `any`.
 * **Python:** Use type hints (`typing`) and runtime data validation (e.g. `pydantic` or `dataclasses`) reflecting `interface/` schemas for Gateway data packets.
 * **Microcontroller C++:** Define explicit struct/byte pack headers matching `interface/` specifications for BLE advertisement payloads and MQTT JSON messages.
 
 ### D. Documentation & Markdown Formatting Rules
+* **Always Use Relative Links for File Linkage:** Never use absolute filesystem URIs (such as `file:///...`) inside repository markdown files. All links between markdown documents, schemas, or source files must strictly use relative paths (e.g. `[README.md](camera/README.md)`, `[SUMMARY.md](../SUMMARY.md)`, `[FUC.md](../interface/FUC.md)`) so they resolve correctly across all machines, clones, and on GitHub.
 * **Never Use Inline or Block LaTeX in Markdown:** Do **not** use LaTeX formatting (e.g. `$...$` or `$$...$$`) anywhere in markdown files. Use standard text or clean Unicode symbols (such as `→`, `≥`, `≤`, `Ω`, `~`, `×`, `±`, `+`) instead.
+* **Never Use Mermaid Diagrams in Markdown:** Do **not** use mermaid code blocks (e.g. ````mermaid ... ````) anywhere in repository markdown files. Always use clean, formatted plain text ASCII diagrams inside fenced code blocks (````text ... ````) instead.
 
 ---
 

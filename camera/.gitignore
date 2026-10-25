@@ -1,0 +1,20 @@
+# Python virtual environment & bytecode
+.venv/
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Tool caches
+.ruff_cache/
+.mypy_cache/
+.pytest_cache/
+
+# Build & distribution
+dist/
+build/
+*.egg-info/
+
+# YOLO model weights & temporary captures
+*.pt
+*.onnx
+captures/

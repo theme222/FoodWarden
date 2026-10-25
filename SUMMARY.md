@@ -48,7 +48,7 @@ The system coordinates edge devices, local actuators, and cloud intelligence acr
    * **Protocol:** Unidirectional Bluetooth Low Energy (BLE) broadcast in **beacon mode**.
    * **Application-Layer Security:** Telemetry payloads are encrypted with **AES-128-GCM** on Node `'F'` and decrypted by the Gateway `'C'`.
    * **Architectural Rationale:** Node `'F'` is battery-powered inside a cold, shielded compartment. Beacon broadcasting eliminates pairing handshakes and Wi-Fi energy penalties, allowing the microcontroller to wake up, broadcast encrypted telemetry, and return to deep sleep instantly.
-   * **Bootup Time Synchronization ([CBF.md](file:///home/sirat/Code/SmarterFridge/interface/CBF.md)):** On cold boot, Node `'F'` briefly connects to Gateway `'C'` via MQTT over TLS (`MQTTS`) to synchronize its hardware RTC with a 64-bit Unix timestamp before entering cyclic BLE sleep.
+   * **Bootup Time Synchronization ([CBF.md](interface/CBF.md)):** On cold boot, Node `'F'` briefly connects to Gateway `'C'` via MQTT over TLS (`MQTTS`) to synchronize its hardware RTC with a 64-bit Unix timestamp before entering cyclic BLE sleep.
 
 2. **Node 'C' (Gateway) ↔ Node 'D' (Door Closer) [MQTT over TLS]:**
    * **Protocol:** Bidirectional MQTT secured with TLS (`MQTTS`).
@@ -105,7 +105,7 @@ The system coordinates edge devices, local actuators, and cloud intelligence acr
   * Hosts local Mosquitto MQTT broker with TLS.
   * Listens to and decrypts AES-128-GCM BLE beacon broadcasts from Node `'F'`.
   * Runs edge YOLO inference for grocery segmentation and real-time human detection.
-  * Drives local user interface and hardware navigation buttons on the display.
+  * Drives local user interface and hardware navigation buttons on the 5-inch LCD with **bilingual prompts displayed by default in Thai with an English translation**.
   * Synchronizes telemetry, check-in, and check-out events with Firebase.
 
 ### Node `ID:'D'`: Door Closer Actuator (KidBright32)
@@ -124,10 +124,12 @@ The system coordinates edge devices, local actuators, and cloud intelligence acr
   * Packages and encrypts sensor telemetry using AES-128-GCM.
   * Broadcasts telemetry unidirectionally via BLE beacon without Wi-Fi overhead.
 
-### Server `ID:'S'`: Cloud Backend (Firebase)
-* **Tech Stack:** TypeScript (strict type definitions enforced across functions, database models, and API interfaces).
+### Server `ID:'S'`: Cloud Backend & Web Dashboard (Firebase)
+* **Tech Stack:** TypeScript (strict type definitions enforced across functions, database models, and API interfaces) and Vite + React frontend.
 * **Responsibilities:**
-  * Hosts Cloud Firestore database for inventory and telemetry time-series.
+  * Serves the mobile-responsive web application allowing users to monitor live metrics, inventory, and door safety on their phones or browsers.
+  * Provides a dynamic language selection method between **Thai (`th`)** and **English (`en`)** in the web dashboard.
+  * Hosts Cloud Firestore database storing food items bilingually (`name_th`, `name_en`, `storage_recommendation_th`, `storage_recommendation_en`) with category and date translation bridges.
   * Orchestrates Gemini 3.5 Flash Lite (`'G'`) API calls with inventory context.
   * Dispatches LINE (`'L'`) notifications for spoilage or safety incidents.
 
@@ -140,3 +142,4 @@ The system coordinates edge devices, local actuators, and cloud intelligence acr
 3. **Power Efficiency at the Edge:** Minimize radio wake time inside the cold enclosure by adopting unidirectional encrypted BLE beacons instead of persistent connections.
 4. **Context-Aware Multimodal Intelligence:** Leverage cloud VLMs (Gemini 3.5 Flash Lite) where contextual reasoning is needed (matching exiting food against existing inventory), while keeping latency-critical perception (human detection, bounding) local on the edge.
 5. **Strict Type Safety & Explicit Contracts:** All inter-service communications, telemetry packets, and database schemas must adhere to strict, typed data contracts shared across subprojects.
+6. **Bilingual Accessibility & Dual User Interfaces:** Direct user interfaces provide complete bilingual accessibility: Node `'C'`'s physical 5-inch LCD displays every instruction by default in Thai with an English translation, while Server `'S'`'s mobile-responsive web dashboard enables users to monitor fridge metrics and inventory on their phone with an instantaneous Thai/English language switcher, backed by bilingual food data storage in Firestore.

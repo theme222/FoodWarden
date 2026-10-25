@@ -1,0 +1,32 @@
+[project]
+name = "smarterfridge-camera"
+version = "0.1.0"
+description = "SmarterFridge Edge Gateway & Camera Logger (Node 'C' - Pi-top [4])"
+readme = "README.md"
+authors = [
+    { name = "Theme222", email = "sira.tongsima@yahoo.com" }
+]
+requires-python = ">=3.11,<3.12"
+dependencies = []
+
+[dependency-groups]
+dev = [
+    "mypy>=1.11.0",
+    "pytest>=8.0.0",
+    "ruff>=0.6.0",
+]
+
+[project.scripts]
+smarterfridge-camera = "smarterfridge_camera:main"
+
+[build-system]
+requires = ["uv_build>=0.12.13,<0.13.0"]
+build-backend = "uv_build"
+
+[tool.ruff]
+target-version = "py311"
+line-length = 100
+
+[tool.mypy]
+python_version = "3.11"
+strict = true

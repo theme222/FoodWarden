@@ -3,8 +3,8 @@
 **/secrets.h
 **/secrets.json
 
-.vscode/
+**/.vscode/
 *.code-workspace
 *.vsix
 
-.zed/
+**/.zed/

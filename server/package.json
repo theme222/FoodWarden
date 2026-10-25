@@ -1,0 +1,20 @@
+{
+  "name": "smarterfridge-server",
+  "module": "index.ts",
+  "type": "module",
+  "private": true,
+  "scripts": {
+    "dev": "bun --watch run index.ts",
+    "start": "bun run index.ts",
+    "test": "bun test",
+    "typecheck": "bunx tsc --noEmit",
+    "format": "bunx prettier --write .",
+    "format:check": "bunx prettier --check ."
+  },
+  "devDependencies": {
+    "@types/bun": "latest"
+  },
+  "peerDependencies": {
+    "typescript": "^7"
+  }
+}
