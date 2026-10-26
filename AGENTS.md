@@ -22,7 +22,7 @@ Before writing or modifying code, familiarize yourself with:
 The repository is split into decoupled subprojects and shared interface definitions:
 * **[`interface/`](interface/README.md):** Shared interface contracts defining payloads, packet formats, schemas, and bitwise structures across all system boundaries (`CBD.md`, `FUC.md`, `CBS.md`, `SBG.md`, `SUL.md`). **ASK FOR APPROVAL BEFORE MAKING ANY CHANGES TO FILES IN THIS DIRECTORY**
 * **[`camera/`](camera/README.md) (Node `'C'` — Gateway):** Runs on Pi-top [4] (Raspberry Pi 4) in **Python**. Handles local YOLO vision, Mosquitto TLS broker, BLE beacon decoding/decryption, LCD display UI, and Firebase HTTPS client.
-* **[`fridge/`](fridge/README.md) (Node `'F'` — Fridge Sensor):** Runs on KidBright32 (ESP32) in **C++/FreeRTOS**. Battery-powered internal sensor using deep sleep, sampling LM73 (temp), SGP40 (VOC), and LDR (door light), broadcasting AES-128-GCM encrypted BLE beacons.
+* **[`fridge/`](fridge/README.md) (Node `'F'` — Fridge Sensor):** Runs on KidBright32 (ESP32) in **C++/FreeRTOS**. Battery-powered internal sensor using deep sleep, sampling LM73 (temp), SGP40 (VOC), and LDR (door light), communicating via AES-128-GCM encrypted BLE GATT (calibrating RTC time directly over BLE with zero Wi-Fi required).
 * **[`door/`](door/README.md) (Node `'D'` — Door Closer):** Runs on KidBright32 (ESP32) in **C++/FreeRTOS**. 12V mains-powered actuator driving worm gear motor via TB6612FNG driver, with INA219 current obstruction detection, limit switch ISR, optical IR closed sensor, and MQTT over TLS.
 * **[`server/`](server/README.md) (Server `'S'` — Cloud Backend):** Runs on **Firebase** using **TypeScript**. Cloud Functions orchestrate Gemini 3.5 Flash Lite (`'G'`) with inventory context, manage Firestore database, enforce security rules, and send LINE (`'L'`) alerts.
 
@@ -44,14 +44,14 @@ All code developed for this project must satisfy these specific engineering stan
 ### B. Engineering Depth Menu (E1 – E7 Focus; Exclude E8)
 1. **E1 (RTOS Multitasking):** Microcontroller firmware on ESP32 must use FreeRTOS with at least 3 discrete tasks with defined priorities, communicating strictly via queues, semaphores, or event groups (no monolithic blocking loops).
 2. **E2 (Interrupt-Driven I/O):** Time-critical inputs (e.g., limit switch hit, emergency abort, UI pushbuttons) must be handled by hardware ISRs with deferred task notification (no busy-waiting or polling loops).
-3. **E3 (Low Power):** Node `'F'` must maximize battery life via ESP32 deep sleep cycles, waking only to sample and transmit encrypted BLE beacons before sleeping. Power consumption and battery runtime must be documented.
+3. **E3 (Low Power):** Node `'F'` must maximize battery life via ESP32 deep sleep cycles, waking only to sample and transmit encrypted BLE GATT telemetry before sleeping (operates with zero Wi-Fi overhead; time synchronization is performed directly over BLE). Power consumption and battery runtime must be documented.
 4. **E4 (Reliable Communication):** Message acknowledgments and retries between nodes; the Gateway must implement store-and-forward telemetry buffering when Internet connectivity is down.
 5. **E5 (Security):** 
    * MQTT connection between Gateway and Node `'D'` must use **MQTT over TLS** with mutual or server authentication.
    * Telemetry from Node `'F'` must be encrypted with **AES-128-GCM** at the application layer.
    * **Never commit secrets, tokens, Wi-Fi credentials, or private keys to Git.** Store secrets in `secrets.h` for C++ and `.env` for Python/TypeScript, with matching variable names across nodes.
 6. **E6 (OTA Update):** Firmware over-the-air update support for microcontroller nodes.
-7. **E7 (On-Device AI):** Local YOLO instance segmentation and human detection running directly on the Gateway edge hardware (Pi-top [4]).
+7. **E7 (On-Device AI):** Local YOLO object detection (bounding box) and human detection running directly on the Gateway edge hardware (Pi-top [4]).
 
 ---
 
@@ -67,7 +67,7 @@ The AI must program defensively and account for all edge cases and failure modes
 ### B. User Experience (Target Audience: Non-Tech-Savvy)
 * The UI and interaction model must be **completely intuitive and friction-free**:
   * One-button check-in and check-out workflows.
-  * Clear visual prompts on the 8-inch LCD with minimal clutter.
+  * Clear visual prompts on the 5-inch LCD with minimal clutter.
   * Automatic selection of items based on First Expired, First Out (FEFO) default with simple confirmation.
   * Human-readable notifications dispatched via **LINE** (e.g., "Milk expires in 2 days", "Door was left open and safely closed", "Door obstruction detected").
 

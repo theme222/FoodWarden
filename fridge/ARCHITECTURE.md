@@ -6,7 +6,7 @@ This document specifies the hardware pinouts, sensor bus interfaces, power archi
   * [`README.md`](README.md) — Setup, build, flash, and test commands
   * [`GOAL.md`](GOAL.md) — Feature and edge-case checklist
   * [`SUMMARY.md`](../SUMMARY.md) — System-wide architecture
-  * **Interfaces:** [`FUC.md`](../interface/FUC.md) (BLE Beacon Telemetry), [`CBF.md`](../interface/CBF.md) (MQTTS Boot Time Sync)
+  * **Interfaces:** [`FUC.md`](../interface/FUC.md) (BLE GATT Telemetry & Time Sync)
 
 ---
 
@@ -27,7 +27,7 @@ This document specifies the hardware pinouts, sensor bus interfaces, power archi
 | **VOC Gas Sensor** | **Sensirion SGP40** Module | External **KB Chain `I2C1`** (`Wire1`) | • `SDA` = **`GPIO 21`**<br>• `SCL` = **`GPIO 22`**<br>• `VCC` = **`3V3`**<br>• `GND` = **`GND`** | **`0x59`** | Measures Volatile Organic Compounds (`VOC Index: 0–500`) emitted by spoiling food. |
 | **LED Dot Matrix** | Onboard **16×8 Red LED Matrix** (`HT16K33` driver) | Onboard **`I2C0`** (`Wire`) | • `SDA` = **`GPIO 4`**<br>• `SCL` = **`GPIO 5`** | **`0x70`** | Displays boot calibration status, manual diagnostic readouts, and battery warnings (disabled during deep sleep). |
 | **Button 1 (`S1`)** | Onboard Pushbutton `S1` | Digital Input (Active-LOW, Pull-up) | **`GPIO 16`** (`RTC_GPIO17`) | Digital (`LOW` when pressed) | Hardware interrupt / wake trigger to display live sensor readings on the LED dot matrix. |
-| **Button 2 (`S2`)** | Onboard Pushbutton `S2` | Digital Input (Active-LOW, Pull-up) | **`GPIO 14`** (`RTC_GPIO16`) | Digital (`LOW` when pressed) | Hardware interrupt / wake trigger to force an MQTTS RTC time recalibration ([`CBF.md`](../interface/CBF.md)). |
+| **Button 2 (`S2`)** | Onboard Pushbutton `S2` | Digital Input (Active-LOW, Pull-up) | **`GPIO 14`** (`RTC_GPIO16`) | Digital (`LOW` when pressed) | Hardware interrupt / wake trigger to force an immediate BLE GATT connection and RTC time recalibration ([`FUC.md`](../interface/FUC.md)). |
 | **Status Indicators** | Onboard LEDs & Buzzer | Digital Output | • Wi-Fi LED = **`GPIO 2`**<br>• IoT LED = **`GPIO 12`**<br>• Buzzer = **`GPIO 13`** | Digital Output | Diagnostic feedback during initial bootup and OTA firmware updates. |
 
 ```text
@@ -60,8 +60,7 @@ This document specifies the hardware pinouts, sensor bus interfaces, power archi
 |---|---|---|
 | **Language** | **C++ (`C++17` / `gnu++17`)** | Compiled via `xtensa-esp32-elf-g++` toolchain with strict struct packing (`__attribute__((packed))`). |
 | **Build System** | **PlatformIO (`pio`)** | Configured in [`platformio.ini`](platformio.ini) (`platform = espressif32`, `board = esp32dev`, `framework = arduino`). |
-| **RTOS & Power Management** | **FreeRTOS (ESP-IDF)** + **ESP32 Deep Sleep (`esp_sleep.h`)** | Coordinates discrete FreeRTOS tasks (`vSensorTask`, `vBleBeaconTask`, `vDisplayTask`) via queues/semaphores, and enters cyclic deep sleep (`esp_deep_sleep_start()`) storing state in `RTC_DATA_ATTR` SRAM (E1, E3). |
-| **BLE Beacon Transmitter** | **ESP32 BLE (`esp_bt.h`, `BLEDevice.h` / `NimBLE-Arduino`)** | Broadcasts unidirectional, non-connectable BLE advertisements containing up to 6 batched `SensorSample` structs ([`FUC.md`](../interface/FUC.md)). |
-| **Application Cryptography** | **mbedTLS (`mbedtls/gcm.h`, `esp_random()`)** | Hardware-accelerated **AES-128-GCM** authenticated encryption using `AES_KEY` from `secrets.h`, generating a unique 12-byte IV and 16-byte authentication tag per packet (E5). |
-| **MQTT over TLS Client** | **`WiFiClientSecure`** + **`PubSubClient`** | Used exclusively on initial cold boot (or `S2` button press) to connect to Gateway `'C'` on port `8883`, publish an empty request to `fridge/node_f/time/req`, and receive the raw 8-byte little-endian 64-bit Unix timestamp on `fridge/node_f/time/res` ([`CBF.md`](../interface/CBF.md)) without requiring a JSON parser. |
+| **RTOS & Power Management** | **FreeRTOS (ESP-IDF)** + **ESP32 Deep Sleep (`esp_sleep.h`)** | Coordinates discrete FreeRTOS tasks (`vSensorTask`, `vBleGattTask`, `vDisplayTask`) via queues/semaphores, and enters cyclic deep sleep (`esp_deep_sleep_start()`) storing state in `RTC_DATA_ATTR` SRAM (E1, E3). |
+| **BLE GATT Server** | **ESP32 BLE (`NimBLE-Arduino` / `BLEDevice.h`)** | Hosts GATT Telemetry Service `0000FFF0...`, allowing Gateway `'C'` to write Unix timestamps to Characteristic `0000FFF2...` and read/notify encrypted sensor telemetry on `0000FFF1...` ([`FUC.md`](../interface/FUC.md)). |
+| **Application Cryptography** | **mbedTLS (`mbedtls/gcm.h`, `esp_random()`)** | Hardware-accelerated **AES-128-GCM** authenticated encryption using `AES_KEY` from `secrets.h`, generating a unique 12-byte IV and 16-byte authentication tag per packet with AAD header verification (E5). |
 | **Sensor Drivers** | • **`Wire` (`TwoWire`)**<br>• **`Sensirion I2C SGP40`** & **`Sensirion Gas Index Algorithm`**<br>• **LM73 I2C Driver**<br>• **HT16K33 LED Matrix Driver** | Dual I2C controller configuration (`Wire.begin(4, 5)` for LM73 + LED Matrix; `Wire1.begin(21, 22)` for SGP40) with bus timeout protection to prevent I2C lockups if a sensor is unplugged. |

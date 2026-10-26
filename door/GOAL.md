@@ -28,8 +28,8 @@
 
 ## 3. Edge Cases & Failure Mode Handlers
 - [ ] **Power Interruption / Reboot Recovery:** On boot, if the Limit Switch (`GPIO 33`) is not depressed, automatically enter `HOMING_ON_BOOT` state and slowly retract the arm until the Limit Switch trips (or timeout) so the arm never blocks the fridge door after a power outage.
-- [ ] **Hard Motion Timeout Fail-Safe:** Enforce a strict maximum duration (e.g. `8 seconds`) for any forward closing or reverse retracting motion; if neither the IR sensor nor the Limit Switch trips before timeout, cut motor power immediately and enter `FAULT_LOCKOUT`.
-- [ ] **Wi-Fi / MQTTS Disconnection During Motion:** Local hardware safety loops (INA219 stall detection, Limit Switch ISR, IR sensor, motion timeout) must execute independently on high-priority FreeRTOS tasks even if Wi-Fi or MQTTS drops mid-swing.
+- [ ] **Hard Motion Timeout Fail-Safe:** Enforce a strict maximum duration of `30 seconds` for any forward closing or reverse retracting motion; if neither the IR sensor nor the Limit Switch trips before timeout, cut motor power immediately, publish `TIMEOUT_ERROR`, and enter `FAULT_LOCKOUT`.
+- [ ] **Wi-Fi / MQTTS Disconnection During Motion:** If Wi-Fi or MQTTS drops while the arm is moving forward, immediately halt forward push and retract to the Home Limit Switch (safe fail-safe default, as vision-based human abort is severed).
 - [ ] **Unplugged INA219 Sensor Defense:** Verify INA219 I2C connectivity before starting motor movement; refuse to drive the motor forward (`FAULT_LOCKOUT`) if the current sensor is unresponsive on `I2C1`.
 
 ---

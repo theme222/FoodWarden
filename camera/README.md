@@ -18,8 +18,7 @@ Running on a **Pi-top [4] (Raspberry Pi 4)** in **Python 3.11**, Node `'C'` capt
 ### System & Interface References
 * **Root Documentation:** [`SUMMARY.md`](../SUMMARY.md) | [`AGENTS.md`](../AGENTS.md) | [`RUBRIC.md`](../RUBRIC.md)
 * **Communication Contracts ([`interface/`](../interface/README.md)):**
-  * [`FUC.md`](../interface/FUC.md) — Fridge (`'F'`) → Camera (`'C'`) BLE Beacon (`AES-128-GCM`)
-  * [`CBF.md`](../interface/CBF.md) — Camera (`'C'`) ↔ Fridge (`'F'`) MQTTS Boot Time Sync
+  * [`FUC.md`](../interface/FUC.md) — Fridge (`'F'`) ↔ Camera (`'C'`) BLE GATT Telemetry & Time Sync (`AES-128-GCM`)
   * [`CBD.md`](../interface/CBD.md) — Camera (`'C'`) ↔ Door (`'D'`) MQTTS Actuation & Safety
   * [`CBS.md`](../interface/CBS.md) — Camera (`'C'`) ↔ Server (`'S'`) HTTPS Cloud Sync
 
@@ -32,8 +31,8 @@ Running on a **Pi-top [4] (Raspberry Pi 4)** in **Python 3.11**, Node `'C'` capt
 
 ### Setup & Dependencies
 ```bash
-# 1. Copy root environment template and populate credentials
-cp ../.env.example ../.env
+# 1. Copy environment template and populate credentials
+cp .env.example .env
 
 # 2. Sync virtual environment and install dependencies (Python 3.11)
 uv sync

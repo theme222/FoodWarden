@@ -48,10 +48,21 @@ Interface contracts strictly define packet structures, data types, memory layout
 ### C. Second-Accurate Timestamps
 All timestamps across all interfaces must use **Second precision** and (if applicable) store them as `uint64_t` / `uint64` values.
 
-### D. Null Values
-Reserve the highest possible number for unsigned integers and lowest possible
-number for signed integers as their respective null sentinals.
-**Example:** `int32_t` -> `0x8000` `uint64_t`
+### D. Null & Error Representation Standards
+
+* **Binary Communication (e.g. C++ Structs / BLE GATT):**
+  Use explicit sentinel values:
+  * **Unsigned Integers:** Reserved as the maximum possible value:
+    * `uint8_t` → `0xFF` (`255`)
+    * `uint16_t` → `0xFFFF` (`65535`)
+    * `uint32_t` → `0xFFFFFFFF` (`4294967295`)
+    * `uint64_t` → `0xFFFFFFFFFFFFFFFF`
+  * **Signed Integers:** Reserved as the minimum possible value:
+    * `int16_t` → `-32768` (`0x8000`)
+    * `int32_t` → `-2147483648` (`0x80000000`)
+* **JSON Communication (e.g. HTTPS REST APIs / MQTT Payloads):**
+  * Missing, unmeasured, or error values must **always be represented as explicit JSON `null`**.
+  * **Never use `undefined`** or omit key fields in JSON documents and payloads.
 
 ### E. Endianness Standard (Little-Endian)
 All inter-process, inter-device, and over-the-wire binary communications across the system must **always use Little-Endian byte order** for multi-byte numeric primitives (`uint16_t`, `uint32_t`, `uint64_t`, `int16_t`, etc.). Both the ESP32 (Xtensa 32-bit LX6) and Raspberry Pi 4 (ARM Cortex-A72) are natively little-endian architectures; standardizing on little-endian eliminates byte-swapping overhead and guarantees direct struct compatibility. In Python serialization routines, multi-byte formats must explicitly specify little-endian (e.g. `<Q`, `<H`, `<h` via `struct`).
@@ -68,9 +79,8 @@ The SmarterFridge system features two primary user-facing interfaces: the local 
 
 | File | Endpoints | Direction | Transport & Security | Description |
 |---|---|---|---|---|
-| [`FUC.md`](FUC.md) | Fridge → Camera | Unidirectional (`U`) | BLE Beacon (AES-128-GCM) | Encrypted telemetry: temperature (LM73), VOC index (SGP40), light reading (LDR), and packet counter. |
-| [`CBF.md`](CBF.md) | Camera ↔ Fridge | Bidirectional (`B`) | MQTT over TLS | Bootup time synchronization: 0-byte request to 8-byte little-endian 64-bit Unix timestamp response for Node `'F'` RTC recalibration. |
-| [`CBD.md`](CBD.md) | Camera ↔ Door | Bidirectional (`B`) | MQTT over TLS | Door actuation commands (`CLOSE_DOOR`, `ABORT`) and door status/safety events (`DOOR_OPEN`, `SUCCESS`, `OBSTRUCTION_ERROR`). |
+| [`FUC.md`](FUC.md) | Fridge ↔ Camera | Inbound Telemetry (`F → C`) | BLE GATT (AES-128-GCM) | Encrypted sensor telemetry and two-way BLE time synchronization: temperature (LM73), VOC index (SGP40), light (LDR), sequence counter, and RTC calibration. |
+| [`CBD.md`](CBD.md) | Camera ↔ Door | Bidirectional (`B`) | MQTT over TLS | Door actuation commands (`CLOSE_DOOR`, `ABORT`), safety events (`CLOSING`, `SUCCESS`, `OBSTRUCTION_ERROR`, `ABORTED`, `TIMEOUT_ERROR`), and 1 Hz telemetry. |
 | [`CBS.md`](CBS.md) | Camera ↔ Server | Bidirectional / Client-Server (`B`) | HTTPS (Bearer Token) | Telemetry sync, check-in cropped images returning bilingual metadata (`name_th`, `name_en`), check-out FEFO verification, and door event logs. |
 | [`SBG.md`](SBG.md) | Server ↔ Gemini | Bidirectional (`B`) | HTTPS (Gen AI SDK) | Context-enriched prompt calls to Gemini 3.5 Flash Lite returning bilingual metadata (`name_th`, `name_en`, `category`, `estimated_expiry_date`). |
 | [`SUL.md`](SUL.md) | Server → LINE | Unidirectional (`U`) | HTTPS POST | Outbound user alerts for food expiration, spoilage VOC spikes, door ajar warnings, and obstruction aborts. |

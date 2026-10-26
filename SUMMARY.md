@@ -12,43 +12,38 @@ The **SmarterFridge** transforms a standard refrigerator into an intelligent, co
 
 The system coordinates edge devices, local actuators, and cloud intelligence across dedicated, isolated communication boundaries:
 
-```
-+--------------------------------------------------------------------+
-|                                                                    |
-|  Node F: Fridge Sensor (Internal)                                  |
-|  [Battery Powered | Ultra-Low Power Deep Sleep]                    |
-|      |                                                             |
-|      |  Bluetooth BLE (Beacon Mode, Encrypted with AES-128-GCM)    |
-|      v                                                             |
-|  Node C: Edge Gateway & Broker                                     |
-|  [Pi-top [4] (Python) | Local Mosquitto TLS Broker]                |
-|      |                                      ^                      |
-|      | MQTT over TLS (MQTTS)                | MQTT over TLS        |
-|      v (Door Actuation Commands)            | (Door Status/Aborts) |
-|  Node D: Door Closer (External Actuator)    |                      |
-|  [12V Powered Actuator Node] ---------------+                      |
-|      |                                                             |
-|      | HTTPS / REST                                                |
-|      v                                                             |
-|  Server S: Firebase Cloud Backend                                  |
-|  [Firestore / TypeScript Cloud Functions]                          |
-|      |                                                             |
-|      | HTTPS (Context-Enriched Prompts)                            |
-|      v                                                             |
-|  Entity G: Gemini 3.5 Flash Lite (VLM)                             |
-|                                                                    |
-|  Entity L: LINE Notification Service (Alerts via Server S)         |
-|                                                                    |
-+--------------------------------------------------------------------+
+```text
++---------------------------------------------------------------------------------+
+|                                                                                 |
+|   Node F: Internal Fridge Sensor                                                |
+|   [KidBright32 | Battery Powered | Deep Sleep]                                  |
+|         ^                                                                       |
+|         | BLE GATT (Telemetry + Time Sync | AES-128-GCM) [FUC.md]               |
+|         v                                                                       |
+|   Node C: Edge Gateway & Broker                                                 |
+|   [Pi-top [4] (Python) | Local Mosquitto TLS Broker | 5" LCD UI]                |
+|      |               ^                               |                          |
+|      | MQTTS Commands| MQTTS Status/Abort            | HTTPS / REST             |
+|      v [CBD.md]      | [CBD.md]                      | (Bearer Token) [CBS.md]  |
+|   Node D: Door Closer Actuator                       v                          |
+|   [KidBright32 | 12V Powered]                Server S: Firebase Cloud Backend   |
+|                                              [Firestore & Cloud Functions]      |
+|                                                 |                    |          |
+|                                    HTTPS [SBG]  |        HTTPS [SUL] |          |
+|                                                 v                    v          |
+|                                           Entity G: Gemini      Entity L: LINE  |
+|                                           3.5 Flash Lite        Messaging API / |
+|                                           (Cloud VLM)           Discord Webhook |
+|                                                                                 |
++---------------------------------------------------------------------------------+
 ```
 
 ### Communication Contracts & Protocols:
 
-1. **Node 'F' (Fridge Sensor) → Node 'C' (Gateway) [BLE Beacon Mode / FUC.md]:**
-   * **Protocol:** Unidirectional Bluetooth Low Energy (BLE) broadcast in **beacon mode**.
-   * **Application-Layer Security:** Telemetry payloads are encrypted with **AES-128-GCM** on Node `'F'` and decrypted by the Gateway `'C'`.
-   * **Architectural Rationale:** Node `'F'` is battery-powered inside a cold, shielded compartment. Beacon broadcasting eliminates pairing handshakes and Wi-Fi energy penalties, allowing the microcontroller to wake up, broadcast encrypted telemetry, and return to deep sleep instantly.
-   * **Bootup Time Synchronization ([CBF.md](interface/CBF.md)):** On cold boot, Node `'F'` briefly connects to Gateway `'C'` via MQTT over TLS (`MQTTS`) to synchronize its hardware RTC with a 64-bit Unix timestamp before entering cyclic BLE sleep.
+1. **Node 'F' (Fridge Sensor) ↔ Node 'C' (Gateway) [BLE GATT / FUC.md]:**
+   * **Protocol:** Bluetooth Low Energy (BLE) GATT (Generic Attribute Profile).
+   * **Application-Layer Security:** Telemetry payloads are encrypted with **AES-128-GCM** on Node `'F'` and decrypted by Gateway `'C'`.
+   * **Architectural Rationale:** Node `'F'` is battery-powered inside a cold compartment. Operating over BLE GATT eliminates continuous Wi-Fi power draw while enabling Gateway `'C'` to calibrate Node `'F'`'s RTC timestamp over BLE without requiring Wi-Fi on the sensor node.
 
 2. **Node 'C' (Gateway) ↔ Node 'D' (Door Closer) [MQTT over TLS]:**
    * **Protocol:** Bidirectional MQTT secured with TLS (`MQTTS`).
@@ -73,7 +68,7 @@ The system coordinates edge devices, local actuators, and cloud intelligence acr
 
 ### A. Grocery Check-In (Adding Items)
 1. **Capture:** The user places groceries in front of Gateway `'C'` and triggers check-in. The camera captures the item.
-2. **Pre-processing:** Local YOLO segments and crops the food item.
+2. **Pre-processing:** Local YOLO detects and crops the food item via bounding box.
 3. **Cloud Analysis:** The cropped image is sent to Firebase via HTTPS, which invokes Gemini 3.5 Flash Lite to determine item name, category, and shelf-life estimate.
 4. **Confirmation:** Item data is saved to Firestore and returned to the Gateway's local display for user review/adjustment.
 
@@ -104,7 +99,7 @@ The system coordinates edge devices, local actuators, and cloud intelligence acr
 * **Responsibilities:**
   * Hosts local Mosquitto MQTT broker with TLS.
   * Listens to and decrypts AES-128-GCM BLE beacon broadcasts from Node `'F'`.
-  * Runs edge YOLO inference for grocery segmentation and real-time human detection.
+  * Runs edge YOLO inference for grocery bounding-box detection/cropping and real-time human detection.
   * Drives local user interface and hardware navigation buttons on the 5-inch LCD with **bilingual prompts displayed by default in Thai with an English translation**.
   * Synchronizes telemetry, check-in, and check-out events with Firebase.
 
@@ -122,7 +117,7 @@ The system coordinates edge devices, local actuators, and cloud intelligence acr
   * Operates in cyclic deep-sleep cycles.
   * Samples internal ambient temperature, spoilage VOC index, and door-open light levels.
   * Packages and encrypts sensor telemetry using AES-128-GCM.
-  * Broadcasts telemetry unidirectionally via BLE beacon without Wi-Fi overhead.
+  * Transmits encrypted sensor telemetry via BLE GATT with zero Wi-Fi overhead (synchronizing RTC time over BLE during connection).
 
 ### Server `ID:'S'`: Cloud Backend & Web Dashboard (Firebase)
 * **Tech Stack:** TypeScript (strict type definitions enforced across functions, database models, and API interfaces) and Vite + React frontend.

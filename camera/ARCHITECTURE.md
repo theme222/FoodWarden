@@ -6,7 +6,7 @@ This document specifies the hardware configuration, physical interconnections, p
   * [`README.md`](README.md) — Setup, build, and execution commands
   * [`GOAL.md`](GOAL.md) — Feature and edge-case checklist
   * [`SUMMARY.md`](../SUMMARY.md) — System-wide architecture
-  * **Interfaces:** [`FUC.md`](../interface/FUC.md), [`CBF.md`](../interface/CBF.md), [`CBD.md`](../interface/CBD.md), [`CBS.md`](../interface/CBS.md)
+  * **Interfaces:** [`FUC.md`](../interface/FUC.md), [`CBD.md`](../interface/CBD.md), [`CBS.md`](../interface/CBS.md)
 
 ---
 
@@ -77,8 +77,8 @@ This document specifies the hardware configuration, physical interconnections, p
 | **Bilingual Fonts** | **Thai OpenType/TrueType Fonts** | `fonts-thai-tlwg` / `fonts-noto-core` | Ensures proper rendering of Thai tone marks and consonants alongside English typography on the framebuffer. |
 | **Hardware Buttons SDK** | **`pitop` (`pitop.miniscreen`)** | `pitop` (apt/system site-packages) | Registers interrupt-driven callbacks (`when_pressed`) for the `Up`, `Down`, `O` (Select), and `X` (Cancel) buttons. |
 | **MQTT Broker (Server)** | **Eclipse Mosquitto (`mosquitto`)** | `mosquitto >=2.0` (Systemd Daemon) | Local TLS-encrypted MQTT broker (`MQTTS`, port `8883`) authenticating Node `'D'` and Node `'F'` using `MQTT_TLS_CA_CERT`. |
-| **MQTT Client** | **`paho-mqtt`** | `paho-mqtt >=2.1.0` | Connects local Python gateway services to the Mosquitto broker to publish `CLOSE_DOOR` / `ABORT` ([`CBD.md`](../interface/CBD.md)) and serve RTC timestamps ([`CBF.md`](../interface/CBF.md)). |
-| **Bluetooth Receiver** | **`bleak`** + **`cryptography`** | `bleak >=0.22`, `cryptography >=43.0` | Scans BLE advertisements from Node `'F'` and decrypts `AES-128-GCM` payloads using `AESGCM` ([`FUC.md`](../interface/FUC.md)). |
+| **MQTT Client** | **`paho-mqtt`** | `paho-mqtt >=2.1.0` | Connects local Python gateway services to the Mosquitto broker to publish `CLOSE_DOOR` / `ABORT` and receive door events ([`CBD.md`](../interface/CBD.md)). |
+| **Bluetooth GATT Client** | **`bleak`** + **`cryptography`** | `bleak >=0.22`, `cryptography >=43.0` | Scans for Node `'F'`, connects to Service `0000FFF0...`, writes current Unix timestamp to `0000FFF2...`, reads telemetry on `0000FFF1...`, and decrypts `AES-128-GCM` payloads with AAD verification using `AESGCM` ([`FUC.md`](../interface/FUC.md)). |
 | **Cloud Client & Cache** | **`httpx`** + **`sqlite3`** | `httpx >=0.27` | Communicates with Firebase Cloud Functions ([`CBS.md`](../interface/CBS.md)) and buffers telemetry locally in SQLite during Internet outages (E4 store-and-forward). |
 | **Code Quality Tools** | **`ruff`**, **`mypy`**, **`pytest`** | Dev dependency group | Linting, formatting, strict static type checking, and unit testing. |
 

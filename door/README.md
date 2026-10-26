@@ -24,8 +24,8 @@
 
 ### Setup Secrets
 ```bash
-# Copy root secrets template and populate Wi-Fi and MQTTS credentials
-cp ../secrets.h.example ../secrets.h
+# Copy secrets template and populate Wi-Fi and MQTTS credentials
+cp secrets.h.example secrets.h
 ```
 
 ### Build & Run (Flash + Serial Monitor)

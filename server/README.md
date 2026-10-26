@@ -28,8 +28,8 @@ Built as a **Bun** and **TypeScript** project on **Firebase**, it persists senso
 
 ### Setup & Dependencies
 ```bash
-# 1. Copy root environment template and populate Firebase, Gemini, and LINE keys
-cp ../.env.example ../.env
+# 1. Copy environment template and populate Firebase, Gemini, and LINE keys
+cp .env.example .env
 
 # 2. Install dependencies
 bun install

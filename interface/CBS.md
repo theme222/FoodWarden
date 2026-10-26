@@ -298,9 +298,10 @@ Ingests door safety and actuation events parsed by Gateway Node `'C'`. Rather th
 
 #### Door Event Status Definitions
 * **`SUCCESS`:** Door was successfully closed by the closer and confirmed shut.
-* **`OBSTRUCTION_ERROR`:** Obstruction stall detected (motor current spike or safety limit reached) causing automatic abort.
-* **`TIMEOUT_ERROR`:** Door closer motion exceeded maximum allowable travel time without confirming closure.
-* **`CONTRADICTION_ERROR`:** Door closer IR sensor reports the door is mechanically shut, but Node `'F'`'s internal light sensor reports the fridge compartment light is still on.
+* **`OBSTRUCTION_ERROR`:** Obstruction stall detected (motor current spike ≥ 1200 mA or safety limit reached) causing automatic abort and retraction.
+* **`ABORTED`:** Door closing was halted and arm retracted due to vision-detected human approach or manual button trigger.
+* **`TIMEOUT_ERROR`:** Door closer motion exceeded maximum allowable travel time (30s) without confirming closure.
+* **`CONTRADICTION_ERROR`:** Door closer IR sensor reports the door is mechanically shut, but Node `'F'`'s internal light sensor reports elevated light for 3 consecutive readings.
 
 #### Request Payload
 
@@ -308,8 +309,11 @@ Ingests door safety and actuation events parsed by Gateway Node `'C'`. Rather th
 {
   "events": [
     {
+      "node_id": "D0",
       "timestamp_s": 1792944005,
-      "status": "SUCCESS"
+      "status": "SUCCESS",
+      "duration_ms": 4250,
+      "current_ma": 480
     }
   ]
 }
