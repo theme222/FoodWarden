@@ -24,7 +24,7 @@
 
 ### Setup Secrets
 ```bash
-# Copy secrets template and populate Wi-Fi, AES_KEY, and MQTTS credentials
+# Copy secrets template and populate FRIDGE_NODE_ID and AES_KEY
 cp secrets.h.example secrets.h
 ```
 

@@ -20,8 +20,8 @@
 
 ## 2. Use Cases
 - [ ] **Cyclic Low-Power Telemetry:** Wake from deep sleep every 5 seconds → sample Light, VOC, Temp. Store all data into a local buffer (size 6) and go back to sleep.
-- [ ] **Occasional Broadcast:** Every cycle: (6 wakes -> 30 seconds) broadcasts batched readings to Gateway `'C'`
-- [ ] **Door-Open Immediate Wake/Alert:** During telemetry, if the light sensor signals that the fridge door is opened, broadcast immediate update to Gateway `'C'` with the current buffer.
+- [ ] **Periodic Telemetry Broadcast:** After accumulating 6 samples in the RTC buffer (6 wakes × 5 s = 30 seconds), connect via BLE GATT and transfer the batched payload to Gateway `'C'`.
+- [ ] **Door-Open Immediate Wake/Alert:** During telemetry, if the light sensor signals that the fridge door is opened, broadcast an immediate update to Gateway `'C'` with the current buffer.
 - [ ] **Manual Diagnostic Inspection:** User presses `S1` (`GPIO 16`) → LED matrix scrolls current temperature (`°C`), light level and VOC index, then powers down the display to conserve battery.
 
 ---
@@ -35,6 +35,6 @@
 ---
 
 ## 4. Tests & Quantitative Metrics
-- [ ] **Binary Layout & Encryption Verification:** Confirm packed `SensorPacket` size is exactly `11 + (N × 6)` bytes and decrypts cleanly on Gateway `'C'`.
+- [ ] **Binary Layout & Encryption Verification:** Confirm packed `SensorPacketEnvelope` size matches [`FUC.md`](../interface/FUC.md) (`32 + (N × 14)` bytes, or 116 bytes for N=6) and decrypts cleanly with AAD validation on Gateway `'C'`.
 - [ ] **Power Consumption Profile (E3):** Measure active vs. deep-sleep current draw (`mA` / `µA`) and document estimated 18650 battery runtime inside the `4°C` fridge compartment.
 - [ ] **Sensor Accuracy Calibration:** Log LM73 temperature and SGP40 VOC readings against a reference thermometer inside the refrigerator.

@@ -40,24 +40,40 @@ All cryptographic keys and sensitive tokens are strictly decoupled from source c
 ```c
 #include <stdint.h>
 
-#define SENSOR_TEMP_ERROR  0x7FFF  // 32767 centi-degrees (sensor disconnected / I2C fault)
-#define SENSOR_VOC_ERROR   0xFFFF  // 65535 VOC index (sensor disconnected / I2C fault)
-#define SENSOR_LIGHT_ERROR 0xFFFF  // 65535 ADC reading (ADC fault)
+// Explicit error sentinels matching interface/README.md §2.D
+#define SENSOR_TEMP_ERROR  ((int16_t)-32768) // 0x8000 (sensor disconnected / I2C fault)
+#define SENSOR_VOC_ERROR   ((uint16_t)0xFFFF) // 65535 VOC index (sensor disconnected / I2C fault)
+#define SENSOR_LIGHT_ERROR ((uint16_t)0xFFFF) // 65535 ADC reading (ADC fault)
 
-struct __attribute__((packed)) SensorSample {
-  int16_t  temp_cdeg; // Temperature in centi-degrees Celsius (e.g. 342 = 3.42°C; 0x7FFF = Error)
-  uint16_t voc_index; // Sensirion Gas Index Algorithm output (1-500; 0 = warming up; 0xFFFF = Error)
-  uint16_t light_ldr; // Raw ADC light reading (0-4095; 0xFFFF = Error)
+// Plaintext AAD Header (15 bytes, unencrypted, authenticated via GCM AAD)
+struct __attribute__((packed)) TelemetryHeader {
+  uint8_t  version;         // Protocol format version (0x01)
+  char     node_id[2];      // 2-byte ASCII node identifier (e.g. {'F', '0'} for "F0")
+  uint8_t  session_salt[8]; // Random 64-bit session salt generated via hardware TRNG on cold boot
+  uint32_t counter;         // Monotonically increasing sequence counter per session (Little-Endian)
 };
 
+// Individual Sensor Reading with dedicated timestamp (14 bytes)
+struct __attribute__((packed)) SensorSample {
+  uint64_t timestamp_s; // Second-accurate Unix timestamp (Little-Endian)
+  int16_t  temp_cdeg;   // Temperature in centi-degrees Celsius (e.g. 342 = 3.42°C; -32768 / 0x8000 = Error)
+  uint16_t voc_index;   // Sensirion Gas Index Algorithm output (1-500; 0 = warming up; 0xFFFF = Error)
+  uint16_t light_ldr;   // Raw ADC light reading (0-4095; 0xFFFF = Error)
+};
+
+// Encrypted Payload Structure (1 + N * 14 bytes)
 struct __attribute__((packed)) SensorPacketPayload {
-  uint8_t      node_id;       // Unique node ID (e.g. 1 for Node F1, 2 for Node F2)
-  uint32_t     counter;       // Monotonically increasing sequence counter (32-bit)
-  uint64_t     timestamp_s;   // Unix epoch timestamp in seconds of the latest sample
-  uint8_t      sample_count;  // Number of samples in packet (1 to 6)
-  SensorSample samples[6];    // Batched sensor readings (up to 36 bytes)
+  uint8_t      sample_count; // Number of batched samples in packet (1 to 6)
+  SensorSample samples[6];   // Batched readings (up to 84 bytes)
 };
 ```
+
+> [!NOTE]
+> **Sensirion VOC Index vs. Raw Ticks:**
+> Transmission across all interfaces strictly uses the processed **VOC Index (1–500)** produced by the Sensirion Gas Index Algorithm (where 100 represents baseline air, and values > 250 indicate high VOC emissions). Raw SRAW ticks are processed internally on Node `'F'` and are never transmitted over BLE.
+>
+> **Battery Power Profiling (Rubric E3):**
+> Battery voltage is not transmitted in the telemetry payload. Rubric E3 compliance is evaluated via physical multi-meter / power profiler measurements of active current (~80–120 mA during BLE transmission) versus deep sleep current (< 15 µA), calculating total projected battery runtime against nominal cell capacity.
 
 ### B. Python Data Models (Node `'C'`)
 
@@ -65,17 +81,19 @@ struct __attribute__((packed)) SensorPacketPayload {
 from dataclasses import dataclass
 from typing import List, Optional
 
-@dataclass
+@dataclass(frozen=True)
 class SensorSample:
-    temp_celsius: Optional[float]  # None if sentinel SENSOR_TEMP_ERROR (0x7FFF)
+    timestamp_s: int               # Second-accurate Unix timestamp
+    temp_celsius: Optional[float]  # None if sentinel SENSOR_TEMP_ERROR (-32768)
     voc_index: Optional[int]       # None if sentinel SENSOR_VOC_ERROR (0xFFFF)
     light_ldr: Optional[int]       # None if sentinel SENSOR_LIGHT_ERROR (0xFFFF)
 
-@dataclass
+@dataclass(frozen=True)
 class SensorPacket:
-    node_id: int
-    counter: int
-    timestamp_s: int               # Timestamp of the latest sample in seconds
+    version: int
+    node_id: str                   # 2-character ASCII node identifier (e.g. "F0")
+    session_salt: bytes            # 8-byte session salt
+    counter: int                   # Monotonic 32-bit counter
     samples: List[SensorSample]
 ```
 
@@ -85,63 +103,76 @@ class SensorPacket:
  0                   1                   2                   3
  0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1
 +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
-|    node_id    |                   counter                     |
+|  sample_cnt   |              timestamp_s[0] (Bytes 0-2)       |
 +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
-|    counter    |              timestamp_s (Bytes 0-2)          |
+|                    timestamp_s[0] (Bytes 3-6)                 |
 +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
-|                    timestamp_s (Bytes 3-6)                    |
+|timestamp_s[0]7|         temp_cdeg[0]          | voc_index[0]  |
 +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
-| timestamp_s[7]|  sample_cnt   |         temp_cdeg[0]          |
+| voc_index[0]H |          light_ldr[0]         | timestamp[1]..|
 +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
-|          voc_index[0]         |          light_ldr[0]         |
-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
-|   ... remaining samples (6 bytes each: temp, voc, light) ...  |
+|   ... remaining samples (14 bytes each: timestamp, temp, voc, light) ...  |
 +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
 ```
 
 | Field | Type | Offset (Bytes) | Size (Bytes) | Description |
 |---|---|---|---|---|
-| `node_id` | `uint8_t` | 0 | 1 | Identifies the physical/simulated sensor node (e.g. `1`). |
-| `counter` | `uint32_t` (Little-Endian) | 1 | 4 | Monotonic sequence counter to prevent replay attacks and track packet drops. |
-| `timestamp_s` | `uint64_t` (Little-Endian) | 5 | 8 | Second-accurate Unix timestamp of `samples[sample_count - 1]`. |
-| `sample_count` | `uint8_t` | 13 | 1 | Number of samples in packet (`N`, where `1 ≤ N ≤ 6`). |
-| `samples` | `SensorSample[N]` | 14 | `N × 6` | Batched sensor readings (6 to 36 bytes). |
+| `sample_count` | `uint8_t` | 0 | 1 | Number of samples in packet (`N`, where `1 ≤ N ≤ 6`). |
+| `samples` | `SensorSample[N]` | 1 | `N × 14` | Batched readings containing dedicated `timestamp_s`, `temp_cdeg`, `voc_index`, and `light_ldr`. |
 
-**Total Plaintext Size:** `14 + (N × 6)` bytes (Minimum: 20 bytes for 1 sample; Maximum: 50 bytes for 6 samples).
-
-* **Sample Timing:** `timestamp_s` represents the timestamp of the most recent reading (`samples[sample_count - 1]`). For previous readings (index `i < sample_count - 1`), their timestamp is calculated as `timestamp_s - (sample_count - 1 - i) * 5` seconds (assuming a standard 5-second sampling interval).
+**Total Plaintext Payload Size:** `1 + (N × 14)` bytes (15 bytes for 1 sample; 85 bytes for 6 samples).
 
 ---
 
 ## 4. Cryptographic Envelope (AES-128-GCM)
 
-All telemetry data transferred via the GATT Telemetry Characteristic is encrypted with **AES-128-GCM**.
+All telemetry data transferred via the GATT Telemetry Characteristic is encrypted with **AES-128-GCM** using an explicit Additional Authenticated Data (AAD) header.
 
 ```text
 +-------------------------------------------------------------------------------+
 | GATT Telemetry Characteristic Value (Read / Notify Payload)                   |
 |                                                                               |
-|  [ Plaintext AAD Header ]                                                     |
-|    - node_id            (1 byte)                                              |
-|    - iv / nonce         (12 bytes)                                            |
+|  [ Plaintext AAD Header ] (15 bytes, struct format: <B2s8sI)                  |
+|    - version            (1 byte,  offset 0)  = 0x01                           |
+|    - node_id            (2 bytes, offset 1)  = "F0" (0x46, 0x30)              |
+|    - session_salt       (8 bytes, offset 3)  = random 64-bit boot salt        |
+|    - counter            (4 bytes, offset 11) = 32-bit monotonic counter       |
 |                                                                               |
-|  [ Encrypted Ciphertext ]                                                     |
-|    - ciphertext         (20 to 50 bytes, matches plaintext size)              |
+|  [ Encrypted Ciphertext ] (15 to 85 bytes, matches plaintext size)            |
+|    - ciphertext         (encrypted SensorPacketPayload)                       |
 |                                                                               |
-|  [ Authentication Tag ]                                                       |
+|  [ Authentication Tag ] (16 bytes)                                            |
 |    - auth_tag           (16 bytes)                                            |
 +-------------------------------------------------------------------------------+
 ```
 
-* **Total Characteristic Value Size:** `1 + 12 + (14 + N * 6) + 16` = `43 + (N × 6)` bytes (49 bytes for 1 sample; 79 bytes for 6 samples).
+* **Total Characteristic Value Size:** `15 + (1 + N × 14) + 16` = `32 + (N × 14)` bytes (46 bytes for 1 sample; 116 bytes for 6 samples).
 * **Key:** `AES_KEY` (128-bit pre-shared symmetric key).
-* **IV / Nonce (12 bytes):** Generated via hardware RNG (`esp_random()`) and combined with the 32-bit counter. Must never be reused with the same key.
-* **Additional Authenticated Data (AAD):** The 13-byte unencrypted header (`node_id` [1 byte] + `iv` [12 bytes]) is provided to the GCM cipher as AAD so that the header cannot be tampered with in transit.
-* **Authentication Tag (16 bytes):** Guarantees data integrity and authenticity. Packets with invalid tags are dropped immediately by Node `'C'`.
+* **IV / Nonce (12 bytes):** Formed by concatenating `session_salt` (8 bytes) + `counter` (4 bytes).
+  * `session_salt` is generated via hardware TRNG (`esp_fill_random()`) once per cold-boot and stored in `RTC_DATA_ATTR`.
+  * `counter` increments strictly monotonically for each wake/sleep transmission.
+  * Because `session_salt` re-seeds on every battery replacement or brown-out reboot, **nonce reuse across boots is mathematically eliminated**.
+  * Because `counter` is 32-bit, integer wrap requires > 4,000 years.
+* **Additional Authenticated Data (AAD):** The entire 15-byte plaintext header (`version` + `node_id` + `session_salt` + `counter`) is fed to GCM as AAD. Any tampering with node ID, version, or nonce causes the authentication check to fail.
+* **Authentication Tag (16 bytes):** Guarantees data integrity and ciphertext authenticity.
 
 ---
 
-## 5. Connection & Exchange Flow
+## 5. Anti-Replay Verification Procedure (Node `'C'`)
+
+When Node `'C'` receives a telemetry payload:
+1. **Header Parsing:** Slice off the 15-byte AAD header (`version`, `node_id`, `session_salt`, `counter` using `<B2s8sI`).
+2. **Replay Validation:**
+   * If `session_salt == last_session_salt[node_id]`:
+     * Verify that incoming `counter > last_counter[node_id]`. If `counter <= last_counter`, drop the packet as a duplicate/replay.
+   * If `session_salt != last_session_salt[node_id]` (Node `'F'` rebooted):
+     * Accept the new session, updating `last_session_salt[node_id] = session_salt` and `last_counter[node_id] = counter`.
+3. **Decryption & Auth:** Run AES-128-GCM decrypt with `AES_KEY`, `iv = session_salt + counter`, `aad = header`, and `tag = auth_tag`. If tag verification fails, discard immediately.
+4. **Timestamp Sanity Check:** Verify that the decoded sample `timestamp_s >= last_timestamp_s[node_id]`.
+
+---
+
+## 6. Connection & Exchange Flow
 
 ```text
 Node 'F' (GATT Server)                        Node 'C' (GATT Client)

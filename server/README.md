@@ -20,7 +20,7 @@ Built as a **Bun** and **TypeScript** project on **Firebase**, it persists senso
 * **Communication Contracts ([`interface/`](../interface/README.md)):**
   * [`CBS.md`](../interface/CBS.md) — Camera (`'C'`) ↔ Server (`'S'`) HTTPS Telemetry, Check-In/Out & Door Logs
   * [`SBG.md`](../interface/SBG.md) — Server (`'S'`) ↔ Gemini (`'G'`) Context-Enriched Multimodal Prompts & JSON Schemas
-  * [`SUL.md`](../interface/SUL.md) — Server (`'S'`) → LINE (`'L'`) Outbound User Alert Webhooks
+  * [`SUL.md`](../interface/SUL.md) — Server (`'S'`) → LINE (`'L'`) Outbound User Alert Webhooks *(Left to the Server engineering team to define message templates, bilingual Thai/English payloads, alert triggers, and account pairing)*.
 
 ---
 

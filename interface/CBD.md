@@ -62,7 +62,7 @@ Node `'D'` maintains an internal RTC for second-accurate timestamping of telemet
 All commands must be published with **QoS 1** and include a unique `cmd_id` to enable delivery confirmation, deduplication, and rubric E4 acknowledgment tracking.
 
 ### A. `CLOSE_DOOR` Command
-Dispatched by Gateway `'C'` when the door has remained open longer than the configured threshold (e.g. 15–30 seconds) and local YOLO vision detects no human in the camera frame.
+Dispatched by Gateway `'C'` when the door has remained open for longer than **60 seconds** and local YOLO11n vision detects no human in the camera frame.
 
 ```json
 {
@@ -107,7 +107,7 @@ Dispatched by Gateway `'C'` if a human enters the camera frame while the door is
 
 ## 4. Event Payloads: Door `'D'` → Gateway `'C'` (`fridge/door/event`)
 
-Published with **QoS 1** on discrete state transitions. Every event responding to a command must mirror the matching `ack_cmd_id`.
+Published with **QoS 1** on discrete state transitions. Every event envelope contains top-level `node_id`, `ack_cmd_id` (mirroring the command `cmd_id`, or `null` if unsolicited), `timestamp`, and a structured `event` object discriminated by `event.type` containing all event-specific fields.
 
 ### Event Types & Schemas
 
@@ -117,7 +117,9 @@ Published the instant Node `'D'` accepts a `CLOSE_DOOR` command and initiates mo
 {
   "node_id": "D0",
   "ack_cmd_id": "c-9b1d8f20-1a2b",
-  "event": "CLOSING",
+  "event": {
+    "type": "CLOSING"
+  },
   "timestamp": 1729930016
 }
 ```
@@ -128,9 +130,11 @@ Published when the optical TCRT5000 IR sensor detects the door is fully shut (`G
 {
   "node_id": "D0",
   "ack_cmd_id": "c-9b1d8f20-1a2b",
-  "event": "SUCCESS",
-  "duration_ms": 4250,
-  "peak_current_ma": 480,
+  "event": {
+    "type": "SUCCESS",
+    "duration_ms": 4250,
+    "peak_current_ma": 480
+  },
   "timestamp": 1729930020
 }
 ```
@@ -141,9 +145,11 @@ Published when the INA219 current sensor detects motor draw exceeding the obstru
 {
   "node_id": "D0",
   "ack_cmd_id": "c-9b1d8f20-1a2b",
-  "event": "OBSTRUCTION_ERROR",
-  "stall_current_ma": 1340,
-  "retracted": true,
+  "event": {
+    "type": "OBSTRUCTION_ERROR",
+    "stall_current_ma": 1340,
+    "retracted": true
+  },
   "timestamp": 1729930018
 }
 ```
@@ -154,13 +160,15 @@ Published when motor motion is halted and retracted to home in response to a sof
 {
   "node_id": "D0",
   "ack_cmd_id": "c-9b1d8f20-1a2c",
-  "event": "ABORTED",
-  "trigger": "REMOTE_ABORT",
-  "retracted": true,
+  "event": {
+    "type": "ABORTED",
+    "trigger": "REMOTE_ABORT",
+    "retracted": true
+  },
   "timestamp": 1729930022
 }
 ```
-* `trigger` values: `"REMOTE_ABORT"` (vision/UI triggered via MQTTS) or `"MANUAL_BUTTON"` (physical `S1` interrupt on Node `'D'`).
+* `event.trigger` values: `"REMOTE_ABORT"` (vision/UI triggered via MQTTS) or `"MANUAL_BUTTON"` (physical `S1` interrupt on Node `'D'`).
 
 #### 5. `TIMEOUT_ERROR` (Hard Motion Timeout)
 Published if forward or reverse motion continues for longer than `30 seconds` without tripping the IR sensor or Limit Switch. Motor power is cut immediately.
@@ -168,23 +176,28 @@ Published if forward or reverse motion continues for longer than `30 seconds` wi
 {
   "node_id": "D0",
   "ack_cmd_id": "c-9b1d8f20-1a2b",
-  "event": "TIMEOUT_ERROR",
-  "elapsed_ms": 30000,
+  "event": {
+    "type": "TIMEOUT_ERROR",
+    "elapsed_ms": 30000
+  },
   "timestamp": 1729930046
 }
 ```
 
 #### 6. `FAULT_LOCKOUT` (Hardware Safety Lockout)
-Published on boot or runtime if a critical safety hardware check fails (e.g. INA219 current sensor disconnected on I2C bus, or broken limit switch wire). The actuator refuses to move while locked out.
+Published on boot or runtime if a critical safety hardware check fails. The actuator refuses to move while locked out.
 ```json
 {
   "node_id": "D0",
   "ack_cmd_id": null,
-  "event": "FAULT_LOCKOUT",
-  "reason": "INA219_I2C_UNRESPONSIVE",
+  "event": {
+    "type": "FAULT_LOCKOUT",
+    "reason": "INA219_I2C_UNRESPONSIVE"
+  },
   "timestamp": 1729930001
 }
 ```
+* `event.reason` values: `"INA219_I2C_UNRESPONSIVE"` (INA219 current sensor failed I2C communication check) or `"BOOT_HOMING_TIMEOUT"` (boot homing retraction failed to trip the limit switch within 30 seconds).
 
 ---
 

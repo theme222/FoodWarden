@@ -209,4 +209,4 @@ The presenter may be chosen at random by the examiner, so every member must prep
 
 ## 7 FAQ
 
-Students can ask further questions in the Q&A tab. *(The original text layer was garbled during extraction; this is the intended Thai sentence: นิสิตสามารถสอบถามเพิ่มเติมได้ใน Tab Q&A.)*
+Students can ask further questions in the Q&A tab (นิสิตสามารถสอบถามเพิ่มเติมได้ใน Tab Q&A).

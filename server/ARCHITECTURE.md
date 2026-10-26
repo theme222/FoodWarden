@@ -15,7 +15,7 @@ This document specifies the cloud infrastructure, runtime environment, third-par
 ```text
 +-----------------------+              HTTPS JSON / Images (CBS.md)            +-----------------------------------+
 |  Node 'C' Gateway     | <==================================================> | Firebase Cloud Functions          |
-|  (Pi-top [4] Python)  |                                                      | (TypeScript / Bun Runtime)        |
+|  (Pi-top [4] Python)  |                                                      | (TypeScript / Node.js 20 Runtime) |
 +-----------------------+                                                      +-----------------------------------+
                                                                                      ^           |           |
 +------------------------------------------------------+                             |           |           | Context-Enriched
@@ -37,11 +37,12 @@ This document specifies the cloud infrastructure, runtime environment, third-par
          v                                                                           v
 +------------------------------------------------------------------------------------------------------------------+
 |  Cloud Firestore Database & Cloud Storage                                                                        |
-|  - /fridges/{fridgeId}/inventory   (Food items, expiry dates, FEFO status)                                      |
-|  - /fridges/{fridgeId}/telemetry   (LM73 temp, SGP40 VOC, LDR light time-series)                                 |
-|  - /fridges/{fridgeId}/door_events (Actuator status, INA219 stall cutoffs, IR sensor events)                     |
-|  - /fridges/{fridgeId}/members     (Google SSO user roles: owner, editor, viewer)                               |
-|  - /storage/food_crops/{fridgeId}  (Cropped food images uploaded by Gateway 'C')                                 |
+|  - /fridges/{fridgeId}                  (Document: name, createdAt, members, last_seen_s, last_telemetry)        |
+|  - /fridges/{fridgeId}/private          (Owner-only subdocument: config with geminiApiKey, gatewayTokenHash)     |
+|  - /fridges/{fridgeId}/inventory        (Active food items, expiry dates, FEFO status; hard-deleted on checkout) |
+|  - /fridges/{fridgeId}/telemetry_minute (Minute-bucketed LM73 temp, SGP40 VOC, LDR light time-series)            |
+|  - /fridges/{fridgeId}/door_events      (Actuator status, INA219 stall cutoffs, IR sensor events)                |
+|  - /storage/food_crops/{fridgeId}       (Cropped JPEG food images uploaded by Gateway 'C'; deleted on checkout)  |
 +------------------------------------------------------------------------------------------------------------------+
 ```
 
@@ -51,13 +52,13 @@ This document specifies the cloud infrastructure, runtime environment, third-par
 
 | Component / Layer | Specific Technology / Package | Version / Details | Role in SmarterFridge |
 |---|---|---|---|
-| **JavaScript Runtime & Package Manager** | **Bun (`bun`)** | `v1.4+` | High-performance runtime and package manager for local development, building frontend assets, and executing backend scripts. |
+| **Package Manager & Dev Tool** | **Bun (`bun`)** | `v1.2+` | High-performance package manager and script runner for fast local dependency resolution, test execution, and building frontend assets. |
 | **Programming Language** | **TypeScript** | `5.x+` (`strict: true` in [`tsconfig.json`](tsconfig.json)) | Strict static typing across Cloud Functions, web application components, and Firestore schemas (no `any`). |
 | **Frontend Framework & Build Tool** | **Vite + React (`@vitejs/plugin-react`)** | Vite 5+, React 18+ | Fast HMR dev server and optimized static production bundle builder compiling the SPA to `dist/` for Firebase Hosting. |
 | **Client-Side Routing** | **React Router (`react-router-dom`)** | `v6+` / `v7+` | Declarative client-side routing supporting multi-page views, route parameters (`/fridges/:fridgeId`), nested layouts, and auth guards. |
 | **Client Firebase SDK** | **Firebase Web SDK (Modular)** (`firebase/app`, `firebase/auth`, `firebase/firestore`) | `v10+` | Direct, secure browser integration for Google SSO login and reactive real-time database listeners (`onSnapshot`). |
 | **Internationalization (i18n)** | **Custom React i18n Context & `Intl` API** | Built-in TypeScript module | Dynamic language switching between Thai (`th`) and English (`en`), persisting preference to `localStorage`, with localized date and category formatting. |
-| **Cloud Backend & Compute** | **Firebase Cloud Functions (v2)** (`firebase-functions`, `firebase-admin`) | Node.js 20+ runtime | Serverless endpoints handling Gateway `'C'` telemetry ingestion, Gemini AI vision pipelines, and scheduled daily alert cron jobs. |
+| **Cloud Backend & Compute** | **Firebase Cloud Functions (v2)** (`firebase-functions`, `firebase-admin`) | Node.js 20 runtime | Serverless endpoints running on official Node.js 20 environment handling Gateway `'C'` telemetry ingestion, Gemini AI vision pipelines, and scheduled daily alert cron jobs. |
 | **NoSQL Database & Object Storage** | **Cloud Firestore & Cloud Storage** | Firestore v1, Google Cloud Storage | Real-time hierarchical document storage for multi-tenant fridge data, sensor time series, and uploaded cropped food images. |
 | **Multimodal AI (Entity `'G'`)** | **Google Gen AI SDK (`@google/genai`) — Gemini 3.5 Flash Lite** | `gemini-3.5-flash-lite` | Multimodal VLM performing food identification, shelf-life estimation, and FEFO inventory matching ([`SBG.md`](../interface/SBG.md)). |
 | **Notification Service (Entity `'L'`)** | **LINE Messaging API (`@line/bot-sdk` / HTTPS REST)** | LINE Messaging API v2 | Dispatches push notifications for expiring food, VOC spoilage warnings, door-left-open alerts, and obstruction errors ([`SUL.md`](../interface/SUL.md)). |
@@ -97,11 +98,12 @@ The application uses **React Router (`react-router-dom`)** to structure navigati
         │                                         - Temperature deviation and VOC spoilage spike tracking
         │                                         - Door actuation history and obstruction incident log
         │
-        └── /fridges/:fridgeId/settings ......... Fridge Management & Hardware Provisioning
-                                                  - Members & Permissions: Invite Google accounts (Owner, Editor, Viewer)
-                                                  - Gateway 'C' Provisioning: Generate / rotate permanent Bearer token
+        └── /fridges/:fridgeId/settings ......... Fridge Management & Hardware Provisioning (Owner Only)
+                                                  - Members & Permissions: Invite Google accounts by email (`member` role) and revoke access
+                                                  - Gateway 'C' Provisioning: View and copy permanent Bearer token (`GATEWAY_TOKEN`) to paste into camera `.env`
                                                   - AI Inference Key: Set/update fridge Google Gen AI (Gemini) API key
                                                   - LINE Notifications: Configure target LINE User/Group IDs
+                                                  - Refrigerator Lifecycle: Rename or delete refrigerator
 ```
 
 ### 3.2 Page Component Breakdown
@@ -110,17 +112,17 @@ The application uses **React Router (`react-router-dom`)** to structure navigati
    * Presents branding, system overview, and a single **"Sign in with Google"** button triggering `signInWithPopup(auth, googleAuthProvider)`.
    * Automatically redirects authenticated users to `/fridges` (or their previous redirect target).
 2. **Fridge Hub Page (`/fridges`):**
-   * Queries Firestore for all fridges where `members[userId]` exists.
+   * Queries Firestore for all fridges where the authenticated user's email exists in the `members` map (`members[request.auth.token.email] != null`).
    * Displays responsive cards for each accessible fridge showing current online status, item count, and temperature.
-   * Includes a **"Create New Fridge"** action that initializes a new fridge document with the current user as `owner`.
+   * Includes a **"Create New Fridge"** action that initializes a new fridge document with the current user's email registered as `'owner'`.
 3. **Fridge Dashboard Page (`/fridges/:fridgeId`):**
    * **Active Inventory Panel:**
-     * Lists all non-consumed items from `/fridges/{fridgeId}/inventory` ordered by `estimated_expiry_date` ascending (**First Expired, First Out — FEFO**).
+     * Lists all active items from `/fridges/{fridgeId}/inventory` ordered by `estimated_expiry_date` ascending (**First Expired, First Out — FEFO**).
      * Color-coded status badges: **Fresh** (green), **Expiring Soon** (yellow, within 2 days), **Expired** (red).
      * Filterable by category (`Dairy`, `Produce`, `Meat`, `Beverage`, `Leftovers`) and searchable by item name.
-     * Quick actions: Manual Check-In, Manual Check-Out, and Expiry Date Edit.
+     * Quick actions: Manual Check-In, Manual Check-Out (hard-deletes item and image), and Expiry Date Edit (available to all members and owners).
    * **Real-Time Telemetry Bar:**
-     * Live metrics fed by Firestore `onSnapshot` listeners on the latest document in `/fridges/{fridgeId}/telemetry`.
+     * Live metrics fed by Firestore `onSnapshot` listeners on `last_telemetry` in `/fridges/{fridgeId}` (and `/fridges/{fridgeId}/telemetry_minute`).
      * Displays temperature (°C) with safety threshold alert (`> 8.0 °C`), VOC Index (0–500) with spoilage warning (`> 250`), and door light level (LDR).
    * **Door Actuator & Safety Card:**
      * Shows current door physical state (`CLOSED`, `OPEN`, `CLOSING`, `ABORTED`) derived from `/fridges/{fridgeId}/door_events`.
@@ -129,11 +131,12 @@ The application uses **React Router (`react-router-dom`)** to structure navigati
    * Time-series graphs plotting historical temperature readings against safety thresholds.
    * VOC Index trend graphs correlating VOC spikes with spoiled food items.
    * Door opening frequency and duration metrics to analyze cold-air loss.
-5. **Fridge Settings Page (`/fridges/:fridgeId/settings`):**
-   * **Access Control:** Add or revoke permissions for other Google accounts by email with role enforcement (`owner`, `editor`, `viewer`).
-   * **Gateway `'C'` Authentication:** Generate, view, and regenerate the unique permanent Bearer API token that Node `'C'` (Pi-top [4]) uses in the `Authorization` header when calling Cloud Functions ([`CBS.md`](../interface/CBS.md)).
-   * **Google AI Key Management:** Input field to securely store the fridge's dedicated Google Gen AI API key in Firestore (encrypted/restricted via Security Rules) for Gemini 3.5 Flash Lite inference ([`SBG.md`](../interface/SBG.md)).
-   * **LINE Messaging API Setup:** Enter target LINE User ID or Group ID to receive automated push alerts dispatched by Cloud Functions ([`SUL.md`](../interface/SUL.md)).
+5. **Fridge Settings Page (`/fridges/:fridgeId/settings` — Owner Only):**
+   * **Role Enforcement:** Accessible only to users holding the `'owner'` role. Non-owner members attempting to navigate here are redirected back to the dashboard.
+   * **Access Control:** Add or revoke permissions for other Google accounts by email (`'member'` role).
+   * **Gateway `'C'` Configuration:** Displays the permanent Bearer API token (`GATEWAY_TOKEN`). The token is permanent and does not expire automatically; the owner copies this token and manually pastes it into `.env` on the Pi-top [4] via connected keyboard/mouse during one-time hardware setup. A manual revocation and token regeneration button is provided exclusively for the owner in case the token is ever compromised.
+   * **Google AI Key Management:** Form to securely store or update the fridge's dedicated Google Gen AI API key in the owner-only `/fridges/{fridgeId}/private/config` subdocument ([`SBG.md`](../interface/SBG.md)).
+   * **Refrigerator Management:** Options to rename or delete the refrigerator.
 
 ### 3.3 Internationalization (i18n) & Language Selection Architecture
 
@@ -159,73 +162,7 @@ The web application provides an intuitive language selection mechanism enabling 
    * **English (`en`):** Standard Gregorian formatting (`Nov 4, 2026`) and relative badges (`"Expires in 2 days"`, `"Expired 1 day ago"`).
    * **Thai (`th`):** Thai Buddhist Era formatting (`4 พ.ย. 2569`) via `Intl.DateTimeFormat('th-TH-u-ca-buddhist')` and localized relative badges (`"หมดอายุในอีก 2 วัน"`, `"หมดอายุแล้ว 1 วัน"`).
 
-### 3.4 Directory Structure
-
-```text
-server/
-├── index.ts                   # Backend entrypoint (Cloud Functions / local dev server)
-├── package.json               # Dependencies, scripts, and build tasks
-├── tsconfig.json              # Strict TypeScript compiler options
-├── vite.config.ts             # Vite build configuration (React plugin, path aliases, proxy)
-├── firebase.json              # Firebase Hosting configuration & SPA rewrites
-│
-└── src/                       # Web application source tree
-    ├── main.tsx               # Application bootstrap (mounts React DOM & Router)
-    ├── App.tsx                # Root route definitions (<Routes>, <Route>, <ProtectedRoute>)
-    │
-    ├── routes/                # Page route components
-    │   ├── LoginPage.tsx
-    │   ├── FridgeListPage.tsx
-    │   ├── FridgeDashboardPage.tsx
-    │   ├── FridgeAnalyticsPage.tsx
-    │   ├── FridgeSettingsPage.tsx
-    │   └── NotFoundPage.tsx
-    │
-    ├── layouts/               # Shared page scaffolding
-    │   ├── RootLayout.tsx     # Global layout (toaster, modal root)
-    │   ├── AuthLayout.tsx     # Centered card layout for login
-    │   └── DashboardLayout.tsx# Navigation sidebar, fridge selector, user profile menu
-    │
-    ├── components/            # Reusable UI widgets
-    │   ├── common/            # Button, Card, Badge, Modal, Input, Spinner, LanguageToggle
-    │   ├── inventory/         # InventoryTable, ItemRow, ExpiryBadge, CategoryFilter
-    │   ├── telemetry/         # TelemetryGauge, MetricCard, RealtimeChart
-    │   ├── door/              # DoorStatusWidget, ActuationEventFeed
-    │   └── settings/          # MemberListModal, ApiKeyForm, GatewayTokenWidget
-    │
-    ├── context/               # React Context providers
-    │   ├── AuthContext.tsx    # Google SSO user session state & login/logout methods
-    │   ├── FridgeContext.tsx  # Active fridge metadata, user permissions, and switchers
-    │   └── LanguageContext.tsx# Active language ('th' | 'en') & translation methods
-    │
-    ├── hooks/                 # Custom React hooks
-    │   ├── useAuth.ts         # Access AuthContext
-    │   ├── useFridge.ts       # Access active FridgeContext
-    │   ├── useTranslation.ts  # Access active locale, dictionary lookups, and category translators
-    │   ├── useInventory.ts    # onSnapshot subscription to /fridges/{id}/inventory (FEFO sorted)
-    │   ├── useTelemetry.ts    # onSnapshot subscription to /fridges/{id}/telemetry
-    │   └── useDoorEvents.ts   # onSnapshot subscription to /fridges/{id}/door_events
-    │
-    ├── locales/               # Static UI translation dictionaries
-    │   ├── th.ts              # Thai strings, button labels, error alerts, and category translations
-    │   └── en.ts              # English strings, button labels, error alerts, and category translations
-    │
-    ├── utils/                 # Helpers
-    │   └── dateFormatters.ts  # Bilingual date formatting (Buddhist Era th-TH vs Gregorian en-US)
-    │
-    ├── services/              # External client services
-    │   ├── firebase.ts        # Client Firebase app initialization (Auth, Firestore, Storage)
-    │   └── api.ts             # Cloud Functions HTTPS client helpers (token provisioning, manual triggers)
-    │
-    └── types/                 # Static TypeScript contracts
-        ├── auth.ts            # User profile, role definitions (owner, editor, viewer)
-        ├── fridge.ts          # Fridge document schema, gateway credentials, API keys
-        ├── inventory.ts       # Food item schema (bilingual names, category, expiry, status)
-        ├── telemetry.ts       # Sensor readings (temp_celsius, voc_index, light_ldr, timestamp_s)
-        └── door.ts            # Door event schema (timestamp_s, status)
-```
-
-### 3.5 SPA Deployment & Firebase Hosting Configuration
+### 3.4 SPA Deployment & Firebase Hosting Configuration
 
 Because React Router performs client-side routing, Firebase Hosting must rewrite all dynamic URL paths to `/index.html` so that deep links (e.g. `/fridges/kitchen-fridge/settings`) load the single-page application correctly rather than returning a 404.
 
@@ -253,9 +190,27 @@ In `firebase.json`:
 
 ```text
 /fridges/{fridgeId}
-  ├── (document fields: name, createdAt, ownerId, members, gatewayTokenHash, geminiApiKey, lineTargetId)
+  ├── Document Fields:
+  │     - name: string
+  │     - createdAt: uint64
+  │     - members: { [email: string]: "owner" | "member" }
+  │     - lineTargetId: string | null
+  │     - last_seen_s: uint64                # Epoch timestamp of latest gateway contact (online if now - last_seen_s < 60s)
+  │     - last_telemetry: {                  # Cached latest reading for fast dashboard rendering
+  │         node_id: string,
+  │         timestamp_s: uint64,
+  │         temp_celsius: number | null,
+  │         voc_index: number | null,
+  │         light_ldr: number | null
+  │       }
   │
-  ├── /inventory/{itemId}
+  ├── /private/config (Owner-only subdocument)
+  │     Fields:
+  │       - geminiApiKey: string               # Dedicated Google Gen AI API key for Gemini 3.5 Flash Lite
+  │       - gatewayToken: string               # Plaintext Bearer token (displayed to owner to paste into .env)
+  │       - gatewayTokenHash: string           # SHA-256 hash verified by Cloud Functions
+  │
+  ├── /inventory/{itemId}                      # Active items only; hard-deleted from DB + Storage upon check-out
   │     Fields:
   │       - name_th: string                     # Thai food name (e.g. "นมสดพาสเจอร์ไรส์")
   │       - name_en: string                     # English food name (e.g. "Pasteurized Whole Milk")
@@ -264,26 +219,52 @@ In `firebase.json`:
   │       - category: FoodCategory              # Canonical category key (e.g. "Dairy")
   │       - estimated_expiry_date: string       # ISO 8601 date string ("YYYY-MM-DD")
   │       - check_in_timestamp_s: uint64        # Epoch timestamp of check-in
-  │       - consumed: boolean                   # Check-out flag (true if removed)
-  │       - consumed_timestamp_s: uint64 | null # Epoch timestamp of removal
-  │       - image_storage_path: string          # Firebase Storage path to cropped image
-  │       - confidence: number                  # Gemini recognition confidence (0.0 to 1.0)
+  │       - image_storage_path: string | null   # Firebase Storage path (null for manual web check-ins; deleted on check-out)
+  │       - confidence: number                  # Recognition confidence: 0.0-1.0 (defaults to 1.0 for manual web entries)
+  │       - check_in_source: string             # "CAMERA" or "WEB_MANUAL"
   │
-  ├── /telemetry/{telemetryId}
-  │     Fields: timestamp_s, temp_celsius, voc_index, light_ldr
+  ├── /telemetry_minute/{YYYYMMDD_HHMM}        # Minute bucketing (1,440 docs/day per fridge, well under 20k/day free quota)
+  │     Fields:
+  │       - bucket_minute: string               # "20261026_2030"
+  │       - samples: TelemetrySamplePayload[]   # Array of batched samples from CBS.md
   │
   └── /door_events/{eventId}
-        Fields: timestamp_s, status ('SUCCESS' | 'OBSTRUCTION_ERROR' | 'TIMEOUT_ERROR' | 'CONTRADICTION_ERROR')
+        Fields: node_id, timestamp_s, status ('CLOSING' | 'SUCCESS' | 'OBSTRUCTION_ERROR' | 'ABORTED' | 'TIMEOUT_ERROR' | 'FAULT_LOCKOUT' | 'CONTRADICTION_ERROR')
 ```
 
-### 4.2 Bilingual Data Representation & Translation Policy
+### 4.2 User Roles & Access Control Model
 
-1. **Food Names & Descriptions:** Food items are populated by Gemini 3.5 Flash Lite ([`SBG.md`](../interface/SBG.md)) with explicit bilingual fields (`name_th`, `name_en`, `storage_recommendation_th`, `storage_recommendation_en`). This guarantees that both the edge LCD display (Node `'C'`) and the cloud web application (Server `'S'`) have immediate access to localized text without on-the-fly machine translation calls.
-2. **Canonical Categories Translation:** The database stores canonical category keys in English (`FoodCategory` enum: `'Dairy'`, `'Produce'`, `'Meat'`, `'Seafood'`, `'Beverage'`, `'Condiments'`, `'Leftovers'`, `'Bakery'`, `'Snacks'`, `'Other'`). Client applications use standard translation tables to render either Thai or English labels.
-3. **Dates & Timestamps:** Timestamps are stored uniformly as UTC-based second epochs (`uint64 timestamp_s`) and standard ISO 8601 dates (`YYYY-MM-DD`). Web clients translate and render dates according to the user's active locale (e.g. Thai Buddhist Era `พ.ศ.` vs Western Gregorian `CE`).
+Every dashboard user is identified by their Google email address (`request.auth.token.email`). The system supports a many-to-many relationship: a single user can belong to multiple refrigerators, and a refrigerator can have multiple users with assigned roles:
 
-### 4.3 Security Rules Model
-* **User Authentication:** Enforced via Firebase Auth (`request.auth != null`).
-* **Multi-Tenant Isolation:** Read and write access to `/fridges/{fridgeId}` and all subcollections require `request.auth.uid in resource.data.members` or `request.auth.token.email in resource.data.memberEmails`.
-* **Hardware Ingestion Security:** Gateway `'C'` connects to Firebase Cloud Functions over HTTPS using its provisioned Bearer token. Cloud Functions validate the token against `gatewayTokenHash` using the Admin SDK, bypassing client rules.
-* **Sensitive Field Protection:** The fridge's `geminiApiKey` and `gatewayTokenHash` are restricted so only users with the `owner` role can read or update them.
+| Role | Permissions & Capabilities |
+|---|---|
+| **`owner`** | • Full administrative authority.<br>• Rename or delete the refrigerator.<br>• Invite new users by Gmail address (assigning `'member'` role) and revoke access.<br>• Update the Google Gen AI (Gemini) API key.<br>• View the permanent Bearer token (`gatewayToken`) to manually copy/paste into Node `'C'`'s `.env` on device.<br>• Add, modify, and delete inventory items and view all telemetry. |
+| **`member`** | • Operational access.<br>• Add, edit, and remove food items in the active inventory.<br>• View all live sensor telemetry, historical charts, and door safety logs.<br>• **Restricted:** Cannot view or edit API keys, Bearer tokens, member lists, or delete the fridge. |
+
+### 4.3 Security Rules Architecture
+
+Firestore security rules enforce role-based access control and strict data isolation directly at the database layer:
+
+1. **User Authentication:** Enforced via `request.auth != null && request.auth.token.email != null`.
+2. **Refrigerator Document (`/fridges/{fridgeId}`):**
+   * **Read:** Allowed if `request.auth.token.email in resource.data.members`.
+   * **Create:** Allowed for any authenticated user, provided `request.resource.data.members[request.auth.token.email] == 'owner'`.
+   * **Update / Delete:** Allowed strictly if `resource.data.members[request.auth.token.email] == 'owner'`.
+3. **Subcollections (`/inventory`, `/telemetry_minute`, `/door_events`):**
+   * Allowed for both `owner` and `member` roles:
+     ```javascript
+     function isFridgeMember(fridgeId) {
+       return request.auth.token.email in get(/databases/$(database)/documents/fridges/$(fridgeId)).data.members;
+     }
+     ```
+   * Both `owner` and `member` can read/write to `/inventory`.
+   * Both `owner` and `member` can read `/telemetry_minute` and `/door_events`.
+4. **Owner-Only Subdocument (`/fridges/{fridgeId}/private/config`):**
+   * **Read / Write:** Restricted strictly to the refrigerator's `owner`:
+     ```javascript
+     function isFridgeOwner(fridgeId) {
+       return get(/databases/$(database)/documents/fridges/$(fridgeId)).data.members[request.auth.token.email] == 'owner';
+     }
+     ```
+   * Regular members have zero read or write access to `/private/config`, guaranteeing that `geminiApiKey`, `gatewayToken`, and `gatewayTokenHash` cannot be read or leaked.
+5. **Hardware Ingestion Security:** Gateway `'C'` never talks to Firestore directly with client SDKs. It connects to Cloud Functions over HTTPS using its permanent Bearer token. Cloud Functions validate the token against `gatewayTokenHash` in `/private/config` using the Firebase Admin SDK.

@@ -20,19 +20,19 @@ This document defines the multimodal AI interface between the cloud backend (**S
 ```text
 Gateway 'C' (Pi-top [4])      Server 'S' (Firebase Cloud Functions)        Entity 'G' (Gemini 3.5 Flash Lite)
       |                                      |                                             |
-      | === 1. POST /api/inventory/checkin =>|                                             |
-      |    [Cropped image + fridgeId]        |                                             |
+      | = 1. POST /api/inventory/checkin/draft =>|                                         |
+      |    [Compressed JPEG image bytes]     |                                             |
       |                                      | === 2. Build Check-In Prompt =============> |
-      |                                      |        [Image bytes + Date context]         |
+      |                                      |        [JPEG bytes + Date context]          |
       |                                      |                                             |
       |                                      |                               [Vision Classification]
       |                                      |                               [Shelf-Life Estimation]
       |                                      |                                             |
       |                                      | <== 3. Structured JSON Response =========== |
-      |                                      |        {name, category, expiry_date, ...}   |
+      |                                      |        {name, category, shelf_life_days...} |
       |                                      |                                             |
-      |                                      | [Persist new item to Firestore]             |
-      | <== 4. Return Check-In Confirmation =|                                             |
+      |                                      | [Upload JPEG & compute expiry_date]         |
+      | <== 4. Return Check-In Draft ========|                                             |
       |    [Display on 5" LCD for review]    |                                             |
 ```
 
@@ -41,20 +41,19 @@ Gateway 'C' (Pi-top [4])      Server 'S' (Firebase Cloud Functions)        Entit
 ```text
 Gateway 'C' (Pi-top [4])      Server 'S' (Firebase Cloud Functions)        Entity 'G' (Gemini 3.5 Flash Lite)
       |                                      |                                             |
-      | === 1. POST /api/inventory/checkout=>|                                             |
-      |    [Cropped image + fridgeId]        |                                             |
+      | = 1. POST /api/inventory/checkout/draft >|                                         |
+      |    [Compressed JPEG image bytes]     |                                             |
       |                                      | [Fetch active inventory from Firestore]     |
       |                                      | === 2. Build Context-Enriched Prompt =====> |
-      |                                      |        [Image bytes + Candidate Items list] |
+      |                                      |        [JPEG bytes + Candidate Items list]  |
       |                                      |                                             |
       |                                      |                               [Visual Matching vs Context]
-      |                                      |                               [FEFO Candidate Ranking]
       |                                      |                                             |
       |                                      | <== 3. Structured JSON Response =========== |
-      |                                      |        {match_type, matched_item_id, ...}   |
+      |                                      |        {match_type, candidate_matches, ...} |
       |                                      |                                             |
-      |                                      | [Update item: consumed = true in Firestore] |
-      | <== 4. Return Check-Out Resolution ==|                                             |
+      |                                      | [Sort candidate items by FEFO]              |
+      | <== 4. Return Candidate Resolution ==|                                             |
       |    [Show confirmation / FEFO list]   |                                             |
 ```
 
@@ -80,8 +79,8 @@ All inference calls to Entity `'G'` use the official Google Gen AI SDK (`@google
 ### A. Context & Prompt Architecture
 
 When classifying an item placed into the fridge, Server `'S'` supplies:
-1. **The Cropped Grocery Image:** High-resolution JPEG or PNG bytes captured by Gateway `'C'`.
-2. **Current Date Context:** The current date (`YYYY-MM-DD`) and Unix timestamp (`timestamp_s`) so the model can calculate absolute expiration dates based on standard refrigeration shelf life.
+1. **The Cropped Grocery Image:** Compressed JPEG (`image/jpeg`) bytes captured by Gateway `'C'`.
+2. **Current Date Context:** The current date (`YYYY-MM-DD`) and Unix timestamp (`timestamp_s`). Server `'S'` deterministically calculates `estimated_expiry_date = CURRENT_DATE + estimated_shelf_life_days`.
 
 #### System Prompt Template
 
@@ -95,10 +94,9 @@ Your task:
 1. Determine if the image contains a food or beverage item (is_food).
 2. Identify the specific item name in both Thai (name_th) and English (name_en), e.g. name_th="นมสดพาสเจอร์ไรส์", name_en="Pasteurized Whole Milk".
 3. Classify the item into one of the canonical categories: Dairy, Produce, Meat, Seafood, Beverage, Condiments, Leftovers, Bakery, Snacks, Other.
-4. Estimate standard refrigerated shelf life in days (estimated_shelf_life_days).
-5. Calculate the estimated expiration date (estimated_expiry_date in YYYY-MM-DD format) by adding estimated_shelf_life_days to Current Reference Date.
-6. Provide a confidence score between 0.0 and 1.0.
-7. Return brief storage recommendations in both Thai (storage_recommendation_th) and English (storage_recommendation_en), e.g. storage_recommendation_th="เก็บในช่องแช่เย็นหลัก", storage_recommendation_en="Keep sealed on main shelf".
+4. Estimate standard refrigerated shelf life in days (estimated_shelf_life_days). Note: Server 'S' deterministically calculates estimated_expiry_date = CURRENT_DATE + estimated_shelf_life_days.
+5. Provide a confidence score between 0.0 and 1.0.
+6. Return brief storage recommendations in both Thai (storage_recommendation_th) and English (storage_recommendation_en), e.g. storage_recommendation_th="เก็บในช่องแช่เย็นหลัก", storage_recommendation_en="Keep sealed on main shelf".
 ```
 
 ### B. Standard Food Categories & Bilingual Translation Mapping
@@ -156,10 +154,6 @@ Canonical categories are stored in English across the database and interfaces. C
       "type": "integer",
       "description": "Estimated refrigerated shelf life in days from the reference date."
     },
-    "estimated_expiry_date": {
-      "type": "string",
-      "description": "ISO 8601 date string (YYYY-MM-DD) indicating the estimated expiration date."
-    },
     "confidence": {
       "type": "number",
       "description": "Confidence score of the visual recognition between 0.0 and 1.0."
@@ -179,8 +173,9 @@ Canonical categories are stored in English across the database and interfaces. C
     "name_en",
     "category",
     "estimated_shelf_life_days",
-    "estimated_expiry_date",
-    "confidence"
+    "confidence",
+    "storage_recommendation_th",
+    "storage_recommendation_en"
   ]
 }
 ```
@@ -200,17 +195,30 @@ export type FoodCategory =
   | 'Snacks'
   | 'Other';
 
-export interface CheckInResponsePayload {
+// Raw response payload returned from Gemini 3.5 Flash Lite
+export interface GeminiCheckInResponse {
   is_food: boolean;
   name_th: string;
   name_en: string;
   category: FoodCategory;
   estimated_shelf_life_days: number;
-  estimated_expiry_date: string; // YYYY-MM-DD
   confidence: number;            // 0.0 to 1.0
-  storage_recommendation_th?: string;
-  storage_recommendation_en?: string;
+  storage_recommendation_th: string;
+  storage_recommendation_en: string;
 }
+
+// Final draft payload returned to Gateway 'C' (CBS.md) with deterministic expiry date
+export interface CheckInDraftPayload {
+  is_food: boolean;
+  name_th: string;
+  name_en: string;
+  category: FoodCategory;
+  estimated_shelf_life_days: number;
+  estimated_expiry_date: string; // Deterministically computed by Server 'S': YYYY-MM-DD
+  image_storage_path: string;    // Firebase Storage path to uploaded JPEG
+  confidence: number;            // 0.0 to 1.0
+  storage_recommendation_th: string;
+  storage_recommendation_en: string;
 }
 ```
 
@@ -220,7 +228,7 @@ export interface CheckInResponsePayload {
 
 ### A. Context-Enriched Prompt Architecture
 
-When an item is removed, visual classification alone can be ambiguous (e.g., distinguishing between two cartons of milk purchased on different dates). Server `'S'` queries active (non-consumed) inventory from Firestore `/fridges/{fridgeId}/inventory` and injects candidate items directly into the prompt:
+When an item is removed, visual classification alone can be ambiguous (e.g., distinguishing between two cartons of milk purchased on different dates). Server `'S'` queries active inventory from Firestore `/fridges/{fridgeId}/inventory` and injects candidate items directly into the prompt:
 
 #### System Prompt Template
 
@@ -248,7 +256,7 @@ Your task:
 2. Search the Candidate Items list for matching items.
 3. Determine match resolution:
    - EXACT_MATCH: Exactly one candidate item clearly corresponds to the image.
-   - AMBIGUOUS_MULTIPLE: Multiple candidate items could match (e.g., multiple milks). Sort candidate_matches by FEFO (First Expired, First Out) with the earliest estimated_expiry_date first.
+   - AMBIGUOUS_MULTIPLE: Multiple candidate items could match (e.g., multiple milks). Return all matching candidate item_ids in candidate_matches (Server 'S' deterministically sorts them by FEFO).
    - NO_MATCH: No candidate items in inventory match the presented item (flag for manual check-out).
 4. Return the matched item ID (matched_item_id) if EXACT_MATCH, or candidate IDs if AMBIGUOUS_MULTIPLE.
 5. Provide identified names in both Thai (identified_name_th) and English (identified_name_en), confidence score (0.0 to 1.0), and brief reasoning string.
@@ -270,7 +278,8 @@ Your task:
       "description": "Resolution of inventory match."
     },
     "matched_item_id": {
-      "type": ["string", "null"],
+      "type": "string",
+      "nullable": true,
       "description": "Firestore item_id of the matching candidate item if match_type is EXACT_MATCH, otherwise null."
     },
     "candidate_matches": {
@@ -278,7 +287,7 @@ Your task:
       "items": {
         "type": "string"
       },
-      "description": "Array of candidate item_ids matching the image, ordered by FEFO (earliest expiry date first)."
+      "description": "Array of candidate item_ids matching the image. (Server 'S' deterministically sorts these candidate IDs by FEFO: earliest expiry date first)."
     },
     "identified_name_th": {
       "type": "string",
@@ -340,5 +349,5 @@ export interface CheckOutResponsePayload {
 1. **Strict JSON Schema Enforcement:** All calls to Entity `'G'` must set `responseMimeType: "application/json"` and pass the OpenAPI schema via SDK `responseSchema`. Freeform markdown blocks (e.g. ` ```json `) are rejected.
 2. **Non-Food Item Guard (`is_food: false`):** If an object detected by Gateway `'C'` is not a valid grocery item (e.g. human hand, empty plate, dish towel), Gemini returns `is_food: false`. Server `'S'` rejects the check-in transaction without creating a Firestore document and prompts Gateway `'C'` to discard the frame.
 3. **Low Confidence Threshold (`confidence < 0.60`):** When confidence is below 0.60, Server `'S'` returns an error to Gateway `'C'` prompting the user to retake the photo.
-4. **FEFO Disambiguation Invariant:** In the case of `AMBIGUOUS_MULTIPLE` check-out matches (e.g., user removes milk and the fridge contains two milks), Server `'S'` defaults to selecting the item with the earliest expiration date (**First Expired, First Out**), while sending candidate alternatives to Gateway `'C'` for optional button override.
-5. **Rate Limiting & Transient Retries:** Server `'S'` implements exponential backoff (initial retry at 1s, doubling up to 3 attempts) for HTTP `429` (Quota Exceeded) or `503` (Model Overloaded) responses from the Gemini API.
+4. **FEFO Disambiguation Invariant:** In the case of `AMBIGUOUS_MULTIPLE` check-out matches (e.g., user removes milk and the fridge contains two cartons of milk), Server `'S'` deterministically sorts the candidate items by earliest expiration date (**First Expired, First Out**: `estimated_expiry_date ASC`) using server-side business logic rather than delegating date ordering to the LLM. Server `'S'` returns these ranked candidates to Gateway `'C'` for user review or 5-second auto-confirmation. Server `'S'` never mutates Firestore during check-out drafting; deletion occurs strictly when Gateway `'C'` commits the confirmed `item_id` via `POST /api/inventory/checkout`.
+5. **Rate Limiting & Transient Retries:** Server `'S'` implements deterministic exponential backoff for transient HTTP `429` (Quota Exceeded) or `503` (Model Overloaded) responses from the Gemini API: Attempt 1 waits 1.0s, Attempt 2 waits 2.0s, and Attempt 3 waits 4.0s (maximum 3 retry attempts before returning HTTP `503 Service Unavailable` to Gateway `'C'`).

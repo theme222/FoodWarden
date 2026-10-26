@@ -28,7 +28,7 @@ This document specifies the hardware pinouts, sensor bus interfaces, power archi
 | **LED Dot Matrix** | Onboard **16×8 Red LED Matrix** (`HT16K33` driver) | Onboard **`I2C0`** (`Wire`) | • `SDA` = **`GPIO 4`**<br>• `SCL` = **`GPIO 5`** | **`0x70`** | Displays boot calibration status, manual diagnostic readouts, and battery warnings (disabled during deep sleep). |
 | **Button 1 (`S1`)** | Onboard Pushbutton `S1` | Digital Input (Active-LOW, Pull-up) | **`GPIO 16`** (`RTC_GPIO17`) | Digital (`LOW` when pressed) | Hardware interrupt / wake trigger to display live sensor readings on the LED dot matrix. |
 | **Button 2 (`S2`)** | Onboard Pushbutton `S2` | Digital Input (Active-LOW, Pull-up) | **`GPIO 14`** (`RTC_GPIO16`) | Digital (`LOW` when pressed) | Hardware interrupt / wake trigger to force an immediate BLE GATT connection and RTC time recalibration ([`FUC.md`](../interface/FUC.md)). |
-| **Status Indicators** | Onboard LEDs & Buzzer | Digital Output | • Wi-Fi LED = **`GPIO 2`**<br>• IoT LED = **`GPIO 12`**<br>• Buzzer = **`GPIO 13`** | Digital Output | Diagnostic feedback during initial bootup and OTA firmware updates. |
+| **Status Indicators** | Onboard LEDs & Buzzer | Digital Output | • Wi-Fi LED = **`GPIO 2`**<br>• IoT LED = **`GPIO 12`**<br>• Buzzer = **`GPIO 13`** | Digital Output | Diagnostic feedback during initial bootup and BLE connection events. |
 
 ```text
 +-------------------------------------------------------------------------------+

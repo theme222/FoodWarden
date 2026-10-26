@@ -38,11 +38,11 @@ Authorization: Bearer <GATEWAY_TOKEN>
 Node 'C' (Edge Gateway)                        Server 'S' (Cloud Functions)
          |                                                   |
  [User presses check-in button]                              |
- [YOLOv8 crops grocery bounding box]                         |
+ [YOLO11n crops grocery bounding box & compresses JPEG]      |
          |                                                   |
-         | === POST /api/inventory/checkin =================>|
+         | === 1. POST /api/inventory/checkin/draft ========>|
          |     Headers: Authorization: Bearer <TOKEN>        |
-         |     Body: multipart/form-data [image]             |
+         |     Body: multipart/form-data [image (JPEG)]      |
          |                                                   |
          |                                      [Identify fridge via Bearer token]
          |                                      [Call Gemini via SBG.md]
@@ -50,13 +50,28 @@ Node 'C' (Edge Gateway)                        Server 'S' (Cloud Functions)
          |                                      +- If confidence < 0.60 or non-food:
          |                                      |  Return 422 UNIDENTIFIABLE
          |                                      +- Else:
-         |                                         [Persist new item to Firestore]
-         |                                         Return 200 OK (CheckInResult)
+         |                                         [Upload JPEG to Firebase Storage]
+         |                                         Return 200 OK (CheckInDraftResult)
+         |                                         (Zero Firestore database writes)
          |                                                   |
          | <== 200 OK or 422 UNIDENTIFIABLE =================|
          |                                                   |
- [Render bilingual review card or                            |
-  bilingual retry warning on LCD]                            |
+ [Render bilingual review card on LCD]                       |
+ [Start 5s auto-confirm countdown]                           |
+ +- If user presses 'X' (Cancel):                            |
+ |  [Drop draft locally, no commit sent]                     |
+ +- If user adjusts expiry (Up/Down) or 5s timer expires:    |
+         |                                                   |
+         | === 2. POST /api/inventory/checkin ==============>|
+         |     Headers: Authorization: Bearer <TOKEN>        |
+         |     Body: application/json [Finalized Item Data]  |
+         |                                                   |
+         |                                      [Persist new item to Firestore]
+         |                                      Return 201 Created { item_id, success }
+         |                                                   |
+         | <== 201 Created ==================================|
+         |                                                   |
+ [Display success checkmark on LCD]                          |
 ```
 
 ### B. Context-Enriched Grocery Check-Out Sequence
@@ -65,46 +80,60 @@ Node 'C' (Edge Gateway)                        Server 'S' (Cloud Functions)
 Node 'C' (Edge Gateway)                        Server 'S' (Cloud Functions)
          |                                                   |
  [User presses check-out button]                             |
- [YOLOv8 crops grocery bounding box]                         |
+ [YOLO11n crops grocery bounding box & compresses JPEG]      |
          |                                                   |
-         | === POST /api/inventory/checkout ================>|
+         | === 1. POST /api/inventory/checkout/draft ======>|
          |     Headers: Authorization: Bearer <TOKEN>        |
-         |     Body: multipart/form-data [image]             |
+         |     Body: multipart/form-data [image (JPEG)]      |
          |                                                   |
          |                                      [Identify fridge via Bearer token]
-         |                                      [Fetch active inventory]
+         |                                      [Fetch active inventory from Firestore]
          |                                      [Call Gemini via SBG.md]
-         |                                      [Check confidence >= 0.60]
          |                                      +- If confidence < 0.60:
          |                                      |  Return 422 UNIDENTIFIABLE
+         |                                      +- If confidence >= 0.60 but no match:
+         |                                      |  Return 200 OK (NO_MATCH, candidates: [])
          |                                      +- Else:
-         |                                         [FEFO ranking & match resolution]
-         |                                         [Mark consumed if EXACT_MATCH]
-         |                                         Return 200 OK (CheckOutResult)
+         |                                         [Sort candidates by FEFO with item_ids]
+         |                                         Return 200 OK (CheckOutDraftResult)
+         |                                         (Zero database mutations)
          |                                                   |
          | <== 200 OK or 422 UNIDENTIFIABLE =================|
          |                                                   |
- [Display single match confirmation,                         |
-  bilingual FEFO list, or retry warning]                     |
+ [Display candidate matches with item_id]                    |
+ [Start 5s auto-confirm countdown]                           |
+ [User selects item or timer auto-selects FEFO default]      |
+         |                                                   |
+         | === 2. POST /api/inventory/checkout =============>|
+         |     Headers: Authorization: Bearer <TOKEN>        |
+         |     Body: application/json { item_id }            |
+         |                                                   |
+         |                                      [Hard-delete item from Firestore]
+         |                                      [Delete item JPEG from Cloud Storage]
+         |                                      Return 200 OK { item_id, status }
+         |                                                   |
+         | <== 200 OK =======================================|
+         |                                                   |
+ [Display check-out confirmation on LCD]                     |
 ```
 
 ---
 
 ## 3. Endpoint Specifications
 
-### 3.1 Grocery Check-In (`POST /api/inventory/checkin`)
+### 3.1 Grocery Check-In Draft (`POST /api/inventory/checkin/draft`)
 
-Processes a cropped food image captured by Node `'C'`, invokes cloud AI classification ([`SBG.md`](SBG.md)), stores the new item in Firestore under the authenticated fridge, and returns bilingual food metadata for LCD display.
+Processes a cropped food image captured by Node `'C'`, invokes cloud AI classification ([`SBG.md`](SBG.md)), and returns draft bilingual food metadata for LCD display. **This endpoint does not write to the database.**
 
 * **Method:** `POST`
-* **Path:** `/api/inventory/checkin`
+* **Path:** `/api/inventory/checkin/draft`
 * **Content-Type:** `multipart/form-data`
 
 #### Request Fields
 
 | Field Name | Type | Format / Description |
 |---|---|---|
-| `image` | Binary File | JPEG or PNG image bytes of the cropped grocery item. |
+| `image` | Binary File | Compressed JPEG (`image/jpeg`) image bytes of the cropped grocery item. |
 
 #### Success Response Schema (`200 OK`)
 
@@ -146,6 +175,10 @@ Returned when the item is identified with confidence ≥ 0.60 and `is_food` is `
       "type": "string",
       "description": "Exact storage recommendation in English."
     },
+    "image_storage_path": {
+      "type": "string",
+      "description": "Firebase Storage path to the uploaded JPEG crop (e.g. /storage/food_crops/fridge_123/crop_abc.jpg)."
+    },
     "confidence": {
       "type": "number",
       "description": "AI recognition confidence (0.60 to 1.0)."
@@ -160,6 +193,7 @@ Returned when the item is identified with confidence ≥ 0.60 and `is_food` is `
     "estimated_expiry_date",
     "storage_recommendation_th",
     "storage_recommendation_en",
+    "image_storage_path",
     "confidence"
   ]
 }
@@ -178,19 +212,56 @@ Returned when the AI recognition confidence is strictly below 0.60 or when `is_f
 
 ---
 
-### 3.2 Grocery Check-Out (`POST /api/inventory/checkout`)
+### 3.2 Grocery Check-In Commit (`POST /api/inventory/checkin`)
 
-Matches a removed food item against active refrigerator inventory using context-enriched multimodal AI ([`SBG.md`](SBG.md)).
+Persists a confirmed food item into Firestore under the authenticated refrigerator. Dispatched after the user confirms or adjusts the draft on the Gateway LCD (or after the 5-second countdown timer expires).
 
 * **Method:** `POST`
-* **Path:** `/api/inventory/checkout`
+* **Path:** `/api/inventory/checkin`
+* **Content-Type:** `application/json`
+
+#### Request Payload
+
+```json
+{
+  "name_th": "นมสดพาสเจอร์ไรส์",
+  "name_en": "Pasteurized Whole Milk",
+  "category": "Dairy",
+  "category_th": "นมและผลิตภัณฑ์นม",
+  "estimated_shelf_life_days": 7,
+  "estimated_expiry_date": "2026-11-02",
+  "storage_recommendation_th": "เก็บในช่องแช่เย็นหลัก 2-4°C",
+  "storage_recommendation_en": "Keep sealed on main shelf 2-4°C",
+  "image_storage_path": "/storage/food_crops/fridge_123/crop_abc.jpg",
+  "confidence": 0.94
+}
+```
+
+#### Success Response Schema (`201 Created`)
+
+```json
+{
+  "success": true,
+  "item_id": "item_abc123xyz",
+  "message": "Item successfully added to inventory."
+}
+```
+
+---
+
+### 3.3 Grocery Check-Out Draft (`POST /api/inventory/checkout/draft`)
+
+Matches a removed food item against active refrigerator inventory using context-enriched multimodal AI ([`SBG.md`](SBG.md)). Returns candidate matches enriched with their unique `item_id`s, ordered by FEFO (earliest expiry first). **This endpoint does not modify or delete items from the database.**
+
+* **Method:** `POST`
+* **Path:** `/api/inventory/checkout/draft`
 * **Content-Type:** `multipart/form-data`
 
 #### Request Fields
 
 | Field Name | Type | Format / Description |
 |---|---|---|
-| `image` | Binary File | JPEG or PNG image bytes of the removed grocery item. |
+| `image` | Binary File | Compressed JPEG (`image/jpeg`) image bytes of the removed grocery item. |
 
 #### Success Response Schema (`200 OK`)
 
@@ -210,13 +281,14 @@ Returned when the AI successfully processes the image against inventory with con
       "items": {
         "type": "object",
         "properties": {
+          "item_id": { "type": "string", "description": "Unique Firestore item identifier." },
           "name_th": { "type": "string" },
           "name_en": { "type": "string" },
           "category": { "type": "string" },
           "category_th": { "type": "string" },
           "estimated_expiry_date": { "type": "string" }
         },
-        "required": ["name_th", "name_en", "category", "category_th", "estimated_expiry_date"]
+        "required": ["item_id", "name_th", "name_en", "category", "category_th", "estimated_expiry_date"]
       },
       "description": "Candidate matches sorted by FEFO (earliest expiry first). Contains 1 item for EXACT_MATCH, 2+ items for AMBIGUOUS_MULTIPLE, and 0 items for NO_MATCH."
     },
@@ -245,19 +317,52 @@ Returned when the AI recognition confidence is strictly below 0.60:
 ```json
 {
   "error": "UNIDENTIFIABLE",
-  "message": "Removed item could not be reliably identified from active inventory (confidence below 0.60)."
+  "message": "Removed item could not be reliably identified (confidence below 0.60)."
 }
 ```
 
 ---
 
-### 3.3 Telemetry Ingestion (`POST /api/telemetry`)
+### 3.4 Grocery Check-Out Commit (`POST /api/inventory/checkout`)
 
-Ingests batched environmental sensor samples collected by Node `'C'` from Node `'F'` BLE beacons ([`FUC.md`](FUC.md)) or flushed from the local offline SQLite queue (E4 store-and-forward).
+Permanently deletes a specific food item document from Firestore (`/fridges/{fridgeId}/inventory/{item_id}`) and deletes its associated cropped JPEG image (`image_storage_path`) from Firebase Cloud Storage to conserve storage space. Dispatched when the user or Gateway confirms removal of a specific `item_id`.
+
+* **Method:** `POST`
+* **Path:** `/api/inventory/checkout`
+* **Content-Type:** `application/json`
+
+#### Request Payload
+
+```json
+{
+  "item_id": "item_abc123xyz"
+}
+```
+
+#### Success Response Schema (`200 OK`)
+
+```json
+{
+  "success": true,
+  "item_id": "item_abc123xyz",
+  "status": "deleted",
+  "message": "Item and associated image permanently removed from inventory."
+}
+```
+
+---
+
+### 3.5 Telemetry Ingestion (`POST /api/telemetry`)
+
+Ingests batched environmental sensor samples collected by Node `'C'` from Node `'F'` BLE GATT connections ([`FUC.md`](FUC.md)) or flushed from the local offline SQLite queue (E4 store-and-forward).
 
 * **Method:** `POST`
 * **Path:** `/api/telemetry`
 * **Content-Type:** `application/json`
+
+> [!NOTE]
+> **Deduplication Policy:**
+> Cloud Server `'S'` deduplicates incoming telemetry records strictly by `timestamp_s`. Microcontroller packet counters are validated and abstracted away at the Gateway edge (Node `'C'`).
 
 #### Request Payload
 
@@ -265,6 +370,7 @@ Ingests batched environmental sensor samples collected by Node `'C'` from Node `
 {
   "samples": [
     {
+      "node_id": "F0",
       "timestamp_s": 1792944000,
       "temp_celsius": 3.42,
       "voc_index": 115,
@@ -288,7 +394,7 @@ Ingests batched environmental sensor samples collected by Node `'C'` from Node `
 
 ---
 
-### 3.4 Door Event Ingestion (`POST /api/door_events`)
+### 3.6 Door Event Ingestion (`POST /api/door_events`)
 
 Ingests door safety and actuation events parsed by Gateway Node `'C'`. Rather than forwarding raw microcontroller register dumps, Node `'C'` parses events locally and dispatches a clean, minimal status payload to Server `'S'`.
 
@@ -297,10 +403,12 @@ Ingests door safety and actuation events parsed by Gateway Node `'C'`. Rather th
 * **Content-Type:** `application/json`
 
 #### Door Event Status Definitions
+* **`CLOSING`:** Door closer accepted a `CLOSE_DOOR` command and initiated motor drive.
 * **`SUCCESS`:** Door was successfully closed by the closer and confirmed shut.
 * **`OBSTRUCTION_ERROR`:** Obstruction stall detected (motor current spike ≥ 1200 mA or safety limit reached) causing automatic abort and retraction.
 * **`ABORTED`:** Door closing was halted and arm retracted due to vision-detected human approach or manual button trigger.
 * **`TIMEOUT_ERROR`:** Door closer motion exceeded maximum allowable travel time (30s) without confirming closure.
+* **`FAULT_LOCKOUT`:** Door closer entered hardware safety lockout due to an unresponsive INA219 sensor or boot homing failure.
 * **`CONTRADICTION_ERROR`:** Door closer IR sensor reports the door is mechanically shut, but Node `'F'`'s internal light sensor reports elevated light for 3 consecutive readings.
 
 #### Request Payload
@@ -311,9 +419,7 @@ Ingests door safety and actuation events parsed by Gateway Node `'C'`. Rather th
     {
       "node_id": "D0",
       "timestamp_s": 1792944005,
-      "status": "SUCCESS",
-      "duration_ms": 4250,
-      "current_ma": 480
+      "status": "SUCCESS"
     }
   ]
 }
@@ -358,7 +464,7 @@ All non-200 responses across this interface return a standardized JSON error env
 ### A. TypeScript Models (Server `'S'`)
 
 ```typescript
-export interface CheckInResult {
+export interface CheckInDraftResult {
   name_th: string;
   name_en: string;
   category: string;
@@ -367,10 +473,31 @@ export interface CheckInResult {
   estimated_expiry_date: string; // YYYY-MM-DD
   storage_recommendation_th: string;
   storage_recommendation_en: string;
+  image_storage_path: string;    // Firebase Storage path to uploaded JPEG
   confidence: number;
 }
 
+export interface CheckInCommitPayload {
+  name_th: string;
+  name_en: string;
+  category: string;
+  category_th: string;
+  estimated_shelf_life_days: number;
+  estimated_expiry_date: string; // YYYY-MM-DD
+  storage_recommendation_th: string;
+  storage_recommendation_en: string;
+  image_storage_path: string;    // Firebase Storage path to uploaded JPEG
+  confidence: number;
+}
+
+export interface CheckInCommitResult {
+  success: boolean;
+  item_id: string;
+  message: string;
+}
+
 export interface CandidateItem {
+  item_id: string; // Unique Firestore document ID
   name_th: string;
   name_en: string;
   category: string;
@@ -380,14 +507,26 @@ export interface CandidateItem {
 
 export type CheckOutMatchType = 'EXACT_MATCH' | 'AMBIGUOUS_MULTIPLE' | 'NO_MATCH';
 
-export interface CheckOutResult {
+export interface CheckOutDraftResult {
   match_type: CheckOutMatchType;
   candidate_matches: CandidateItem[];
   confidence: number;
   reasoning: string;
 }
 
+export interface CheckOutCommitPayload {
+  item_id: string;
+}
+
+export interface CheckOutCommitResult {
+  success: boolean;
+  item_id: string;
+  status: 'deleted';
+  message: string;
+}
+
 export interface TelemetrySamplePayload {
+  node_id: string; // Sensor node instance identifier (e.g. "F0")
   timestamp_s: number; // uint64 second precision
   temp_celsius: number | null;
   voc_index: number | null;
@@ -395,12 +534,16 @@ export interface TelemetrySamplePayload {
 }
 
 export type DoorEventStatus =
+  | 'CLOSING'
   | 'SUCCESS'
   | 'OBSTRUCTION_ERROR'
+  | 'ABORTED'
   | 'TIMEOUT_ERROR'
+  | 'FAULT_LOCKOUT'
   | 'CONTRADICTION_ERROR';
 
 export interface DoorEventItem {
+  node_id: string;     // Actuator node identifier (e.g. "D0")
   timestamp_s: number; // uint64 second precision
   status: DoorEventStatus;
 }
@@ -425,7 +568,7 @@ from dataclasses import dataclass
 from typing import List, Optional
 
 @dataclass(frozen=True)
-class CheckInResult:
+class CheckInDraftResult:
     name_th: str
     name_en: str
     category: str
@@ -434,10 +577,31 @@ class CheckInResult:
     estimated_expiry_date: str
     storage_recommendation_th: str
     storage_recommendation_en: str
+    image_storage_path: str
     confidence: float
 
 @dataclass(frozen=True)
+class CheckInCommitPayload:
+    name_th: str
+    name_en: str
+    category: str
+    category_th: str
+    estimated_shelf_life_days: int
+    estimated_expiry_date: str
+    storage_recommendation_th: str
+    storage_recommendation_en: str
+    image_storage_path: str
+    confidence: float
+
+@dataclass(frozen=True)
+class CheckInCommitResult:
+    success: bool
+    item_id: str
+    message: str
+
+@dataclass(frozen=True)
 class CandidateItem:
+    item_id: str
     name_th: str
     name_en: str
     category: str
@@ -445,14 +609,26 @@ class CandidateItem:
     estimated_expiry_date: str
 
 @dataclass(frozen=True)
-class CheckOutResult:
+class CheckOutDraftResult:
     match_type: str  # EXACT_MATCH, AMBIGUOUS_MULTIPLE, NO_MATCH
     candidate_matches: List[CandidateItem]
     confidence: float
     reasoning: str
 
 @dataclass(frozen=True)
+class CheckOutCommitPayload:
+    item_id: str
+
+@dataclass(frozen=True)
+class CheckOutCommitResult:
+    success: bool
+    item_id: str
+    status: str  # "deleted"
+    message: str
+
+@dataclass(frozen=True)
 class TelemetrySamplePayload:
+    node_id: str
     timestamp_s: int
     temp_celsius: Optional[float]  # None if sensor reading failed
     voc_index: Optional[int]       # None if sensor reading failed
@@ -460,8 +636,9 @@ class TelemetrySamplePayload:
 
 @dataclass(frozen=True)
 class DoorEventItem:
+    node_id: str
     timestamp_s: int
-    status: str  # SUCCESS, OBSTRUCTION_ERROR, TIMEOUT_ERROR, CONTRADICTION_ERROR
+    status: str  # CLOSING, SUCCESS, OBSTRUCTION_ERROR, ABORTED, TIMEOUT_ERROR, FAULT_LOCKOUT, CONTRADICTION_ERROR
 
 @dataclass(frozen=True)
 class ApiErrorResponse:

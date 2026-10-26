@@ -23,7 +23,7 @@ Every interface file follows a 3-letter naming format:
 * **`D`** — **Door** Closer Actuator Node (KidBright32)
 * **`S`** — **Server** Cloud Backend (Firebase / Cloud Functions)
 * **`G`** — **Gemini** 3.5 Flash Lite Multimodal API
-* **`L`** — **LINE** Notification Service (Messaging API / Notify)
+* **`L`** — **LINE** Notification Service (Messaging API)
 
 ### Directionality
 * **`U`** — **Unidirectional** (one-way broadcast, stream, or webhook alert)
