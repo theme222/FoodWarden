@@ -50,7 +50,7 @@ This document specifies the cloud infrastructure, runtime environment, third-par
 
 ## 2. Software & Tech Stack Architecture
 
-| Component / Layer | Specific Technology / Package | Version / Details | Role in SmarterFridge |
+| Component / Layer | Specific Technology / Package | Version / Details | Role in FoodWarden |
 |---|---|---|---|
 | **Package Manager & Dev Tool** | **Bun (`bun`)** | `v1.2+` | High-performance package manager and script runner for fast local dependency resolution, test execution, and building frontend assets. |
 | **Programming Language** | **TypeScript** | `5.x+` (`strict: true` in [`tsconfig.json`](tsconfig.json)) | Strict static typing across Cloud Functions, web application components, and Firestore schemas (no `any`). |
@@ -145,7 +145,7 @@ The web application provides an intuitive language selection mechanism enabling 
 1. **Language Switcher Widget (`LanguageToggle.tsx`):**
    * Placed prominently in the global navigation bar / mobile header.
    * Toggles the active locale with instant reactive UI re-rendering without page reload.
-   * Persists user preference to browser `localStorage` (`smarterfridge_locale = "th" | "en"`) and synchronizes with user profile settings.
+   * Persists user preference to browser `localStorage` (`foodwarden_locale = "th" | "en"`) and synchronizes with user profile settings.
 2. **Category Translation Bridge:**
    * Canonical categories are stored in English in Firestore (`FoodCategory`), and translated dynamically in the UI:
      * `Dairy` ↔ `นมและผลิตภัณฑ์นม`

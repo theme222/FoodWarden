@@ -1,5 +1,5 @@
 {
-  "name": "smarterfridge-server",
+  "name": "foodwarden-server",
   "module": "index.ts",
   "type": "module",
   "private": true,

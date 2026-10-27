@@ -95,7 +95,7 @@ To maximize accessibility for all household members, **every on-screen instructi
 
 ```text
 +-----------------------------------------------------------------------------+
-| SmarterFridge - ตรวจรับอาหารเข้าตู้ (Check-In)                 [Wi-Fi: OK]  |
+| FoodWarden - ตรวจรับอาหารเข้าตู้ (Check-In)                    [Wi-Fi: OK]  |
 +-----------------------------------------------------------------------------+
 |                                                                             |
 |      [ แสดงภาพสดจากกล้อง / Live Camera Feed ]                                 |

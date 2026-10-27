@@ -1,6 +1,6 @@
 # Server 'S': Cloud Backend & Web Dashboard (`server/`)
 
-**Server `'S'`** is the cloud backend, AI orchestrator, notification dispatcher, and user-facing web dashboard for the **SmarterFridge** system. It provides the second primary user-facing interface in the ecosystem, serving a responsive **Vite + React** Single Page Application (SPA) with **React Router** optimized for mobile phones and desktop browsers, complete with **dynamic language switching between Thai and English**, Google SSO authentication, live fridge metric monitoring, and FEFO inventory inspection.
+**Server `'S'`** is the cloud backend, AI orchestrator, notification dispatcher, and user-facing web dashboard for the **FoodWarden** system. It provides the second primary user-facing interface in the ecosystem, serving a responsive **Vite + React** Single Page Application (SPA) with **React Router** optimized for mobile phones and desktop browsers, complete with **dynamic language switching between Thai and English**, Google SSO authentication, live fridge metric monitoring, and FEFO inventory inspection.
 
 Built as a **Bun** and **TypeScript** project on **Firebase**, it persists sensor telemetry, door safety events, and bilingual food inventory in **Cloud Firestore**, orchestrates **Gemini 3.5 Flash Lite** (`'G'`) with live inventory context for grocery check-in/check-out classification, and dispatches real-time user alerts via the **LINE Messaging API** (`'L'`).
 

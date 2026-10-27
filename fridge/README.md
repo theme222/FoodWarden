@@ -1,6 +1,6 @@
 # Node 'F': Fridge Internal Sensor (`fridge/`)
 
-**Node `'F'`** is the ultra-low-power internal environmental sensor node for the **SmarterFridge** system. Running on a battery-powered **KidBright32 (ESP32)** in **C++/FreeRTOS** inside a moisture-sealed enclosure, it wakes periodically from deep sleep to sample internal temperature (**LM73**), volatile organic compounds from spoiling food (**SGP40**), and door-open ambient light (**LDR**). It packs and encrypts readings with **AES-128-GCM** and transfers them via BLE GATT to Gateway `'C'`, synchronizing its 64-bit Unix RTC timestamp directly over BLE with zero Wi-Fi overhead.
+**Node `'F'`** is the ultra-low-power internal environmental sensor node for the **FoodWarden** system. Running on a battery-powered **KidBright32 (ESP32)** in **C++/FreeRTOS** inside a moisture-sealed enclosure, it wakes periodically from deep sleep to sample internal temperature (**LM73**), volatile organic compounds from spoiling food (**SGP40**), and door-open ambient light (**LDR**). It packs and encrypts readings with **AES-128-GCM** and transfers them via BLE GATT to Gateway `'C'`, synchronizing its 64-bit Unix RTC timestamp directly over BLE with zero Wi-Fi overhead.
 
 ---
 

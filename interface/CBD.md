@@ -14,7 +14,7 @@ This document defines the bidirectional communication interface between the edge
 ## 1. Node Identification & Topic Topology
 
 ### A. Node ID Standard (`XN`)
-Every participating device in the SmarterFridge ecosystem is uniquely identified by a compact 2-character identifier:
+Every participating device in the FoodWarden ecosystem is uniquely identified by a compact 2-character identifier:
 * **Format:** `XN`
   * `X` = Single-character node type (`'C'` for Gateway, `'D'` for Door Actuator, `'F'` for Internal Sensor)
   * `N` = Numeric instance index (`'0'`, `'1'`, `'2'`, `'3'`, ...)

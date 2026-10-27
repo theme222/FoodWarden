@@ -1,6 +1,6 @@
 # System Communication Interfaces (`interface/`)
 
-This directory contains the central interface contracts defining all inter-device and inter-service communications across the **SmarterFridge** ecosystem.
+This directory contains the central interface contracts defining all inter-device and inter-service communications across the **FoodWarden** ecosystem.
 
 Because the system spans multiple programming languages (**C++/FreeRTOS** on microcontrollers, **Python 3.11** on the edge gateway, and **TypeScript** on the cloud backend), each boundary contract is documented as a markdown specification (`.md`) providing exact memory layouts and schemas in the corresponding languages.
 
@@ -68,7 +68,7 @@ All timestamps across all interfaces must use **Second precision** and (if appli
 All inter-process, inter-device, and over-the-wire binary communications across the system must **always use Little-Endian byte order** for multi-byte numeric primitives (`uint16_t`, `uint32_t`, `uint64_t`, `int16_t`, etc.). Both the ESP32 (Xtensa 32-bit LX6) and Raspberry Pi 4 (ARM Cortex-A72) are natively little-endian architectures; standardizing on little-endian eliminates byte-swapping overhead and guarantees direct struct compatibility. In Python serialization routines, multi-byte formats must explicitly specify little-endian (e.g. `<Q`, `<H`, `<h` via `struct`).
 
 ### F. Bilingual Data Contracts & Localization Policy
-The SmarterFridge system features two primary user-facing interfaces: the local PyQt LCD on Node `'C'` and the mobile-responsive web dashboard on Server `'S'`. To support seamless bilingual user interaction:
+The FoodWarden system features two primary user-facing interfaces: the local PyQt LCD on Node `'C'` and the mobile-responsive web dashboard on Server `'S'`. To support seamless bilingual user interaction:
 * **Bilingual Food Metadata:** Inter-service interfaces communicating food items ([`CBS.md`](CBS.md), [`SBG.md`](SBG.md)) must explicitly provide both Thai and English fields (`name_th`, `name_en`, `storage_recommendation_th`, `storage_recommendation_en`).
 * **Canonical Categories:** Categories are represented by canonical English keys (`Dairy`, `Produce`, `Meat`, etc.) across schemas and database storage, with bidirectional translation tables used by client applications.
 * **Date & Time Localization:** All timestamps use second-precision UTC epochs (`timestamp_s`) and ISO 8601 strings (`YYYY-MM-DD`), localized at the presentation layer (Thai Buddhist Era `พ.ศ.` on Thai interfaces, Western Gregorian `CE` on English interfaces).

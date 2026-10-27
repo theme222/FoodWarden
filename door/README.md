@@ -1,6 +1,6 @@
 # Node 'D': Door Closer Actuator (`door/`)
 
-**Node `'D'`** is the external motorized door-closing and safety reflex node for the **SmarterFridge** system. Running on a 12V-powered **KidBright32 (ESP32)** in **C++/FreeRTOS** mounted on top of the refrigerator, it listens for `CLOSE_DOOR` and `ABORT` commands from Gateway `'C'` over **MQTT over TLS**. It drives a **JGY-370 12V worm gear motor** via a **TB6612FNG** dual H-Bridge driver while enforcing multi-layered hardware and software fail-safes: high-frequency stall/obstruction current sensing (**INA219**), closed-door confirmation (**Close-Range IR Sensor**), home-position **Limit Switch** hardware ISR, and hard motion timeouts.
+**Node `'D'`** is the external motorized door-closing and safety reflex node for the **FoodWarden** system. Running on a 12V-powered **KidBright32 (ESP32)** in **C++/FreeRTOS** mounted on top of the refrigerator, it listens for `CLOSE_DOOR` and `ABORT` commands from Gateway `'C'` over **MQTT over TLS**. It drives a **JGY-370 12V worm gear motor** via a **TB6612FNG** dual H-Bridge driver while enforcing multi-layered hardware and software fail-safes: high-frequency stall/obstruction current sensing (**INA219**), closed-door confirmation (**Close-Range IR Sensor**), home-position **Limit Switch** hardware ISR, and hard motion timeouts.
 
 ---
 

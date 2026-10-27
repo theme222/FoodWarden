@@ -1,7 +1,7 @@
-# SmarterFridge — System Architecture & Summary
+# FoodWarden — System Architecture & Summary
 
 ## 1. Project Overview
-The **SmarterFridge** transforms a standard refrigerator into an intelligent, connected appliance without altering internal fridge circuitry or voiding warranties. It addresses food waste, inventory visibility, and energy efficiency through three core pillars:
+The **FoodWarden** transforms a standard refrigerator into an intelligent, connected appliance without altering internal fridge circuitry or voiding warranties. It addresses food waste, inventory visibility, and energy efficiency through three core pillars:
 1. **AI Food Logging & Expiry Tracking:** Identifies groceries entering and leaving the fridge using edge vision (YOLO) and cloud multimodal AI (Gemini 3.5 Flash Lite orchestrated via Firebase with real-time inventory context).
 2. **Internal Environment & Spoilage Monitoring:** Continuously tracks temperature, door light status, and Volatile Organic Compounds (VOCs) to detect food spoilage early.
 3. **Automated Door Closing with Reflexive Safety:** Automatically shuts the fridge door if left ajar while no human is nearby, backed by multi-layered hardware and software obstruction aborts.
@@ -132,7 +132,7 @@ The system coordinates edge devices, local actuators, and cloud intelligence acr
 
 ## 5. Centralized System Sensor Thresholds & Operational Bounds
 
-This table serves as the canonical single source of truth for all sensor thresholds, operational bounds, alert trigger rules, and hardware fault sentinels across the entire SmarterFridge system:
+This table serves as the canonical single source of truth for all sensor thresholds, operational bounds, alert trigger rules, and hardware fault sentinels across the entire FoodWarden system:
 
 | Node | Sensor Component | Parameter / Unit | Normal Operating Range | Warning Bound | Critical Alarm / Action Threshold | Sustained Condition & Reaction | Hardware Error Sentinel |
 |---|---|---|---|---|---|---|---|
