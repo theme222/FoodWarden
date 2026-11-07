@@ -22,6 +22,11 @@ def main() -> int:
     """Initializes and runs the FoodWarden Gateway application."""
     logger.info("Initializing FoodWarden Camera Logger (Node 'C')...")
 
+    # Prevent opencv-python from overriding PyQt6's platform plugin path on Linux
+    os.environ.pop("QT_QPA_PLATFORM_PLUGIN_PATH", None)
+    if sys.platform.startswith("linux") and not os.getenv("QT_QPA_PLATFORM"):
+        os.environ["QT_QPA_PLATFORM"] = "xcb"
+
     # On headless/Linux without X11 or when specified, allow offscreen
     if os.getenv("QT_QPA_PLATFORM"):
         logger.info("Running with QT_QPA_PLATFORM=%s", os.getenv("QT_QPA_PLATFORM"))

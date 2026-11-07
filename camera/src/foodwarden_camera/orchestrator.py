@@ -86,8 +86,6 @@ class GatewayOrchestrator:
             username=settings.mqtt_username,
             password=settings.mqtt_password,
             ca_cert_path=settings.mqtt_tls_ca_cert,
-            client_cert_path=settings.mqtt_tls_server_cert,
-            client_key_path=settings.mqtt_tls_server_key,
             on_door_event=self._on_door_event,
             on_door_telemetry=self._on_door_telemetry,
             on_connection_change=self._on_mqtt_connection_change,

@@ -98,18 +98,38 @@ class DoorMQTTClient:
             self._client.username_pw_set(self.username, self.password)
 
         # TLS configuration
-        if os.path.exists(self.ca_cert_path):
+        if os.path.exists(self.ca_cert_path) and os.access(self.ca_cert_path, os.R_OK):
             logger.info("Configuring MQTT TLS with CA: %s", self.ca_cert_path)
-            self._client.tls_set(
-                ca_certs=self.ca_cert_path,
-                certfile=self.client_cert_path
-                if self.client_cert_path and os.path.exists(self.client_cert_path)
-                else None,
-                keyfile=self.client_key_path
-                if self.client_key_path and os.path.exists(self.client_key_path)
-                else None,
-                tls_version=ssl.PROTOCOL_TLS_CLIENT,
+            certfile = (
+                self.client_cert_path
+                if self.client_cert_path
+                and os.path.exists(self.client_cert_path)
+                and os.access(self.client_cert_path, os.R_OK)
+                else None
             )
+            keyfile = (
+                self.client_key_path
+                if self.client_key_path
+                and os.path.exists(self.client_key_path)
+                and os.access(self.client_key_path, os.R_OK)
+                else None
+            )
+            try:
+                self._client.tls_set(
+                    ca_certs=self.ca_cert_path,
+                    certfile=certfile if keyfile else None,
+                    keyfile=keyfile if certfile else None,
+                    tls_version=ssl.PROTOCOL_TLS_CLIENT,
+                )
+                # Allow connecting to 127.0.0.1 when cert CN is LAN IP
+                self._client.tls_insecure_set(True)
+            except (PermissionError, ssl.SSLError, OSError) as exc:
+                logger.warning("MQTT TLS cert load warning (%s); using CA-only TLS", exc)
+                self._client.tls_set(
+                    ca_certs=self.ca_cert_path,
+                    tls_version=ssl.PROTOCOL_TLS_CLIENT,
+                )
+                self._client.tls_insecure_set(True)
         else:
             logger.warning(
                 "MQTT CA certificate not found at %s. Running in unencrypted mode for dev/testing.",

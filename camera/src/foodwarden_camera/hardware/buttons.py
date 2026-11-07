@@ -39,18 +39,27 @@ class ButtonController:
     def _init_hardware(self) -> None:
         """Attempts to register interrupt callbacks via the pitop SDK."""
         try:
-            # Check for pitop miniscreen button classes on Raspberry Pi OS
-            from pitop.miniscreen import (  # type: ignore[import-not-found]
-                CancelButton,
-                DownButton,
-                SelectButton,
-                UpButton,
-            )
+            # 1. Try real Pi-top [4] Miniscreen instance buttons or button classes
+            try:
+                from pitop.miniscreen import (  # type: ignore[import-not-found]
+                    CancelButton,
+                    DownButton,
+                    SelectButton,
+                    UpButton,
+                )
 
-            self._up_btn: Any = UpButton()
-            self._down_btn: Any = DownButton()
-            self._select_btn: Any = SelectButton()
-            self._cancel_btn: Any = CancelButton()
+                self._up_btn: Any = UpButton()
+                self._down_btn: Any = DownButton()
+                self._select_btn: Any = SelectButton()
+                self._cancel_btn: Any = CancelButton()
+            except ImportError:
+                from pitop.miniscreen import Miniscreen
+
+                self._miniscreen: Any = Miniscreen()
+                self._up_btn = self._miniscreen.up_button
+                self._down_btn = self._miniscreen.down_button
+                self._select_btn = self._miniscreen.select_button
+                self._cancel_btn = self._miniscreen.cancel_button
 
             self._up_btn.when_pressed = lambda: self.emit_button_press(ButtonType.UP)
             self._down_btn.when_pressed = lambda: self.emit_button_press(ButtonType.DOWN)
@@ -59,7 +68,7 @@ class ButtonController:
 
             self.is_hardware_available = True
             logger.info("Successfully bound Pi-top [4] physical case buttons (Up, Down, O, X)")
-        except (ImportError, RuntimeError, OSError) as exc:
+        except (ImportError, RuntimeError, OSError, Exception) as exc:  # noqa: BLE001
             self.is_hardware_available = False
             logger.info(
                 "Pi-top hardware SDK not available (%s). Running buttons in Dev/Emulation mode.",
