@@ -69,6 +69,9 @@ uv run pytest
 
 ## 3. Pi-top [4] Hardware Deployment (`deploy/`)
 
+* **[`deploy/setup-pitop.sh`](deploy/setup-pitop.sh):** Automated installation script for Raspberry Pi OS Bookworm (64-bit) setting up Mosquitto TLS, system dependencies, Python 3.11 venv, and desktop autostart.
+* **[`deploy/check-hardware.py`](deploy/check-hardware.py):** Hardware diagnostics script verifying Logitech C270 webcam, SEN0018 PIR sensor (GPIO 22), Pi-top physical buttons, Mosquitto MQTTS port `8883`, and BLE adapter.
 * **[`deploy/generate-certs.sh`](deploy/generate-certs.sh):** Generates local Root CA and Mosquitto server TLS certificates (`ca.crt`, `server.crt`, `server.key`).
 * **[`deploy/mosquitto-tls.conf`](deploy/mosquitto-tls.conf):** Mosquitto MQTTS broker configuration on port `8883` with TLS 1.2+ and username/password authentication.
+* **[`deploy/foodwarden-camera.desktop`](deploy/foodwarden-camera.desktop):** XDG Desktop Autostart entry launching the full-screen UI on boot.
 * **[`deploy/foodwarden-camera.service`](deploy/foodwarden-camera.service):** `systemd` service unit for unattended auto-boot and crash recovery into the full-screen PyQt6 UI on Display `:0`.

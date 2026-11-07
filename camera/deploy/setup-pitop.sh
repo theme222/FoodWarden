@@ -26,16 +26,24 @@ echo " FoodWarden Node 'C' Deployment on Pi-top [4]"
 echo " User: $CURRENT_USER | Camera Dir: $CAMERA_DIR | IP: $GATEWAY_IP"
 echo "=================================================================="
 
-# 1. Install OS packages, Thai fonts, Mosquitto, and ARM64 system Python bindings
-echo "[1/6] Installing system packages, Thai fonts, and Mosquitto..."
+# 1. Install OS packages, Minimal X11 (for OS Lite), Thai fonts, Mosquitto, and ARM64 Python bindings
+echo "[1/6] Installing system packages, Minimal X11, Thai fonts, and Mosquitto..."
 sudo apt update
 sudo apt install -y \
     git curl openssl \
+    xserver-xorg xserver-xorg-legacy xinit x11-xserver-utils openbox \
     mosquitto mosquitto-clients \
     fonts-thai-tlwg fonts-noto-core \
-    libgl1 libglib2.0-0 x11-xserver-utils \
+    libgl1 libglib2.0-0 \
     python3-pyqt6 python3-gpiozero python3-lgpio python3-opencv \
     bluez libbluetooth-dev
+
+# Allow starting X11 from SSH or tty1 console autologin
+if [ -f /etc/X11/Xwrapper.config ]; then
+    sudo sed -i 's/allowed_users=console/allowed_users=anybody/' /etc/X11/Xwrapper.config
+else
+    echo "allowed_users=anybody" | sudo tee /etc/X11/Xwrapper.config >/dev/null
+fi
 
 # 2. Ensure uv is installed
 echo "[2/6] Checking uv package manager..."
@@ -82,8 +90,8 @@ if [ ! -f "$CAMERA_DIR/.env" ]; then
     echo "Created $CAMERA_DIR/.env (please review AES_KEY and GATEWAY_TOKEN)."
 fi
 
-# 6. Configure Desktop Autostart for Unattended Power Recovery
-echo "[6/6] Configuring Desktop Autostart..."
+# 6. Configure Kiosk Autostart (supports both OS Lite B2 Console Autologin & Desktop)
+echo "[6/6] Configuring Kiosk Autostart..."
 mkdir -p "$USER_HOME/.config/autostart"
 cat > "$USER_HOME/.config/autostart/foodwarden-camera.desktop" <<EOF
 [Desktop Entry]
@@ -95,10 +103,22 @@ Terminal=false
 X-GNOME-Autostart-enabled=true
 EOF
 
+# Also configure ~/.bash_profile for Raspberry Pi OS Lite (B2 Console Autologin on tty1)
+if ! grep -q "foodwarden-camera" "$USER_HOME/.bash_profile" 2>/dev/null; then
+    cat >> "$USER_HOME/.bash_profile" <<EOF
+
+# Auto-launch FoodWarden UI on 5-inch LCD when logged in on tty1 (B2 Console Autologin)
+if [ -z "\$DISPLAY" ] && [ "\$(tty)" = "/dev/tty1" ]; then
+    cd "$CAMERA_DIR"
+    exec startx "$USER_HOME/.local/bin/uv" run foodwarden-camera -- :0 vt1
+fi
+EOF
+fi
+
 echo "=================================================================="
 echo " Deployment Complete!"
 echo " - Mosquitto TLS Broker active on $GATEWAY_IP:8883"
 echo " - CA Certificate for Node 'D': /etc/mosquitto/certs/ca.crt"
-echo " - Run manually: cd $CAMERA_DIR && uv run foodwarden-camera"
+echo " - Run manually from SSH: cd $CAMERA_DIR && startx ~/.local/bin/uv run foodwarden-camera -- :0 vt1"
 echo "=================================================================="
 

@@ -58,6 +58,9 @@ class GatewayOrchestrator:
             on_wake=self._on_pir_wake,
             on_sleep=self._on_pir_sleep,
         )
+        # Any physical button press also wakes display & resets inactivity timer
+        for btn in self.buttons._callbacks:
+            self.buttons.register_callback(btn, self.pir.wake)
 
         # 2. Vision Pipeline
         self.camera = WebcamCapture(device_index=settings.webcam_index)

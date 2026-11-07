@@ -61,6 +61,13 @@ class PIRController:
 
     def _init_hardware(self) -> None:
         """Attempts to bind to hardware GPIO pin on Raspberry Pi OS."""
+        if self.gpio_pin < 0:
+            self.is_hardware_available = False
+            logger.info(
+                "PIR sensor disabled (gpio_pin=%d). Display will stay awake.", self.gpio_pin
+            )
+            return
+
         try:
             from gpiozero import DigitalInputDevice  # type: ignore[import-not-found]
 
@@ -98,7 +105,7 @@ class PIRController:
             True if display was put to sleep, False otherwise.
         """
         with self._lock:
-            if not self._is_display_awake:
+            if self.gpio_pin < 0 or not self._is_display_awake:
                 return False
 
             if self.idle_duration_s >= self.inactivity_timeout_s:
