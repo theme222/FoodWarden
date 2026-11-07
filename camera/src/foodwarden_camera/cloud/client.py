@@ -7,6 +7,8 @@ sensor telemetry batch upload, and door event logging per CBS.md.
 from __future__ import annotations
 
 import logging
+import time
+from datetime import datetime, timedelta
 
 import httpx
 
@@ -14,6 +16,7 @@ from foodwarden_camera.models.cloud_cbs import (
     CheckInCommitPayload,
     CheckInCommitResult,
     CheckInDraftResult,
+    CheckOutCandidate,
     CheckOutCommitPayload,
     CheckOutCommitResult,
     CheckOutDraftResult,
@@ -32,10 +35,12 @@ class CloudClient:
         base_url: str = "https://asia-southeast1-foodwarden-app.cloudfunctions.net/api",
         gateway_token: str = "",
         timeout_s: float = 20.0,
+        mock_cloud: bool = False,
     ) -> None:
         self.base_url = base_url.rstrip("/")
         self.gateway_token = gateway_token
         self.timeout_s = timeout_s
+        self.mock_cloud = mock_cloud
 
     @property
     def _headers(self) -> dict[str, str]:
@@ -63,6 +68,23 @@ class CloudClient:
         Returns:
             (success, draft_result_or_none, error_message)
         """
+        if self.mock_cloud:
+            today = datetime.now()
+            mock_draft = CheckInDraftResult(
+                name_th="นมสดพาสเจอร์ไรส์",
+                name_en="Pasteurized Whole Milk",
+                category="Dairy",
+                category_th="นมและผลิตภัณฑ์นม",
+                estimated_shelf_life_days=7,
+                estimated_expiry_date=(today + timedelta(days=7)).strftime("%Y-%m-%d"),
+                storage_recommendation_th="เก็บในช่องแช่เย็นหลัก (2-4 °C)",
+                storage_recommendation_en="Store in main refrigerator shelf (2-4 °C)",
+                image_storage_path=f"mock_storage/capture_{int(time.time())}.jpg",
+                confidence=0.96,
+            )
+            logger.info("[MOCK_CLOUD] Check-in draft generated: %s", mock_draft.name_en)
+            return True, mock_draft, ""
+
         url = "/inventory/checkin/draft"
         files = {
             "image": ("capture.jpg", image_jpeg_bytes, "image/jpeg"),
@@ -99,6 +121,15 @@ class CloudClient:
         self, payload: CheckInCommitPayload
     ) -> tuple[bool, CheckInCommitResult | None, str]:
         """Commits finalized grocery check-in item to Firestore."""
+        if self.mock_cloud:
+            result = CheckInCommitResult(
+                item_id=f"mock-item-{int(time.time())}",
+                created_at=int(time.time()),
+                status="COMMITTED",
+            )
+            logger.info("[MOCK_CLOUD] Check-in committed: %s (%s)", payload.name_en, result.item_id)
+            return True, result, ""
+
         url = "/inventory/checkin"
         try:
             with self._get_client() as client:
@@ -126,6 +157,40 @@ class CloudClient:
         self, image_jpeg_bytes: bytes
     ) -> tuple[bool, CheckOutDraftResult | None, str]:
         """Uploads JPEG to request FEFO candidate matches from fridge inventory."""
+        if self.mock_cloud:
+            today = datetime.now()
+            candidates = [
+                CheckOutCandidate(
+                    item_id="item-milk-01",
+                    name_th="นมสดพาสเจอร์ไรส์",
+                    name_en="Pasteurized Whole Milk",
+                    category="Dairy",
+                    category_th="นมและผลิตภัณฑ์นม",
+                    expiry_date=(today + timedelta(days=2)).strftime("%Y-%m-%d"),
+                    confidence=0.94,
+                ),
+                CheckOutCandidate(
+                    item_id="item-yogurt-02",
+                    name_th="โยเกิร์ตรสธรรมชาติ",
+                    name_en="Plain Yogurt",
+                    category="Dairy",
+                    category_th="นมและผลิตภัณฑ์นม",
+                    expiry_date=(today + timedelta(days=5)).strftime("%Y-%m-%d"),
+                    confidence=0.88,
+                ),
+                CheckOutCandidate(
+                    item_id="item-eggs-03",
+                    name_th="ไข่ไก่สดเบอร์ 2",
+                    name_en="Fresh Chicken Eggs",
+                    category="Poultry",
+                    category_th="ไข่และเนื้อสัตว์",
+                    expiry_date=(today + timedelta(days=12)).strftime("%Y-%m-%d"),
+                    confidence=0.82,
+                ),
+            ]
+            logger.info("[MOCK_CLOUD] Check-out draft returned %d candidates", len(candidates))
+            return True, CheckOutDraftResult(candidates=candidates), ""
+
         url = "/inventory/checkout/draft"
         files = {
             "image": ("capture.jpg", image_jpeg_bytes, "image/jpeg"),
@@ -152,6 +217,15 @@ class CloudClient:
         self, payload: CheckOutCommitPayload
     ) -> tuple[bool, CheckOutCommitResult | None, str]:
         """Commits hard-delete removal of checked-out grocery item."""
+        if self.mock_cloud:
+            result = CheckOutCommitResult(
+                item_id=payload.item_id,
+                removed_at=int(time.time()),
+                status="REMOVED",
+            )
+            logger.info("[MOCK_CLOUD] Check-out committed: %s", payload.item_id)
+            return True, result, ""
+
         url = "/inventory/checkout"
         try:
             with self._get_client() as client:
@@ -177,6 +251,10 @@ class CloudClient:
 
     def sync_telemetry(self, payload: TelemetrySyncPayload) -> bool:
         """Uploads a batch of telemetry sensor readings to Server 'S'."""
+        if self.mock_cloud:
+            logger.debug("[MOCK_CLOUD] Synced %d telemetry readings", len(payload.telemetry))
+            return True
+
         url = "/telemetry"
         try:
             with self._get_client() as client:
@@ -192,6 +270,10 @@ class CloudClient:
 
     def sync_door_event(self, payload: DoorEventSyncPayload) -> bool:
         """Uploads a discrete door actuation safety event to Server 'S'."""
+        if self.mock_cloud:
+            logger.info("[MOCK_CLOUD] Synced door event: %s", payload.event_type)
+            return True
+
         url = "/events/door"
         try:
             with self._get_client() as client:

@@ -67,6 +67,10 @@ class GatewaySettings(BaseModel):
         default=os.getenv("GATEWAY_TOKEN", ""),
         description="Permanent Bearer API token for Firebase Cloud Functions",
     )
+    mock_cloud: bool = Field(
+        default=os.getenv("MOCK_CLOUD", "false").lower() in ("true", "1", "yes"),
+        description="Enable simulated cloud responses for local testing without backend",
+    )
 
     # Local Offline SQLite Queue Path (Rubric E4 Store-and-Forward)
     sqlite_db_path: str = Field(

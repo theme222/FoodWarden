@@ -9,6 +9,7 @@ from __future__ import annotations
 import logging
 import threading
 import time
+from datetime import datetime, timedelta
 from typing import Any
 
 from foodwarden_camera.ble.receiver import BLEReceiver
@@ -65,6 +66,7 @@ class GatewayOrchestrator:
         self.cloud_client = CloudClient(
             base_url=settings.firebase_api_base_url,
             gateway_token=settings.gateway_token,
+            mock_cloud=settings.mock_cloud,
         )
         self.sync_manager = CloudSyncManager(self.cloud_client, self.queue)
 
@@ -332,6 +334,23 @@ class GatewayOrchestrator:
             logger.warning("Check-in draft failed (%s); buffering offline capture", err_msg)
             self.sync_manager.enqueue_offline_checkin(jpeg_bytes)
             self.window.show_offline_warning()
+
+            # Offline Check-In Screen per GOAL.md §3:
+            # Show captured photo, allow user to adjust expiry date, and run 5s countdown
+            offline_expiry = (datetime.now() + timedelta(days=7)).strftime("%Y-%m-%d")
+            offline_draft = CheckInDraftResult(
+                name_th="บันทึกภาพออฟไลน์ (รอเชื่อมต่อคลาวด์)",
+                name_en="Offline Capture (Pending Cloud Sync)",
+                category="General",
+                category_th="ทั่วไป (ออฟไลน์)",
+                estimated_shelf_life_days=7,
+                estimated_expiry_date=offline_expiry,
+                storage_recommendation_th="จะส่งให้ AI วิเคราะห์อัตโนมัติเมื่อต่อเน็ต",
+                storage_recommendation_en="Auto-analyzed by AI once online",
+                image_storage_path="local_offline",
+                confidence=0.0,
+            )
+            self.window.show_checkin_draft(offline_draft, jpeg_bytes)
 
     def handle_commit_checkin(self, draft: CheckInDraftResult, expiry_date: str) -> None:
         """Triggered when user confirms check-in item on LCD (or 5s countdown elapses)."""
