@@ -3,4 +3,3 @@
 from foodwarden_camera.ui.main_window import FoodWardenMainWindow
 
 __all__ = ["FoodWardenMainWindow"]
-

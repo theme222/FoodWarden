@@ -9,6 +9,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import struct
+import threading
 import time
 from collections.abc import Callable
 from typing import Any
@@ -103,6 +104,7 @@ class BLEReceiver:
         self._client: BleakClient | None = None
         self._running: bool = False
         self._connected: bool = False
+        self._thread: threading.Thread | None = None
 
     @property
     def is_connected(self) -> bool:
@@ -233,8 +235,33 @@ class BLEReceiver:
                 logger.warning("Error in BLE run loop: %s", exc)
                 await asyncio.sleep(backoff_s)
                 backoff_s = min(backoff_s * 1.5, 30.0)
+            except Exception as exc:  # noqa: BLE001
+                logger.warning("Unexpected BLE adapter error: %s", exc)
+                await asyncio.sleep(backoff_s)
+                backoff_s = min(backoff_s * 1.5, 30.0)
             await asyncio.sleep(1.0)
+
+    def start(self) -> None:
+        """Starts the BLE GATT scanner loop in a background daemon thread."""
+        if self._running:
+            return
+        self._running = True
+        self._thread = threading.Thread(
+            target=self._run_thread_entry,
+            daemon=True,
+            name="BLEReceiverLoop",
+        )
+        self._thread.start()
+        logger.info("BLE GATT receiver background thread started")
+
+    def _run_thread_entry(self) -> None:
+        try:
+            asyncio.run(self.run_loop())
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("BLE background loop exited: %s", exc)
 
     def stop(self) -> None:
         """Stops the BLE scanning loop."""
         self._running = False
+        if self._thread is not None and self._thread.is_alive():
+            self._thread.join(timeout=2.0)

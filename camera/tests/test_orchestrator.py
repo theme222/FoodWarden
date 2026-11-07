@@ -12,7 +12,12 @@ from PyQt6.QtWidgets import QApplication
 from foodwarden_camera.config import GatewaySettings
 from foodwarden_camera.models.ble_fuc import SensorPacket, SensorSample, TelemetryHeader
 from foodwarden_camera.models.cloud_cbs import CheckInDraftResult
-from foodwarden_camera.models.mqtt_cbd import ClosingEventData, DoorEventEnvelope, SuccessEventData
+from foodwarden_camera.models.mqtt_cbd import (
+    ClosingEventData,
+    DoorEventEnvelope,
+    DoorTelemetryPayload,
+    SuccessEventData,
+)
 from foodwarden_camera.orchestrator import GatewayOrchestrator
 
 os.environ["QT_QPA_PLATFORM"] = "offscreen"
@@ -138,3 +143,31 @@ def test_ble_telemetry_handling(test_orchestrator: GatewayOrchestrator) -> None:
     assert "3.2 °C" in test_orchestrator.window.idle_screen.temp_label.text()
     # Verified telemetry forwarded to sync manager
     test_orchestrator.sync_manager.send_or_enqueue_telemetry.assert_called_once()
+
+
+def test_ir_light_mismatch_alert(test_orchestrator: GatewayOrchestrator) -> None:
+    # 1. Node 'F' reports internal light is ON (light_ldr = 250 >= 100)
+    sample = SensorSample.from_raw(1729930000, 400, 100, 250)
+    header = TelemetryHeader(version=1, node_id="F0", session_salt=b"12345678", counter=1)
+    packet = SensorPacket(header=header, samples=[sample])
+    test_orchestrator._on_ble_telemetry(packet)
+    assert test_orchestrator._latest_ldr_light == 250
+
+    # 2. Node 'D' reports door is closed via IR sensor (ir_closed = True)
+    test_orchestrator.mqtt.is_door_open = False
+    test_orchestrator.mqtt.door_ajar_duration_s = 0.0
+    telem = DoorTelemetryPayload(
+        node_id="D0",
+        timestamp=1729930005,
+        state="IDLE_CLOSED",
+        limit_switch_home=True,
+        ir_closed=True,
+        current_ma=0,
+    )
+    test_orchestrator._on_door_telemetry(telem)
+
+    # 3. Verify IR_LIGHT_MISMATCH_ERROR event was alerted upstream
+    test_orchestrator.sync_manager.send_or_enqueue_door_event.assert_called_once()
+    call_kwargs = test_orchestrator.sync_manager.send_or_enqueue_door_event.call_args.kwargs
+    assert call_kwargs["event_type"] == "IR_LIGHT_MISMATCH_ERROR"
+    assert call_kwargs["details"]["ldr_light"] == 250

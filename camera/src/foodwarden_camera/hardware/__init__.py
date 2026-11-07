@@ -4,4 +4,3 @@ from foodwarden_camera.hardware.buttons import ButtonController, ButtonType
 from foodwarden_camera.hardware.pir import PIRController
 
 __all__ = ["ButtonController", "ButtonType", "PIRController"]
-

@@ -10,7 +10,7 @@ import logging
 from collections.abc import Callable
 from typing import Any
 
-from PyQt6.QtCore import Qt
+from PyQt6.QtCore import Qt, QThread, pyqtSignal
 from PyQt6.QtGui import QKeyEvent
 from PyQt6.QtWidgets import (
     QMainWindow,
@@ -36,6 +36,18 @@ logger = logging.getLogger(__name__)
 
 class FoodWardenMainWindow(QMainWindow):
     """Main window hosting the stacked screens on 800x480 resolution."""
+
+    # Cross-thread Qt signals for safe background thread -> GUI updates
+    _sig_button_up = pyqtSignal()
+    _sig_button_down = pyqtSignal()
+    _sig_button_select = pyqtSignal()
+    _sig_button_cancel = pyqtSignal()
+    _sig_update_frame = pyqtSignal(object)
+    _sig_update_telemetry = pyqtSignal(object, object, object)
+    _sig_update_door_state = pyqtSignal(bool, float)
+    _sig_update_wifi_status = pyqtSignal(bool)
+    _sig_person_abort_alert = pyqtSignal()
+    _sig_offline_warning = pyqtSignal()
 
     def __init__(
         self,
@@ -101,10 +113,24 @@ class FoodWardenMainWindow(QMainWindow):
 
     def _bind_button_controller(self) -> None:
         """Connects Pi-top button controller events to UI state machine."""
+        self._sig_button_up.connect(self._handle_button_up)
+        self._sig_button_down.connect(self._handle_button_down)
+        self._sig_button_select.connect(self._handle_button_select)
+        self._sig_button_cancel.connect(self._handle_button_cancel)
+        self._sig_update_frame.connect(self.idle_screen.update_frame)
+        self._sig_update_telemetry.connect(self.idle_screen.update_telemetry)
+        self._sig_update_door_state.connect(self.idle_screen.update_door_state)
+        self._sig_update_wifi_status.connect(self.idle_screen.update_wifi_status)
+        self._sig_person_abort_alert.connect(self.alert_banner.show_person_abort_alert)
+        self._sig_offline_warning.connect(self.alert_banner.show_offline_warning)
+
         self.button_controller.register_callback(ButtonType.UP, self._on_button_up)
         self.button_controller.register_callback(ButtonType.DOWN, self._on_button_down)
         self.button_controller.register_callback(ButtonType.SELECT, self._on_button_select)
         self.button_controller.register_callback(ButtonType.CANCEL, self._on_button_cancel)
+
+    def _is_gui_thread(self) -> bool:
+        return QThread.currentThread() == self.thread()
 
     # ==========================================================================
     # Screen Transitions
@@ -133,6 +159,12 @@ class FoodWardenMainWindow(QMainWindow):
 
     def _on_button_select(self) -> None:
         """Handler for 'O' (Select/Confirm)."""
+        if not self._is_gui_thread():
+            self._sig_button_select.emit()
+            return
+        self._handle_button_select()
+
+    def _handle_button_select(self) -> None:
         idx = self.stack.currentIndex()
         if idx == 0:
             # Idle screen -> Trigger Check-In capture
@@ -146,6 +178,12 @@ class FoodWardenMainWindow(QMainWindow):
 
     def _on_button_cancel(self) -> None:
         """Handler for 'X' (Cancel/Back)."""
+        if not self._is_gui_thread():
+            self._sig_button_cancel.emit()
+            return
+        self._handle_button_cancel()
+
+    def _handle_button_cancel(self) -> None:
         idx = self.stack.currentIndex()
         if idx == 0:
             # Idle screen -> Trigger Check-Out capture
@@ -159,6 +197,12 @@ class FoodWardenMainWindow(QMainWindow):
 
     def _on_button_up(self) -> None:
         """Handler for '▲' (Up)."""
+        if not self._is_gui_thread():
+            self._sig_button_up.emit()
+            return
+        self._handle_button_up()
+
+    def _handle_button_up(self) -> None:
         idx = self.stack.currentIndex()
         if idx == 1:
             self.checkin_screen.handle_up()
@@ -167,6 +211,12 @@ class FoodWardenMainWindow(QMainWindow):
 
     def _on_button_down(self) -> None:
         """Handler for '▼' (Down)."""
+        if not self._is_gui_thread():
+            self._sig_button_down.emit()
+            return
+        self._handle_button_down()
+
+    def _handle_button_down(self) -> None:
         idx = self.stack.currentIndex()
         if idx == 1:
             self.checkin_screen.handle_down()
@@ -215,19 +265,37 @@ class FoodWardenMainWindow(QMainWindow):
     # ==========================================================================
 
     def update_camera_frame(self, frame_bgr: Any) -> None:
-        self.idle_screen.update_frame(frame_bgr)
+        if self._is_gui_thread():
+            self.idle_screen.update_frame(frame_bgr)
+        else:
+            self._sig_update_frame.emit(frame_bgr)
 
     def update_telemetry(self, temp_c: float | None, voc: int | None, light: int | None) -> None:
-        self.idle_screen.update_telemetry(temp_c, voc, light)
+        if self._is_gui_thread():
+            self.idle_screen.update_telemetry(temp_c, voc, light)
+        else:
+            self._sig_update_telemetry.emit(temp_c, voc, light)
 
     def update_door_state(self, is_open: bool, ajar_duration_s: float = 0.0) -> None:
-        self.idle_screen.update_door_state(is_open, ajar_duration_s)
+        if self._is_gui_thread():
+            self.idle_screen.update_door_state(is_open, ajar_duration_s)
+        else:
+            self._sig_update_door_state.emit(is_open, ajar_duration_s)
 
     def update_wifi_status(self, is_online: bool) -> None:
-        self.idle_screen.update_wifi_status(is_online)
+        if self._is_gui_thread():
+            self.idle_screen.update_wifi_status(is_online)
+        else:
+            self._sig_update_wifi_status.emit(is_online)
 
     def show_person_abort_alert(self) -> None:
-        self.alert_banner.show_person_abort_alert()
+        if self._is_gui_thread():
+            self.alert_banner.show_person_abort_alert()
+        else:
+            self._sig_person_abort_alert.emit()
 
     def show_offline_warning(self) -> None:
-        self.alert_banner.show_offline_warning()
+        if self._is_gui_thread():
+            self.alert_banner.show_offline_warning()
+        else:
+            self._sig_offline_warning.emit()

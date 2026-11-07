@@ -2,7 +2,7 @@
 
 **Node `'C'`** is the local edge processor and communication gateway for the **FoodWarden** system. It provides one of the two primary user-facing interfaces in the ecosystem, running a full-screen **PyQt6** application on the fridge-mounted 5-inch LCD (`800×480`) controlled by the 4 physical Pi-top buttons (`Up`, `Down`, `O`, `X`). All on-screen instructions, prompts, and food items are displayed **by default in Thai with an English translation**.
 
-Running on a **Pi-top [4] (Raspberry Pi 4)** in **Python 3.11**, Node `'C'` captures food items via a 720p USB webcam, runs local **YOLO11 Nano (`yolo11n.pt`)** object detection for grocery cropping and real-time human presence detection, receives and decrypts `AES-128-GCM` BLE GATT telemetry from Node `'F'`, hosts the local **Mosquitto MQTT over TLS** broker (`port 8883`), and synchronizes data with the Firebase backend (Server `'S'`).
+Running on a **Pi-top [4] (Raspberry Pi 4)** in **Python 3.11**, Node `'C'` captures food items via a 720p USB webcam, runs local **YOLO26 Nano (`yolo26n.pt`)** object detection for grocery cropping and real-time human presence detection, receives and decrypts `AES-128-GCM` BLE GATT telemetry from Node `'F'`, hosts the local **Mosquitto MQTT over TLS** broker (`port 8883`), and synchronizes data with the Firebase backend (Server `'S'`).
 
 ---
 
@@ -64,3 +64,11 @@ uv run mypy src
 # Run unit and integration test suite
 uv run pytest
 ```
+
+---
+
+## 3. Pi-top [4] Hardware Deployment (`deploy/`)
+
+* **[`deploy/generate-certs.sh`](deploy/generate-certs.sh):** Generates local Root CA and Mosquitto server TLS certificates (`ca.crt`, `server.crt`, `server.key`).
+* **[`deploy/mosquitto-tls.conf`](deploy/mosquitto-tls.conf):** Mosquitto MQTTS broker configuration on port `8883` with TLS 1.2+ and username/password authentication.
+* **[`deploy/foodwarden-camera.service`](deploy/foodwarden-camera.service):** `systemd` service unit for unattended auto-boot and crash recovery into the full-screen PyQt6 UI on Display `:0`.

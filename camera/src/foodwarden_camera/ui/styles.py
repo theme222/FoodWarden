@@ -125,4 +125,3 @@ QListWidget::item:selected {
     color: #FFFFFF;
 }
 """
-

@@ -86,4 +86,3 @@ class AlertBanner(QFrame):
             is_critical=False,
             duration_ms=5000,
         )
-

@@ -97,6 +97,7 @@ class GatewayOrchestrator:
 
         # Safety & State Tracking
         self._is_door_closing: bool = False
+        self._latest_ldr_light: int | None = None
         self._running: bool = False
         self._safety_thread: threading.Thread | None = None
         self._ui_stream_thread: threading.Thread | None = None
@@ -119,8 +120,9 @@ class GatewayOrchestrator:
         # Start Cloud Sync Manager
         self.sync_manager.start_background_sync(interval_s=20.0)
 
-        # Start Local MQTT Broker Client
+        # Start Local MQTT Broker Client & BLE GATT Receiver
         self.mqtt.start()
+        self.ble.start()
 
         # Start Safety Loop Thread
         self._safety_thread = threading.Thread(
@@ -178,6 +180,7 @@ class GatewayOrchestrator:
 
         # Update door open tracking if light sensor reports lit (LDR >= 100)
         if latest_sample.light_ldr is not None:
+            self._latest_ldr_light = latest_sample.light_ldr
             is_door_light_on = latest_sample.light_ldr >= 100
             self.mqtt.set_door_state(is_door_light_on)
 
@@ -213,6 +216,30 @@ class GatewayOrchestrator:
             is_open=self.mqtt.is_door_open,
             ajar_duration_s=self.mqtt.door_ajar_duration_s,
         )
+
+        # IR vs. Light Sensor Mismatch check (GOAL.md §3):
+        # If Node 'D' IR sensor thinks door is closed (ir_closed=True) while
+        # Node 'F' LDR sensor reports internal light is still ON (>= 100), alert upstream.
+        if (
+            telem.ir_closed is True
+            and self._latest_ldr_light is not None
+            and self._latest_ldr_light >= 100
+        ):
+            logger.error(
+                "IR Light Mismatch: Node 'D' reports door closed (ir_closed=True), "
+                "but Node 'F' LDR light is still on (light=%d). Alerting Server 'S'.",
+                self._latest_ldr_light,
+            )
+            self.sync_manager.send_or_enqueue_door_event(
+                node_id=telem.node_id,
+                event_type="IR_LIGHT_MISMATCH_ERROR",
+                timestamp=telem.timestamp,
+                details={
+                    "ir_closed": telem.ir_closed,
+                    "ldr_light": self._latest_ldr_light,
+                    "reason": "Internal fridge light ON while IR sensor reports door closed",
+                },
+            )
 
     def _on_mqtt_connection_change(self, connected: bool) -> None:
         logger.info("Mosquitto broker connection changed: %s", connected)
