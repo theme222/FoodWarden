@@ -83,7 +83,7 @@ sudo systemctl restart mosquitto || {
 echo "[4/6] Setting up Python 3.11 environment in $CAMERA_DIR..."
 cd "$CAMERA_DIR"
 uv venv --python 3.11 --system-site-packages --allow-existing
-uv sync
+uv sync --inexact
 
 # Install pitop SDK & gpiozero inside venv if available on Pi-top OS
 uv pip install gpiozero rpi-lgpio || true
@@ -107,7 +107,7 @@ cat > "$USER_HOME/.config/autostart/foodwarden-camera.desktop" <<EOF
 Type=Application
 Name=FoodWarden Camera Gateway (Node C)
 Comment=Auto-start FoodWarden 5-inch LCD UI on boot
-Exec=/bin/bash -c "cd $CAMERA_DIR && $USER_HOME/.local/bin/uv run foodwarden-camera"
+Exec=/bin/bash -c "cd $CAMERA_DIR && $USER_HOME/.local/bin/uv run --no-sync foodwarden-camera"
 Terminal=false
 X-GNOME-Autostart-enabled=true
 EOF
@@ -119,7 +119,7 @@ if ! grep -q "foodwarden-camera" "$USER_HOME/.bash_profile" 2>/dev/null; then
 # Auto-launch FoodWarden UI on 5-inch LCD when logged in on tty1 (B2 Console Autologin)
 if [ -z "\$DISPLAY" ] && [ "\$(tty)" = "/dev/tty1" ]; then
     cd "$CAMERA_DIR"
-    exec startx "$USER_HOME/.local/bin/uv" run foodwarden-camera -- :0 vt1
+    exec startx "$USER_HOME/.local/bin/uv" run --no-sync foodwarden-camera -- :0 vt1
 fi
 EOF
 fi
@@ -128,6 +128,6 @@ echo "=================================================================="
 echo " Deployment Complete!"
 echo " - Mosquitto TLS Broker active on $GATEWAY_IP:8883"
 echo " - CA Certificate for Node 'D': /etc/mosquitto/certs/ca.crt"
-echo " - Run manually from SSH: cd $CAMERA_DIR && startx ~/.local/bin/uv run foodwarden-camera -- :0 vt1"
+echo " - Run manually: cd $CAMERA_DIR && ~/.local/bin/uv run --no-sync foodwarden-camera"
 echo "=================================================================="
 
