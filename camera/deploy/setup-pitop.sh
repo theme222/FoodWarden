@@ -1,0 +1,104 @@
+#!/usr/bin/env bash
+# ==============================================================================
+# Automated Setup Script for FoodWarden Node 'C' on Pi-top [4] (Bookworm 64-bit)
+# Usage:
+#   cd ~/FoodWarden/camera/deploy
+#   chmod +x setup-pitop.sh
+#   ./setup-pitop.sh [MQTT_PASSWORD]
+# ==============================================================================
+
+set -euo pipefail
+
+MQTT_PASS="${1:-foodwarden123}"
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+CAMERA_DIR="$(dirname "$SCRIPT_DIR")"
+CURRENT_USER="$(whoami)"
+USER_HOME="$HOME"
+
+# Detect local IPv4 address for TLS certificate SAN
+GATEWAY_IP="$(hostname -I | awk '{print $1}')"
+if [ -z "$GATEWAY_IP" ]; then
+    GATEWAY_IP="127.0.0.1"
+fi
+
+echo "=================================================================="
+echo " FoodWarden Node 'C' Deployment on Pi-top [4]"
+echo " User: $CURRENT_USER | Camera Dir: $CAMERA_DIR | IP: $GATEWAY_IP"
+echo "=================================================================="
+
+# 1. Install OS packages, Thai fonts, Mosquitto, and ARM64 system Python bindings
+echo "[1/6] Installing system packages, Thai fonts, and Mosquitto..."
+sudo apt update
+sudo apt install -y \
+    git curl openssl \
+    mosquitto mosquitto-clients \
+    fonts-thai-tlwg fonts-noto-core \
+    libgl1 libglib2.0-0 x11-xserver-utils \
+    python3-pyqt6 python3-gpiozero python3-lgpio python3-opencv \
+    bluez libbluetooth-dev
+
+# 2. Ensure uv is installed
+echo "[2/6] Checking uv package manager..."
+if ! command -v uv >/dev/null 2>&1 && [ ! -f "$USER_HOME/.local/bin/uv" ]; then
+    curl -LsSf https://astral.sh/uv/install.sh | sh
+fi
+export PATH="$USER_HOME/.local/bin:$PATH"
+
+# 3. Generate Mosquitto TLS Certificates and configure Port 8883
+echo "[3/6] Configuring Mosquitto TLS Broker on port 8883..."
+cd "$SCRIPT_DIR"
+chmod +x generate-certs.sh
+./generate-certs.sh "$GATEWAY_IP" "$SCRIPT_DIR/certs"
+
+sudo mkdir -p /etc/mosquitto/certs
+sudo cp "$SCRIPT_DIR/certs/ca.crt" "$SCRIPT_DIR/certs/server.crt" "$SCRIPT_DIR/certs/server.key" /etc/mosquitto/certs/
+sudo chown -R mosquitto:mosquitto /etc/mosquitto/certs
+sudo chmod 600 /etc/mosquitto/certs/server.key
+sudo chmod 644 /etc/mosquitto/certs/server.crt /etc/mosquitto/certs/ca.crt
+
+sudo cp "$SCRIPT_DIR/mosquitto-tls.conf" /etc/mosquitto/conf.d/foodwarden-tls.conf
+sudo mosquitto_passwd -b -c /etc/mosquitto/passwd foodwarden_client "$MQTT_PASS"
+sudo chown mosquitto:mosquitto /etc/mosquitto/passwd
+sudo chmod 600 /etc/mosquitto/passwd
+
+sudo systemctl enable mosquitto
+sudo systemctl restart mosquitto
+
+# 4. Create Python 3.11 virtualenv (inheriting ARM64 system packages) & sync uv
+echo "[4/6] Setting up Python 3.11 environment in $CAMERA_DIR..."
+cd "$CAMERA_DIR"
+uv venv --python 3.11 --system-site-packages --allow-existing
+uv sync
+
+# Install pitop SDK & gpiozero inside venv if available on Pi-top OS
+uv pip install gpiozero rpi-lgpio || true
+uv pip install pitop || echo "Note: pitop SDK using system site-packages or fallback mode."
+
+# 5. Initialize .env if not already created
+echo "[5/6] Checking .env file..."
+if [ ! -f "$CAMERA_DIR/.env" ]; then
+    cp "$CAMERA_DIR/../.env.example" "$CAMERA_DIR/.env"
+    sed -i "s|MQTT_PASSWORD=YOUR_MQTT_PASSWORD|MQTT_PASSWORD=$MQTT_PASS|g" "$CAMERA_DIR/.env"
+    echo "Created $CAMERA_DIR/.env (please review AES_KEY and GATEWAY_TOKEN)."
+fi
+
+# 6. Configure Desktop Autostart for Unattended Power Recovery
+echo "[6/6] Configuring Desktop Autostart..."
+mkdir -p "$USER_HOME/.config/autostart"
+cat > "$USER_HOME/.config/autostart/foodwarden-camera.desktop" <<EOF
+[Desktop Entry]
+Type=Application
+Name=FoodWarden Camera Gateway (Node C)
+Comment=Auto-start FoodWarden 5-inch LCD UI on boot
+Exec=/bin/bash -c "cd $CAMERA_DIR && $USER_HOME/.local/bin/uv run foodwarden-camera"
+Terminal=false
+X-GNOME-Autostart-enabled=true
+EOF
+
+echo "=================================================================="
+echo " Deployment Complete!"
+echo " - Mosquitto TLS Broker active on $GATEWAY_IP:8883"
+echo " - CA Certificate for Node 'D': /etc/mosquitto/certs/ca.crt"
+echo " - Run manually: cd $CAMERA_DIR && uv run foodwarden-camera"
+echo "=================================================================="
+

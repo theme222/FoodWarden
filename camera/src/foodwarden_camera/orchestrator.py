@@ -7,6 +7,8 @@ Cloud HTTPS client, PIR motion power manager, and PyQt6 bilingual user interface
 from __future__ import annotations
 
 import logging
+import subprocess
+import sys
 import threading
 import time
 from datetime import datetime, timedelta
@@ -248,9 +250,31 @@ class GatewayOrchestrator:
 
     def _on_pir_wake(self) -> None:
         logger.info("PIR detected human: waking display")
+        if sys.platform.startswith("linux"):
+            try:
+                subprocess.run(
+                    ["xset", "dpms", "force", "on"],
+                    check=False,
+                    timeout=3.0,
+                    stdout=subprocess.DEVNULL,
+                    stderr=subprocess.DEVNULL,
+                )
+            except (OSError, subprocess.SubprocessError) as exc:
+                logger.debug("Could not invoke xset dpms force on: %s", exc)
 
     def _on_pir_sleep(self) -> None:
         logger.info("PIR timeout reached: putting display to sleep")
+        if sys.platform.startswith("linux"):
+            try:
+                subprocess.run(
+                    ["xset", "dpms", "force", "off"],
+                    check=False,
+                    timeout=3.0,
+                    stdout=subprocess.DEVNULL,
+                    stderr=subprocess.DEVNULL,
+                )
+            except (OSError, subprocess.SubprocessError) as exc:
+                logger.debug("Could not invoke xset dpms force off: %s", exc)
 
     # ==========================================================================
     # Door Safety Reflex Loop
