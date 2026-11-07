@@ -41,6 +41,7 @@ build-backend = "uv_build"
 [tool.ruff]
 target-version = "py311"
 line-length = 100
+extend-exclude = ["*.md"]
 
 [tool.mypy]
 python_version = "3.11"

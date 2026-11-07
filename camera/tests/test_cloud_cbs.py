@@ -76,4 +76,3 @@ def test_telemetry_sync_payload() -> None:
     data = payload.model_dump()
     assert data["node_id"] == "F0"
     assert len(data["telemetry"]) == 2
-
