@@ -51,6 +51,13 @@ class VisionDetector:
         """Loads or returns cached YOLO model weights."""
         if self._model is None:
             logger.info("Loading YOLO model: %s...", self.model_name)
+            try:
+                import torch
+
+                torch.backends.mkldnn.enabled = False  # type: ignore[assignment]
+                torch.set_num_threads(2)
+            except Exception as exc:  # noqa: BLE001
+                logger.debug("Could not configure torch backend flags: %s", exc)
             t0 = time.time()
             self._model = YOLO(self.model_name)
             load_ms = (time.time() - t0) * 1000

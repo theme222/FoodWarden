@@ -45,8 +45,11 @@ else
     echo "allowed_users=anybody" | sudo tee /etc/X11/Xwrapper.config >/dev/null
 fi
 
-# 2. Ensure uv is installed
-echo "[2/6] Checking uv package manager..."
+# 2. Ensure Bluetooth is unblocked and powered on, and check uv package manager
+echo "[2/6] Enabling Bluetooth adapter and checking uv..."
+sudo rfkill unblock bluetooth || true
+sudo systemctl enable --now bluetooth || true
+sudo bluetoothctl power on || true
 if ! command -v uv >/dev/null 2>&1 && [ ! -f "$USER_HOME/.local/bin/uv" ]; then
     curl -LsSf https://astral.sh/uv/install.sh | sh
 fi
