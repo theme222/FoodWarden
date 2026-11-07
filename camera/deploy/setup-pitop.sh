@@ -65,12 +65,19 @@ sudo chmod 600 /etc/mosquitto/certs/server.key
 sudo chmod 644 /etc/mosquitto/certs/server.crt /etc/mosquitto/certs/ca.crt
 
 sudo cp "$SCRIPT_DIR/mosquitto-tls.conf" /etc/mosquitto/conf.d/foodwarden-tls.conf
+# Strip any Windows CRLF line endings from config and certs
+sudo sed -i 's/\r$//' /etc/mosquitto/conf.d/foodwarden-tls.conf
+sudo sed -i 's/\r$//' /etc/mosquitto/certs/ca.crt /etc/mosquitto/certs/server.crt /etc/mosquitto/certs/server.key
+
 sudo mosquitto_passwd -b -c /etc/mosquitto/passwd foodwarden_client "$MQTT_PASS"
 sudo chown mosquitto:mosquitto /etc/mosquitto/passwd
 sudo chmod 600 /etc/mosquitto/passwd
 
 sudo systemctl enable mosquitto
-sudo systemctl restart mosquitto
+sudo systemctl restart mosquitto || {
+    echo "WARNING: Mosquitto failed to start. Showing journalctl logs:"
+    sudo journalctl -u mosquitto -n 15 --no-pager || true
+}
 
 # 4. Create Python 3.11 virtualenv (inheriting ARM64 system packages) & sync uv
 echo "[4/6] Setting up Python 3.11 environment in $CAMERA_DIR..."
@@ -87,7 +94,9 @@ echo "[5/6] Checking .env file..."
 if [ ! -f "$CAMERA_DIR/.env" ]; then
     cp "$CAMERA_DIR/../.env.example" "$CAMERA_DIR/.env"
     sed -i "s|MQTT_PASSWORD=YOUR_MQTT_PASSWORD|MQTT_PASSWORD=$MQTT_PASS|g" "$CAMERA_DIR/.env"
-    echo "Created $CAMERA_DIR/.env (please review AES_KEY and GATEWAY_TOKEN)."
+    sed -i "s|MOCK_CLOUD=false|MOCK_CLOUD=true|g" "$CAMERA_DIR/.env"
+    echo "PIR_GPIO_PIN=-1" >> "$CAMERA_DIR/.env"
+    echo "Created $CAMERA_DIR/.env with MOCK_CLOUD=true and PIR_GPIO_PIN=-1."
 fi
 
 # 6. Configure Kiosk Autostart (supports both OS Lite B2 Console Autologin & Desktop)
