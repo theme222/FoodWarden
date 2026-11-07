@@ -174,7 +174,7 @@ class SensorPacket:
             nonce=nonce, data=bytes(plaintext), associated_data=header_bytes
         )
 
-        return header_bytes + ciphertext_and_tag
+        return bytes(header_bytes + ciphertext_and_tag)
 
 
 class AntiReplayValidator:

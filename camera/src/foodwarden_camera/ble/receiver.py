@@ -146,7 +146,7 @@ class BLEReceiver:
         if self.on_telemetry_callback:
             try:
                 self.on_telemetry_callback(packet)
-            except Exception:  # noqa: BLE001
+            except Exception:
                 logger.exception("Error in telemetry callback")
 
         return packet

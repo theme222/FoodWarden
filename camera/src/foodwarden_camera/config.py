@@ -79,6 +79,10 @@ class GatewaySettings(BaseModel):
         default=int(os.getenv("WEBCAM_INDEX", "0")),
         description="OpenCV VideoCapture index (/dev/video0 -> 0)",
     )
+    yolo_model_path: str = Field(
+        default=os.getenv("YOLO_MODEL_PATH", "yolo26n.pt"),
+        description="YOLO weights file path (default: yolo26n.pt)",
+    )
     pir_gpio_pin: int = Field(
         default=int(os.getenv("PIR_GPIO_PIN", "22")),
         description="Pi-top Hub GPIO pin for PIR motion sensor",

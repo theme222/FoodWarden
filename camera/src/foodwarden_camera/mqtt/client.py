@@ -13,6 +13,7 @@ import ssl
 import time
 from collections.abc import Callable
 from typing import Any, Literal
+
 import paho.mqtt.client as mqtt
 from paho.mqtt.enums import CallbackAPIVersion
 
@@ -101,8 +102,12 @@ class DoorMQTTClient:
             logger.info("Configuring MQTT TLS with CA: %s", self.ca_cert_path)
             self._client.tls_set(
                 ca_certs=self.ca_cert_path,
-                certfile=self.client_cert_path if self.client_cert_path and os.path.exists(self.client_cert_path) else None,
-                keyfile=self.client_key_path if self.client_key_path and os.path.exists(self.client_key_path) else None,
+                certfile=self.client_cert_path
+                if self.client_cert_path and os.path.exists(self.client_cert_path)
+                else None,
+                keyfile=self.client_key_path
+                if self.client_key_path and os.path.exists(self.client_key_path)
+                else None,
                 tls_version=ssl.PROTOCOL_TLS_CLIENT,
             )
         else:
@@ -120,7 +125,11 @@ class DoorMQTTClient:
     ) -> None:
         """Called upon successful MQTT broker connection."""
         if rc == 0 or (hasattr(rc, "is_failure") and not rc.is_failure):
-            logger.info("Connected to local Mosquitto MQTT broker at %s:%d", self.broker_host, self.broker_port)
+            logger.info(
+                "Connected to local Mosquitto MQTT broker at %s:%d",
+                self.broker_host,
+                self.broker_port,
+            )
             self._connected = True
 
             # Subscribe to all required topics from CBD.md §1.B
@@ -183,7 +192,9 @@ class DoorMQTTClient:
                 res.model_dump_json(),
                 qos=1,
             )
-            logger.info("Responded to time sync request from %s with timestamp %d", req.node_id, now_s)
+            logger.info(
+                "Responded to time sync request from %s with timestamp %d", req.node_id, now_s
+            )
         except Exception as exc:  # noqa: BLE001
             logger.error("Error processing time sync request: %s", exc)
 

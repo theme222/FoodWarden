@@ -14,7 +14,7 @@ dependencies = [
     "opencv-python>=4.10.0",
     "paho-mqtt>=2.1.0",
     "pydantic>=2.7.0",
-    "PyQt6>=6.7.0",
+    "PyQt6>=6.7.0,<6.9.0",
     "python-dotenv>=1.0.0",
     "ultralytics>=8.3.0",
 ]
@@ -46,3 +46,14 @@ extend-exclude = ["*.md"]
 [tool.mypy]
 python_version = "3.11"
 strict = true
+
+[[tool.mypy.overrides]]
+module = [
+    "PyQt6",
+    "PyQt6.*",
+    "ultralytics",
+    "ultralytics.*",
+    "cv2",
+    "cv2.*",
+]
+ignore_missing_imports = true
