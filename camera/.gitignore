@@ -18,3 +18,7 @@ build/
 *.pt
 *.onnx
 captures/
+
+# Secrets & local databases
+.env
+*.db
