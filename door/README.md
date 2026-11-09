@@ -7,7 +7,7 @@
 ## 1. Documentation & File Index
 
 ### Local Subproject Files
-* **[`ARCHITECTURE.md`](ARCHITECTURE.md):** Hardware components, 12V/5V isolated power rails, exact KidBright32 pinouts (`GPIO 21/22`, `GPIO 25/26/27`, `GPIO 32`, `GPIO 33`, `GPIO 16/14`), and FreeRTOS firmware stack.
+* **[`ARCHITECTURE.md`](ARCHITECTURE.md):** Hardware components, 12V/5V isolated power rails, exact KidBright32 V1.3 pinouts (`IO4/IO5` or `IO21/IO22`, `IO18/IO26/IO27`, `IO32`, `IO33`, `IO16/IO14`), and FreeRTOS firmware stack.
 * **[`GOAL.md`](GOAL.md):** Incremental checklist of required features, safety fail-safes, use cases, edge-case handlers, and tests.
 * **[`platformio.ini`](platformio.ini):** PlatformIO project configuration for `esp32dev` (KidBright32).
 * **[`secrets.h.example`](secrets.h.example):** Symlink to the root microcontroller secrets template ([`../secrets.h.example`](../secrets.h.example)).
