@@ -6,4 +6,5 @@ void setup() {
 
 void loop() {
   vTaskDelay(pdMS_TO_TICKS(1000));
+  Serial.println("Hello, world!");
 }
