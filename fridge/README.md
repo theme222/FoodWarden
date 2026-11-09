@@ -7,7 +7,7 @@
 ## 1. Documentation & File Index
 
 ### Local Subproject Files
-* **[`ARCHITECTURE.md`](ARCHITECTURE.md):** Hardware components, exact KidBright32 GPIO/I2C pin mappings (`GPIO 4/5` LED matrix, `GPIO 21/22` SHT31 + SGP40, `GPIO 36`, `GPIO 16`, `GPIO 14`), battery protection, and C++/FreeRTOS stack.
+* **[`ARCHITECTURE.md`](ARCHITECTURE.md):** Hardware components, exact KidBright32 GPIO/I2C pin mappings (`GPIO 21/22` LED matrix, `GPIO 4/5` SHT31 + SGP40, `GPIO 36`, `GPIO 16`, `GPIO 14`), battery protection, and C++/FreeRTOS stack.
 * **[`POWER.md`](POWER.md):** Power estimate (not yet measured) and the procedure for measuring deep-sleep/active current and battery runtime.
 * **[`tools/decrypt_packet.py`](tools/decrypt_packet.py):** Gateway-side decrypt and validation of a packet captured from Node F (`--selftest` to check the tool itself).
 * **[`tools/host_test/`](tools/host_test/run_host_tests.sh):** PC tests that need no board (see "Host tests without hardware").

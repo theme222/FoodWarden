@@ -23,12 +23,12 @@ This document specifies the hardware pinouts, sensor bus interfaces, power archi
 | Component | Part Number / IC | Interface / Bus | KidBright32 / ESP32 Exact Pin(s) | I2C Address / Range | Purpose |
 |---|---|---|---|---|---|
 | **Light Sensor** | Onboard LDR Phototransistor | Analog ADC (`ADC1_CH0`) | **`GPIO 36`** (`SENSOR_VP` / `SVP`) | 12-bit ADC (`0–4095`) | Detects internal fridge light to determine whether the fridge door is open or closed. |
-| **Temperature & Humidity Sensor** | **Sensirion SHT31** Module (replaces the onboard LM73) | External **KB Chain `I2C1`** (`Wire1`) | • `SDA` = **`GPIO 21`**<br>• `SCL` = **`GPIO 22`**<br>• `VCC` = **`3V3`**<br>• `GND` = **`GND`** | **`0x44`** | Measures internal refrigerator compartment temperature (`centi-degrees C`, transmitted) and relative humidity (used only to compensate the SGP40, not transmitted). |
-| **VOC Gas Sensor** | **Sensirion SGP40** Module | External **KB Chain `I2C1`** (`Wire1`) | • `SDA` = **`GPIO 21`**<br>• `SCL` = **`GPIO 22`**<br>• `VCC` = **`3V3`**<br>• `GND` = **`GND`** | **`0x59`** | Measures Volatile Organic Compounds (`VOC Index: 0–500`) emitted by spoiling food. Shares `I2C1` with the SHT31. |
-| **LED Dot Matrix** | Onboard **16×8 Red LED Matrix** (`HT16K33` driver) | Onboard **`I2C0`** (`Wire`) | • `SDA` = **`GPIO 4`**<br>• `SCL` = **`GPIO 5`** | **`0x70`** | Displays boot calibration status, manual diagnostic readouts, and battery warnings (disabled during deep sleep). |
+| **Temperature & Humidity Sensor** | **Sensirion SHT31** Module (replaces the onboard LM73) | External **KB Chain `I2C1`** (`Wire1`) | • `SDA` = **`GPIO 4`**<br>• `SCL` = **`GPIO 5`**<br>• `VCC` = **`3V3`**<br>• `GND` = **`GND`** | **`0x44`** | Measures internal refrigerator compartment temperature (`centi-degrees C`, transmitted) and relative humidity (used only to compensate the SGP40, not transmitted). |
+| **VOC Gas Sensor** | **Sensirion SGP40** Module | External **KB Chain `I2C1`** (`Wire1`) | • `SDA` = **`GPIO 4`**<br>• `SCL` = **`GPIO 5`**<br>• `VCC` = **`3V3`**<br>• `GND` = **`GND`** | **`0x59`** | Measures Volatile Organic Compounds (`VOC Index: 0–500`) emitted by spoiling food. Shares `I2C1` with the SHT31. |
+| **LED Dot Matrix** | Onboard **16×8 Red LED Matrix** (`HT16K33` driver) | Onboard **`I2C0`** (`Wire`) | • `SDA` = **`GPIO 21`**<br>• `SCL` = **`GPIO 22`** | **`0x70`** | Displays boot calibration status, manual diagnostic readouts, and battery warnings (disabled during deep sleep). |
 | **Button 1 (`S1`)** | Onboard Pushbutton `S1` | Digital Input (Active-LOW, Pull-up) | **`GPIO 16`** (not an RTC GPIO, see §6) | Digital (`LOW` when pressed) | Hardware interrupt (while awake) and once-per-wake poll to display live sensor readings on the LED dot matrix. Cannot wake the chip from deep sleep. |
 | **Button 2 (`S2`)** | Onboard Pushbutton `S2` | Digital Input (Active-LOW, Pull-up) | **`GPIO 14`** (`RTC_GPIO16`) | Digital (`LOW` when pressed) | Hardware interrupt / wake trigger to force an immediate BLE GATT connection and RTC time recalibration ([`FUC.md`](../interface/FUC.md)). |
-| **Status Indicators** | Onboard LEDs & Buzzer | Digital Output | • Wi-Fi LED = **`GPIO 2`**<br>• IoT LED = **`GPIO 12`**<br>• Buzzer = **`GPIO 13`** | Digital Output | Diagnostic feedback during initial bootup and BLE connection events. |
+| **Status Indicators** | Onboard LEDs & Buzzer | Digital Output | • Wi-Fi LED = **`GPIO 2`**<br>• IoT LED = **`GPIO 12`**<br>• Buzzer = **`GPIO 13`** | Digital Output | Reserved for diagnostic feedback during bootup and BLE connection events. **Not driven by the current firmware.** GPIO 12 is a boot strapping pin (flash voltage) and must not be held high during reset. |
 
 ```text
 +-------------------------------------------------------------------------------+
@@ -40,8 +40,8 @@ This document specifies the hardware pinouts, sensor bus interfaces, power archi
 |         |                     |                     |               |         |
 |         v                     v                     v               v         |
 |  [Internal I2C0]       [KB Chain I2C1]         [ADC1_CH0]      [GPIO ISRs]    |
-|   SDA: GPIO 4           SDA: GPIO 21            GPIO 36         S1: GPIO 16   |
-|   SCL: GPIO 5           SCL: GPIO 22                            S2: GPIO 14   |
+|   SDA: GPIO 21          SDA: GPIO 4             GPIO 36         S1: GPIO 16   |
+|   SCL: GPIO 22          SCL: GPIO 5                             S2: GPIO 14   |
 |         |                     |                     |               |         |
 +---------|---------------------|---------------------|---------------|---------+
           |                     |                     |               |
@@ -64,7 +64,7 @@ This document specifies the hardware pinouts, sensor bus interfaces, power archi
 | **RTOS & Power Management** | **FreeRTOS (ESP-IDF)** + **ESP32 Deep Sleep (`esp_sleep.h`)** | Coordinates discrete FreeRTOS tasks (`vSensorTask`, `vBleGattTask`, `vDisplayTask`) via queues/semaphores, and enters cyclic deep sleep (`esp_deep_sleep_start()`) storing state in `RTC_DATA_ATTR` SRAM (E1, E3). |
 | **BLE GATT Server** | **ESP32 BLE (`NimBLE-Arduino` / `BLEDevice.h`)** | Hosts GATT Telemetry Service `0000FFF0...`, allowing Gateway `'C'` to write Unix timestamps to Characteristic `0000FFF2...` and read/notify encrypted sensor telemetry on `0000FFF1...` ([`FUC.md`](../interface/FUC.md)). |
 | **Application Cryptography** | **mbedTLS (`mbedtls/gcm.h`, `esp_random()`)** | Hardware-accelerated **AES-128-GCM** authenticated encryption using `AES_KEY` from `secrets.h`, generating a unique 12-byte IV and 16-byte authentication tag per packet with AAD header verification (E5). |
-| **Sensor Drivers** | • **`Wire` (`TwoWire`)**<br>• **`Sensirion I2C SGP40`** & **`Sensirion Gas Index Algorithm`**<br>• **`Sensirion I2C SHT3x`**<br>• **HT16K33 LED Matrix Driver** | Dual I2C controller configuration (`Wire.begin(4, 5)` for the LED Matrix; `Wire1.begin(21, 22)` for SHT31 + SGP40) with bus timeout protection to prevent I2C lockups if a sensor is unplugged. |
+| **Sensor Drivers** | • **`Wire` (`TwoWire`)**<br>• **`Sensirion I2C SGP40`** & **`Sensirion Gas Index Algorithm`**<br>• **`Sensirion I2C SHT3x`**<br>• **HT16K33 LED Matrix Driver** | Dual I2C controller configuration (`Wire.begin(21, 22)` for the LED Matrix; `Wire1.begin(4, 5)` for SHT31 + SGP40) with bus timeout protection to prevent I2C lockups if a sensor is unplugged. |
 
 ---
 

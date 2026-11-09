@@ -4,8 +4,9 @@
 #include <stdint.h>
 
 // Pin map (fridge/ARCHITECTURE.md §1.B)
-#define PIN_I2C1_SDA 21 // SHT31 (0x44) + SGP40 (0x59) on Wire1
-#define PIN_I2C1_SCL 22
+// I2C1 is the board's 4-pin I2C connector, shared with the unused onboard LM73 (0x4D).
+#define PIN_I2C1_SDA 4 // SHT31 (0x44) + SGP40 (0x59) on Wire1
+#define PIN_I2C1_SCL 5
 #define PIN_LDR 36 // ADC1_CH0
 
 #define SHT31_I2C_ADDRESS 0x44

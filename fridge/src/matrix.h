@@ -3,10 +3,11 @@
 
 #include <stdint.h>
 
-// Onboard 16x8 red LED matrix (HT16K33) on I2C0: SDA = GPIO 4, SCL = GPIO 5, 0x70.
+// Onboard 16x8 red LED matrix (HT16K33) on I2C0: SDA = GPIO 21, SCL = GPIO 22, 0x70
+// (KidBright V1.3 wiring diagram, resources/ on feat/resources).
 #define MATRIX_I2C_ADDRESS 0x70
-#define PIN_I2C0_SDA 4
-#define PIN_I2C0_SCL 5
+#define PIN_I2C0_SDA 21
+#define PIN_I2C0_SCL 22
 
 // How the 16 display columns map onto the HT16K33's 16 RAM bytes.
 //   1 (default): column x is RAM byte x, row y is bit y.
