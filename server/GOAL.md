@@ -35,9 +35,12 @@
 
 ## 3. Edge Cases & Failure Mode Handlers
 - [ ] **Malformed or Unrecognizable Food Images:** Handle low-confidence or unrecognizable Gemini responses gracefully by returning a structured fallback prompt for manual selection on Gateway `'C'`.
-- [ ] **Idempotent Batched Telemetry Ingestion:** Verify that re-sent telemetry batches from Gateway `'C'` deduplicate by `timestamp_s` within each fridge, as specified in [CBS.md](../interface/CBS.md).
+- [ ] **Idempotent Batched Telemetry Ingestion:** Deduplicate re-sent telemetry batches from Gateway `'C'` (when flushing its offline store-and-forward buffer) strictly by `node_id` and `timestamp_s`.
 - [ ] **LINE Notification Rate Limiting & Cooldown:** Enforce per-alert cooldown windows so continuous VOC spikes or repeated door events do not spam the user's LINE chat.
 - [ ] **Unauthorized API Access:** Reject unauthenticated requests to Cloud Functions and Firestore collections with proper HTTP `401`/`403` status codes.
+
+> [!CAUTION]
+> [CBS section 3.5](../interface/CBS.md#35-telemetry-ingestion-post-apitelemetry) and the current backend deduplicate by `timestamp_s` within each fridge. Two sensor nodes in the same fridge can report in the same second, so the second reading can be dropped. Coordinate an update to CBS, the backend, and the integration test to use `node_id` and `timestamp_s` within each fridge.
 
 ---
 
