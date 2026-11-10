@@ -4,6 +4,7 @@ node_modules
 # output
 out
 dist
+/functions/lib/
 *.tgz
 
 # code coverage
@@ -13,6 +14,9 @@ coverage
 # logs
 logs
 _.log
+firebase-debug*.log
+firestore-debug.log
+ui-debug.log
 report.[0-9]_.[0-9]_.[0-9]_.[0-9]_.json
 
 # dotenv environment variable files
@@ -21,6 +25,7 @@ report.[0-9]_.[0-9]_.[0-9]_.[0-9]_.json
 .env.test.local
 .env.production.local
 .env.local
+.secret.local
 
 # caches
 .eslintcache

@@ -15,7 +15,7 @@ This document specifies the cloud infrastructure, runtime environment, third-par
 ```text
 +-----------------------+              HTTPS JSON / Images (CBS.md)            +-----------------------------------+
 |  Node 'C' Gateway     | <==================================================> | Firebase Cloud Functions          |
-|  (Pi-top [4] Python)  |                                                      | (TypeScript / Node.js 20 Runtime) |
+|  (Pi-top [4] Python)  |                                                      | (TypeScript / Node.js 22 Runtime) |
 +-----------------------+                                                      +-----------------------------------+
                                                                                      ^           |           |
 +------------------------------------------------------+                             |           |           | Context-Enriched
@@ -58,7 +58,7 @@ This document specifies the cloud infrastructure, runtime environment, third-par
 | **Client-Side Routing** | **React Router (`react-router-dom`)** | `v6+` / `v7+` | Declarative client-side routing supporting multi-page views, route parameters (`/fridges/:fridgeId`), nested layouts, and auth guards. |
 | **Client Firebase SDK** | **Firebase Web SDK (Modular)** (`firebase/app`, `firebase/auth`, `firebase/firestore`) | `v10+` | Direct, secure browser integration for Google SSO login and reactive real-time database listeners (`onSnapshot`). |
 | **Internationalization (i18n)** | **Custom React i18n Context & `Intl` API** | Built-in TypeScript module | Dynamic language switching between Thai (`th`) and English (`en`), persisting preference to `localStorage`, with localized date and category formatting. |
-| **Cloud Backend & Compute** | **Firebase Cloud Functions (v2)** (`firebase-functions`, `firebase-admin`) | Node.js 20 runtime | Serverless endpoints running on official Node.js 20 environment handling Gateway `'C'` telemetry ingestion, Gemini AI vision pipelines, and scheduled daily alert cron jobs. |
+| **Cloud Backend & Compute** | **Firebase Cloud Functions (v2)** (`firebase-functions`, `firebase-admin`) | Node.js 22 runtime | Serverless endpoints for Gateway `'C'` telemetry ingestion, Gemini AI vision pipelines, and scheduled daily alert jobs. |
 | **NoSQL Database & Object Storage** | **Cloud Firestore & Cloud Storage** | Firestore v1, Google Cloud Storage | Real-time hierarchical document storage for multi-tenant fridge data, sensor time series, and uploaded cropped food images. |
 | **Multimodal AI (Entity `'G'`)** | **Google Gen AI SDK (`@google/genai`) — Gemini 3.5 Flash Lite** | `gemini-3.5-flash-lite` | Multimodal VLM performing food identification, shelf-life estimation, and FEFO inventory matching ([`SBG.md`](../interface/SBG.md)). |
 | **Notification Service (Entity `'L'`)** | **LINE Messaging API (`@line/bot-sdk` / HTTPS REST)** | LINE Messaging API v2 | Dispatches push notifications for expiring food, VOC spoilage warnings, door-left-open alerts, and obstruction errors ([`SUL.md`](../interface/SUL.md)). |
