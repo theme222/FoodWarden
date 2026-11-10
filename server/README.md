@@ -102,6 +102,22 @@ Open the Vite URL and use the emulator's Google sign-in popup. To grant access, 
 
 Run `bun run typecheck`, `bun test src/model.test.ts`, and `bun run build` from `server/`. With the four emulators running, `npm.cmd --prefix functions run test:emulator` exercises the telemetry and dashboard endpoints. See the [work log](review/DASHBOARD.md) for scope and decisions and [verification](review/VERIFICATION.md) for results.
 
+### Render the fridge block diagram
+
+Start with the [system overview](diagrams/fridge.mmd) and read from the fridge sensor through the gateway to Firebase. The local MQTTS branch connects the gateway and door closer. The overview treats the home router as network infrastructure for both LAN MQTT and internet-bound HTTPS.
+
+Use the [network](diagrams/network.mmd) and [cloud](diagrams/cloud.mmd) diagrams for the external links. Use the separate [gateway](diagrams/gateway.mmd), [fridge sensor](diagrams/fridge-sensor.mmd), and [door closer](diagrams/door-closer.mmd) diagrams for hardware. The [diagram audit](review/DIAGRAM-AUDIT.md) records coverage and differences between Page-1 of `Fridge.drawio` and the code branches.
+
+From the repository root:
+
+```bash
+cd server/diagrams
+bun install --frozen-lockfile
+bun run render fridge.mmd out/fridge.svg
+```
+
+Open `out/fridge.svg` in a browser. To render another diagram, pass its `.mmd` source and the desired `.svg` output path.
+
 ### Typecheck (`tsc`)
 ```bash
 # Run strict TypeScript compiler check without emitting files

@@ -1,0 +1,20 @@
+flowchart TB
+    accTitle: FoodWarden cloud components
+    accDescr: The dashboard and hardware authenticate separately. Firestore stores records and Cloud Storage holds food photos.
+    gateway["C0 · Camera gateway"]
+    user["Phone or computer<br/>FoodWarden dashboard"]
+    auth["Firebase Auth<br/>Google sign-in"]
+    functions["Cloud Functions<br/>Validate gateway token or user membership"]
+    firestore[("Cloud Firestore<br/>Inventory, minute readings and device reports")]
+    storage[("Cloud Storage<br/>Private grocery JPEGs")]
+    gemini["G · Gemini 3.5 Flash Lite<br/>Planned camera recognition"]
+    line["L · LINE Messaging API<br/>Planned notifications"]
+
+    gateway -->|"HTTPS Bearer · telemetry and heartbeat"| functions
+    user <-->|"Google account and ID token"| auth
+    user -->|"ID token · add food and read photos"| functions
+    user <-->|"Verified member · live reads"| firestore
+    functions -->|"Write validated records"| firestore
+    functions <-->|"Store and read JPEGs"| storage
+    functions -.->|"Planned · identify food and rank candidates"| gemini
+    functions -.->|"Planned · expiry and safety alerts"| line

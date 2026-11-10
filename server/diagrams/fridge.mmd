@@ -1,0 +1,19 @@
+flowchart TB
+    accTitle: FoodWarden system overview
+    accDescr: The fridge sensor sends encrypted readings to the camera gateway. The gateway controls the door locally and sends data to Firebase.
+    %% Source topology: Fridge.drawio, Page-1. See network.mmd and cloud.mmd for external links and internals.
+
+    fridge_sensor["F0 · Fridge sensor<br/>Temperature, VOC and light"]
+    gateway["C0 · Camera and gateway<br/>Local vision, BLE client and MQTT broker"]
+    door["D0 · Door closer<br/>Motor, obstruction and limit sensors"]
+    firebase["S · Firebase backend<br/>Cloud Functions, Firestore and Storage"]
+    dashboard["Phone or computer<br/>Food, device status and sensor history"]
+    gemini["G · Gemini API<br/>Grocery recognition"]
+    line["L · LINE Messaging API<br/>Expiry and safety alerts"]
+
+    fridge_sensor <-->|"BLE GATT · AES-128-GCM"| gateway
+    gateway <-->|"Local MQTT over TLS"| door
+    gateway -->|"HTTPS · telemetry and device status"| firebase
+    firebase <-->|"HTTPS · grocery images and candidates"| gemini
+    firebase -->|"HTTPS · LINE push messages"| line
+    dashboard <-->|"Google sign-in · live data and photos"| firebase

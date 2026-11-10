@@ -1,0 +1,20 @@
+flowchart TB
+    accTitle: Camera and gateway hardware
+    accDescr: Gateway power, camera, display and motion sensor from Fridge.drawio. See the review notes for firmware differences.
+    %% Pi-top [4] runs Raspberry Pi OS Bullseye (Legacy 64-bit) and Python 3.11 (uv).
+    %% YOLOv8n handles food cropping and human detection. Mosquitto, Bleak and SQLite handle communications.
+    %% PyQt5 UI uses Up, Down, O and X. Check-out defaults to FEFO.
+    %% PIR wakes the display and webcam. They sleep after 10 minutes of inactivity.
+
+    outlet["AC 220 V outlet"]
+    brick["Pi-top USB-C power brick"]
+    gateway["C0 · Pi-top [4] / Raspberry Pi 4<br/>Local vision, Mosquitto and offline queue"]
+    webcam["Logitech 720p webcam"]
+    lcd["5-inch LCD<br/>Up, Down, O and X buttons"]
+    pir["Digital PIR motion sensor<br/>Wakes the screen and webcam"]
+
+    outlet --> brick
+    brick -->|"USB-C · 5 V"| gateway
+    webcam -->|"USB-A · /dev/video0"| gateway
+    gateway -->|"Micro-HDMI + USB power"| lcd
+    pir -->|"GPIO 22 · 5 V"| gateway

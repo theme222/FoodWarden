@@ -1,0 +1,32 @@
+flowchart TB
+    accTitle: Door closer hardware
+    accDescr: Power, motor drive and safety inputs from Fridge.drawio. This is a block diagram.
+    %% PlatformIO C++ / FreeRTOS with MQTTS. The controller mounts on top of the fridge.
+    %% Four fail-safes: limit switch ISR, INA219 stall cutoff, 8 s timeout and MQTTS abort.
+    %% IR sensor at door seam stops forward drive when closed. Limit switch stops reverse drive at home.
+    %% INA219 samples at 100 Hz. The controller retracts at ≥ 1200 mA.
+    %% Driver supports PWM soft start and direction (PWMA 26, AIN1 27, AIN2 25).
+    %% JGY-370 12 V 18 RPM worm gear drives a 3D-printed arm with rolling wheel.
+
+    outlet["AC 220 V outlet"]
+    adapter["12 V wall adapter"]
+    jack["DC barrel jack"]
+    buck["Mini buck converter"]
+    door["D0 · KidBright32 / ESP32<br/>Local TLS MQTT and safety control"]
+    ir["Close-range IR sensor<br/>Stops forward drive on closure"]
+    limit["Limit switch<br/>Stops reverse drive at home"]
+    ina["INA219 current sensor<br/>Stall cutoff ≥ 1200 mA"]
+    driver["TB6612FNG motor driver"]
+    motor["JGY-370 worm-gear motor"]
+
+    outlet --> adapter
+    adapter -->|"12 V"| jack
+    jack -->|"12 V"| buck
+    buck -->|"5 V"| door
+    jack -->|"12 V"| ina
+    ina -->|"12 V"| driver
+    driver --> motor
+    door -->|"PWM and direction"| driver
+    door ---|"I2C1 · 0x40"| ina
+    ir -->|"GPIO 32"| door
+    limit -->|"GPIO 33 ISR"| door

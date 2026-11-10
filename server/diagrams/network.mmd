@@ -1,0 +1,34 @@
+sequenceDiagram
+    accTitle: FoodWarden physical connections and heartbeat
+    accDescr: Device traffic on BLE and the home LAN, followed by the gateway's authenticated connection to Firebase.
+    participant F as F0 · Fridge sensor
+    participant C as C0 · Camera gateway
+    participant R as Home router / LAN
+    participant D as D0 · Door closer
+    participant S as S · Firebase API
+
+    rect rgb(233, 243, 255)
+        Note over F,C: Direct BLE GATT. Fridge sensor has no Wi-Fi.
+        C->>F: Set clock over GATT
+        F-->>C: AES-128-GCM telemetry with authenticated metadata
+    end
+
+    rect rgb(233, 247, 238)
+        Note over C,D: The local Mosquitto broker runs on C. D validates its TLS certificate.
+        C->>R: MQTT over TLS 8883 · CLOSE_DOOR or ABORT
+        R->>D: Forward command on local LAN
+        D-->>R: Publish status, acknowledgement and safety events
+        R-->>C: Broker receives D status and updates last contact
+        Note over C,D: Door safety works on the local network if the internet fails.
+    end
+
+    rect rgb(250, 241, 224)
+        Note over C,S: HTTPS with gateway Bearer token.
+        C->>R: Send or retry buffered telemetry
+        R->>S: POST /api/telemetry
+        S-->>C: Return ingested count
+        C->>R: Heartbeat every 60 s per PR #5
+        R->>S: POST /api/status · C0, F0, D0 and last seen values
+        S-->>C: Return updated count
+        Note over C,S: Gateway sender still needs the PR #5 integration.
+    end
