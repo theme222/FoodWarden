@@ -436,6 +436,52 @@ Ingests door safety and actuation events parsed by Gateway Node `'C'`. Rather th
 
 ---
 
+### 3.7 Component Status Heartbeat (`POST /api/status`)
+
+Reports the latest contact timestamp (`last_seen_s`) for each physical subsystem observed by Gateway Node `'C'`. Gateway `'C'` is expected to dispatch this heartbeat request **every 60 seconds**.
+
+* **Method:** `POST`
+* **Path:** `/api/status`
+* **Content-Type:** `application/json`
+
+> [!NOTE]
+> **Extensibility & Redundancy:**
+> * The `nodes` array accepts any arbitrary component identifier (`node_id`, e.g. `"C0"`, `"F0"`, `"F1"`, `"D0"`, `"D1"`) to seamlessly support additional or future hardware components without schema changes.
+> * Gateway Node `'C'` (`"C0"`) must explicitly include itself in the `nodes` array on every dispatch (primarily for redundancy alongside request arrival time).
+> * If a configured component has not yet communicated with Gateway `'C'` since boot, its `last_seen_s` value must be transmitted as explicit JSON `null`.
+
+#### Request Payload
+
+```json
+{
+  "nodes": [
+    {
+      "node_id": "C0",
+      "last_seen_s": 1792944010
+    },
+    {
+      "node_id": "F0",
+      "last_seen_s": 1792943980
+    },
+    {
+      "node_id": "D0",
+      "last_seen_s": 1792944009
+    }
+  ]
+}
+```
+
+#### Response Schema (`200 OK`)
+
+```json
+{
+  "success": true,
+  "updated_count": 3
+}
+```
+
+---
+
 ## 4. Error Responses & Status Codes
 
 All non-200 responses across this interface return a standardized JSON error envelope:
@@ -548,6 +594,15 @@ export interface DoorEventItem {
   status: DoorEventStatus;
 }
 
+export interface NodeStatusItem {
+  node_id: string;            // Component identifier (e.g. "C0", "F0", "D0", or future node IDs)
+  last_seen_s: number | null; // uint64 second precision; null if never seen since boot
+}
+
+export interface StatusPayload {
+  nodes: NodeStatusItem[];
+}
+
 export type ApiErrorCode =
   | 'UNAUTHORIZED'
   | 'INVALID_TOKEN'
@@ -639,6 +694,15 @@ class DoorEventItem:
     node_id: str
     timestamp_s: int
     status: str  # CLOSING, SUCCESS, OBSTRUCTION_ERROR, ABORTED, TIMEOUT_ERROR, FAULT_LOCKOUT, CONTRADICTION_ERROR
+
+@dataclass(frozen=True)
+class NodeStatusItem:
+    node_id: str
+    last_seen_s: Optional[int]  # None if component has not been seen since boot
+
+@dataclass(frozen=True)
+class StatusPayload:
+    nodes: List[NodeStatusItem]
 
 @dataclass(frozen=True)
 class ApiErrorResponse:
