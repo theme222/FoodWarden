@@ -1,6 +1,14 @@
 import { expect, test } from "bun:test";
-import { contactState, foodGroups, readFood, readSample, statusTree } from "./model";
+import { contactState, expiryLabel, foodGroups, readFood, readSample, statusTree } from "./model";
 import { chartPoints } from "./Metrics";
+
+test("expiry dates reject calendar overflow rather than displaying a different day", () => {
+  for (const language of ["th", "en"] as const) {
+    expect(expiryLabel("2026-02-31", language)).toBe("—");
+    expect(expiryLabel("2026-02-29", language)).toBe("—");
+    expect(expiryLabel("2024-02-29", language)).not.toBe("—");
+  }
+});
 
 test("matching rows group by name and expiry and preserve each item", () => {
   const item = (id: string, name: string, expiry: string, image_storage_path?: string) =>

@@ -11,6 +11,7 @@ interface TelemetrySample {
 
 const MAX_TIMESTAMP_S = 253402300799; // Last second of year 9999 in UTC.
 const MAX_BUCKETS_PER_BATCH = 499; // Reserve one transaction write for the fridge document.
+const MAX_SAMPLES_PER_BATCH = 10_000;
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
@@ -25,7 +26,8 @@ function parseSample(value: unknown): TelemetrySample | null {
 
   const { node_id, timestamp_s, temp_celsius, voc_index, light_ldr } = value;
   if (
-    typeof node_id !== "string" || !node_id.trim() ||
+    typeof node_id !== "string" || !node_id.trim() || node_id.length > 128 ||
+    node_id !== node_id.trim() ||
     typeof timestamp_s !== "number" || !Number.isInteger(timestamp_s) ||
     timestamp_s < 0 || timestamp_s > MAX_TIMESTAMP_S ||
     !isNullableNumber(temp_celsius) ||
@@ -38,7 +40,8 @@ function parseSample(value: unknown): TelemetrySample | null {
 }
 
 export function parseTelemetry(body: unknown): Map<string, TelemetrySample[]> | null {
-  if (!isRecord(body) || !Array.isArray(body.samples) || body.samples.length === 0) return null;
+  if (!isRecord(body) || !Array.isArray(body.samples) || body.samples.length === 0 ||
+      body.samples.length > MAX_SAMPLES_PER_BATCH) return null;
 
   const buckets = new Map<string, TelemetrySample[]>();
   for (const rawSample of body.samples) {
@@ -52,6 +55,7 @@ export function parseTelemetry(body: unknown): Map<string, TelemetrySample[]> | 
       bucket.push(sample);
     } else {
       buckets.set(bucketId, [sample]);
+      if (buckets.size > MAX_BUCKETS_PER_BATCH) return null;
     }
   }
 

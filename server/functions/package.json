@@ -7,7 +7,8 @@
   },
   "scripts": {
     "build": "tsc",
-    "test:emulator": "node --test"
+    "test": "npm run build && node --test test/validation.test.cjs",
+    "test:emulator": "npm run build && node --test test/telemetry.test.cjs test/dashboard.test.cjs test/door-events.test.cjs"
   },
   "dependencies": {
     "firebase-admin": "^13.10.0",

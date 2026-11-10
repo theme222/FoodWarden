@@ -46,9 +46,9 @@ The health endpoint reads the Firestore emulator and returns `ok = True`. The in
 
 ### Gateway telemetry
 
-Send `POST /api/telemetry` with an `Authorization: Bearer <GATEWAY_TOKEN>` header and the `samples` JSON body defined in [CBS.md](../interface/CBS.md). Provision the SHA-256 token hash as `gatewayTokenHash` in `/fridges/{fridgeId}/private/config` and create the parent fridge document. A batch may span up to 499 UTC minute buckets. Retrying an accepted batch returns `ingested_count: 0`, and older samples do not replace the latest cached reading.
+Send `POST /api/telemetry` with an `Authorization: Bearer <GATEWAY_TOKEN>` header and the `samples` JSON body defined in [CBS.md](../interface/CBS.md). Provision the SHA-256 token hash as `gatewayTokenHash` in `/fridges/{fridgeId}/private/config` and create the parent fridge document. A batch may contain up to 10,000 samples across 499 UTC minute buckets. Node IDs must be nonblank, have no surrounding whitespace and contain at most 128 characters. Split larger offline queues into separate requests. Retrying an accepted batch returns `ingested_count: 0`, and older samples do not replace the latest cached reading.
 
-The Gateway on `feature/C-camera` currently sends a `telemetry` array with different field names. Update that client to send the CBS payload before connecting the Pi. The included Firestore rules deny direct client access until the dashboard's authentication and fridge membership rules are implemented.
+The earlier [gateway review](review/GATEWAY.md) records a camera payload mismatch; verify CBS compatibility before connecting the Pi. Firestore rules allow verified fridge members to read inventory, telemetry, door events and the latest heartbeat. Direct client writes, parent fridge documents and private configuration remain denied; Functions mediate dashboard writes and fridge summaries.
 
 ## 3. Other development commands (`bun`)
 
@@ -137,6 +137,20 @@ bun run format:check
 
 ### Test (`bun test`)
 ```bash
-# Execute unit and integration tests with Bun's native test runner
-bun test
+# Dashboard unit tests (no emulators needed)
+bun run test
+
+# Functions build and validation unit tests (no emulators needed)
+npm --prefix functions test
+
+# With Auth, Functions, Firestore and Storage emulators running
+npm --prefix functions run test:emulator
 ```
+
+## Server review and door events
+
+See the [server review](review/SERVER-REVIEW.md) for implementation coverage, validation and remaining priorities.
+
+`POST /api/door_events` accepts the `events` array in [CBS section 3.6](../interface/CBS.md#36-door-event-ingestion-post-apidoor_events), using the gateway token. A batch contains 1–499 events with the node ID limits above and integer Unix seconds from zero through year 9999. All seven CBS statuses are supported. Invalid batches write nothing. Events are stored under the authenticated fridge's `door_events` collection.
+
+Retries deduplicate by node ID, timestamp and status, including concurrent requests. Different statuses or nodes in the same second remain distinct. Identical transitions in one second require a future shared event identifier to distinguish. This endpoint stores events; LINE dispatch remains planned.

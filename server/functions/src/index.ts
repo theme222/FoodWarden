@@ -6,6 +6,7 @@ import { onRequest } from "firebase-functions/v2/https";
 import { addManualFood, inventoryPhotoPath, isFridgeMember, parseManualFood, readInventoryPhoto, verifiedEmail } from "./inventory";
 import { ingestStatus, parseStatus } from "./status";
 import { ingestTelemetry, parseTelemetry } from "./telemetry";
+import { ingestDoorEvents, parseDoorEvents } from "./door-events";
 
 initializeApp();
 
@@ -85,7 +86,7 @@ export const api = onRequest({ region: "asia-southeast1" }, async (req, res) => 
       return;
     }
 
-    if (path !== "/telemetry" && path !== "/status") {
+    if (path !== "/telemetry" && path !== "/status" && path !== "/door_events") {
       res.status(404).json({ error: "NOT_FOUND", message: "Unknown API route." });
       return;
     }
@@ -104,6 +105,20 @@ export const api = onRequest({ region: "asia-southeast1" }, async (req, res) => 
     }
 
     const tokenHash = createHash("sha256").update(token).digest("hex");
+    if (path === "/door_events") {
+      const events = parseDoorEvents(req.body);
+      if (!events) {
+        res.status(400).json({ error: "INVALID_PAYLOAD", message: "Expected a valid door event batch." });
+        return;
+      }
+      const count = await ingestDoorEvents(firestore, tokenHash, events);
+      if (count === null) {
+        res.status(403).json({ error: "INVALID_TOKEN", message: "The gateway token is invalid." });
+        return;
+      }
+      res.status(200).json({ success: true, ingested_count: count });
+      return;
+    }
     if (path === "/status") {
       const receivedS = Math.floor(Date.now() / 1000);
       const report = parseStatus(req.body, receivedS);

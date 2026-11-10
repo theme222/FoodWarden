@@ -85,7 +85,7 @@ export function FoodDetail({ itemId, items, fridgeId, language, user }: {
   const advice = language === "th" ? food.adviceTh || food.adviceEn : food.adviceEn || food.adviceTh;
   return <section className="food-detail">
     <h1>{foodName(food, language)}</h1>
-    <FoodPhoto key={food.id + String(food.hasPhoto)} user={user} fridgeId={fridgeId} food={food} language={language} />
+    <FoodPhoto key={JSON.stringify([user.uid, fridgeId, food.id, food.hasPhoto])} user={user} fridgeId={fridgeId} food={food} language={language} />
     <dl className="item-facts">
       <div><dt>{t.expiry}</dt><dd>{expiryLabel(food.expiry, language)}</dd></div>
       <div><dt>{t.category}</dt><dd>{categoryLabel(food.category, language) || "—"}</dd></div>
