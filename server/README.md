@@ -104,6 +104,8 @@ Run `bun run typecheck`, `bun test src/model.test.ts`, and `bun run build` from 
 
 ### Render the fridge block diagram
 
+The [original draw.io drawing](diagram/Fridge.drawio) is available as [HTML](diagram/Fridge.html), [SVG](diagram/Fridge.svg) and [PNG](diagram/Fridge.png). The HTML export uses the diagrams.net viewer over HTTPS. The SVG and PNG can be opened offline.
+
 Start with the [system overview](diagrams/fridge.mmd) and read from the fridge sensor through the gateway to Firebase. The local MQTTS branch connects the gateway and door closer. The overview treats the home router as network infrastructure for both LAN MQTT and internet-bound HTTPS.
 
 Use the [network](diagrams/network.mmd) and [cloud](diagrams/cloud.mmd) diagrams for the external links. Use the separate [gateway](diagrams/gateway.mmd), [fridge sensor](diagrams/fridge-sensor.mmd), and [door closer](diagrams/door-closer.mmd) diagrams for hardware. The [diagram audit](review/DIAGRAM-AUDIT.md) records coverage and differences between Page-1 of `Fridge.drawio` and the code branches.

@@ -1,6 +1,12 @@
 # Fridge diagram coverage
 
-The original source is `Fridge.drawio`, Page-1, ID `40sUoAn1FXmmMzHkS7Pw`. The XML contains 125 cells, with 82 vertices, 41 edges and 2 document roots. The vertices include 29 embedded images. Hardware and service images were translated into labelled blocks. Location photos, legend samples and presentation markers are accounted for below. The converted diagrams describe the original topology. This file records design drift where the firmware or project documents differ.
+The original source is [Fridge.drawio](../diagram/Fridge.drawio), Page-1, ID `40sUoAn1FXmmMzHkS7Pw`. The XML contains 125 cells, with 82 vertices, 41 edges and 2 document roots. The vertices include 29 embedded images. Hardware and service images were translated into labelled blocks. Location photos, legend samples and presentation markers are accounted for below. The converted diagrams describe the original topology. This file records design drift where the firmware or project documents differ.
+
+## Completeness check
+
+All six Pele diagrams render and match their committed SVGs apart from trailing line endings. Together they show the architecture required for the proposal diagram in [RUBRIC.md](../../RUBRIC.md), including the fridge sensor, camera gateway, local door actuator, cloud services and dashboard. The hardware and network views show the gateway's local vision and MQTT close/abort paths. The notes below identify the design details that still need confirmation against the actual hardware and firmware.
+
+The [HTML](../diagram/Fridge.html), [SVG](../diagram/Fridge.svg) and [PNG](../diagram/Fridge.png) were exported from Page-1 in draw.io. The HTML contains the same source XML. The SVG embeds its images, and the PNG was visually checked for all major blocks, photos and the legend. The original exports retain physical placement, photos and presentation markings.
 
 ## Reading order
 
@@ -29,7 +35,7 @@ Each source has a matching rendered SVG in [diagrams](../diagrams/).
 | Camera OS, UI and vision | Bullseye, PyQt5 and YOLOv8n | The [branch camera README](../../camera/README.md) describes Bookworm, PyQt6 and YOLO11n. The camera implementation branch defaults to `yolo26n.pt`. [Camera configuration](https://github.com/theme222/FoodWarden/blob/476aba0/camera/src/foodwarden_camera/config.py) |
 | Fridge temperature and I2C | SHT31 and SGP40 on GPIO 21/22 | The root summary names LM73. The fridge fixes branch uses SHT31 and SGP40 on GPIO 4/5 and the LED matrix on GPIO 21/22. [Fridge architecture](https://github.com/theme222/FoodWarden/blob/dc81386/fridge/ARCHITECTURE.md) |
 | VOC while door is open | SHT31 compensation and SGP40 heater gated during sleep | The fridge fixes branch still runs the gas index algorithm, reports a missing VOC value during open and cooldown periods, and uses SHT31 compensation when available. The web chart leaves those points blank. [Issue #1](https://github.com/theme222/FoodWarden/issues/1) · [VOC filter](https://github.com/theme222/FoodWarden/blob/dc81386/fridge/src/door_voc_filter.h) |
-| Door motor direction pin | AIN2 GPIO 25 | The door implementation branch documents AIN2 GPIO 18. Check its current pin table before wiring. [Door architecture](https://github.com/theme222/FoodWarden/blob/c5d4b7e/door/ARCHITECTURE.md) |
+| Door motor direction pin and current sensor | AIN2 GPIO 25. INA219 on GPIO 21/22 at 100 Hz. | The door implementation branch documents AIN2 GPIO 18, INA219 on GPIO 4/5 or 21/22, and at least 50 Hz in its pin table. Confirm the selected bus and sample rate on the built unit. [Door architecture](https://github.com/theme222/FoodWarden/blob/c5d4b7e/door/ARCHITECTURE.md) |
 | LINE digest time | 08:00 | The open issue proposes 06:00, summarizes alerts and requests rate limits and user registration. The time remains an open server decision. [Issue #3](https://github.com/theme222/FoodWarden/issues/3) |
 | Gateway component heartbeat | Not shown in the original drawing | PR #5 proposes `POST /api/status` every 60 seconds. The server receiver is present here. The camera implementation branch has no matching sender in the reviewed revision. [PR #5](https://github.com/theme222/FoodWarden/pull/5) |
 
