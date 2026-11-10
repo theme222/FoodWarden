@@ -39,7 +39,7 @@ Keep the emulator running. In a second PowerShell window, also in `server/`, run
 
 ```powershell
 Invoke-RestMethod 'http://127.0.0.1:5001/demo-foodwarden/asia-southeast1/api/health'
-npm.cmd --prefix .\functions run test:emulator
+node --test .\functions\test\telemetry.test.cjs
 ```
 
 The health endpoint reads the Firestore emulator and returns `ok = True`. The integration test seeds a temporary fridge and gateway token, sends CBS telemetry, and checks authentication, payload validation, retry deduplication, and older readings arriving after newer ones. The Emulator UI is at `http://127.0.0.1:4000`. Rebuild Functions after changing TypeScript.
@@ -78,6 +78,29 @@ bunx vite
 # Compile Vite + React SPA to dist/ for Firebase Hosting
 bunx vite build
 ```
+
+### Run the dashboard locally
+
+Use Node.js 22 and JDK 21. From `server/`, install and start the emulator suite:
+
+```powershell
+npm.cmd --prefix functions ci
+npm.cmd --prefix functions run build
+$env:FIREBASE_STORAGE_BUCKET = 'demo-foodwarden.appspot.com'
+firebase.cmd emulators:start --only auth,functions,firestore,storage --project demo-foodwarden
+```
+
+In another PowerShell window in `server/`:
+
+```powershell
+bun install --frozen-lockfile
+$env:VITE_USE_EMULATORS = 'true'
+bun run dev:dashboard
+```
+
+Open the Vite URL and use the emulator's Google sign-in popup. To grant access, use the emulator UI to create a Firestore document at `/fridges/kitchen` with `name` set to `Kitchen fridge` and a `members` map whose key is the account's exact verified email and whose value is `owner`. The same document shape applies to provisioned fridges. In a real Firebase project enable Google Auth and use the `VITE_FIREBASE_*` settings from [.env.example](../.env.example).
+
+Run `bun run typecheck`, `bun test src/model.test.ts`, and `bun run build` from `server/`. With the four emulators running, `npm.cmd --prefix functions run test:emulator` exercises the telemetry and dashboard endpoints. See the [work log](review/DASHBOARD.md) for scope and decisions and [verification](review/VERIFICATION.md) for results.
 
 ### Typecheck (`tsc`)
 ```bash

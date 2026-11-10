@@ -1,8 +1,17 @@
 {
   "functions": {
     "source": "functions",
-    "ignore": ["node_modules", ".git", "firebase-debug.log", "firebase-debug.*.log", "*.local", "test"],
-    "predeploy": ["npm --prefix \"$RESOURCE_DIR\" run build"]
+    "ignore": [
+      "node_modules",
+      ".git",
+      "firebase-debug.log",
+      "firebase-debug.*.log",
+      "*.local",
+      "test"
+    ],
+    "predeploy": [
+      "npm --prefix \"$RESOURCE_DIR\" run build"
+    ]
   },
   "firestore": {
     "database": "(default)",
@@ -11,8 +20,53 @@
     "indexes": "firestore.indexes.json"
   },
   "emulators": {
-    "functions": { "host": "127.0.0.1", "port": 5001 },
-    "firestore": { "host": "127.0.0.1", "port": 8080 },
-    "ui": { "enabled": true, "port": 4000 }
+    "functions": {
+      "host": "127.0.0.1",
+      "port": 5001
+    },
+    "firestore": {
+      "host": "127.0.0.1",
+      "port": 8080
+    },
+    "ui": {
+      "enabled": true,
+      "port": 4000
+    },
+    "auth": {
+      "host": "127.0.0.1",
+      "port": 9099
+    },
+    "storage": {
+      "host": "127.0.0.1",
+      "port": 9199
+    },
+    "hosting": {
+      "host": "127.0.0.1",
+      "port": 5000
+    }
+  },
+  "storage": {
+    "rules": "storage.rules"
+  },
+  "hosting": {
+    "public": "dist",
+    "ignore": [
+      "firebase.json",
+      "**/.*",
+      "**/node_modules/**"
+    ],
+    "rewrites": [
+      {
+        "source": "/api/**",
+        "function": {
+          "functionId": "api",
+          "region": "asia-southeast1"
+        }
+      },
+      {
+        "source": "**",
+        "destination": "/index.html"
+      }
+    ]
   }
 }

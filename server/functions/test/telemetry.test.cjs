@@ -5,14 +5,15 @@ const { deleteApp, initializeApp } = require("firebase-admin/app");
 const { getFirestore } = require("firebase-admin/firestore");
 
 const projectId = "demo-foodwarden";
-const api = `http://127.0.0.1:5001/${projectId}/asia-southeast1/api`;
+const functions = process.env.FOODWARDEN_FUNCTIONS_HOST || "127.0.0.1:5001";
+const api = `http://${functions}/${projectId}/asia-southeast1/api`;
 
 test("the local API authenticates, validates, and deduplicates telemetry", async (t) => {
   const health = await fetch(`${api}/health`);
   assert.equal(health.status, 200);
   assert.deepEqual(await health.json(), { ok: true });
 
-  process.env.FIRESTORE_EMULATOR_HOST = "127.0.0.1:8080";
+  process.env.FIRESTORE_EMULATOR_HOST ??= "127.0.0.1:8080";
   const app = initializeApp({ projectId });
   const firestore = getFirestore(app);
   const token = randomUUID();

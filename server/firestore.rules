@@ -1,8 +1,35 @@
 rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
-    match /{document=**} {
-      allow read, write: if false;
+    function verifiedEmail() {
+      return request.auth != null && request.auth.token.email is string
+        && request.auth.token.email_verified == true;
+    }
+
+    function isMember(fridge) {
+      return verifiedEmail() && fridge.members[request.auth.token.email] in ['owner', 'member'];
+    }
+
+    function canReadFridge(fridgeId) {
+      return isMember(get(/databases/$(database)/documents/fridges/$(fridgeId)).data);
+    }
+
+    match /fridges/{fridgeId} {
+      match /system_status/{statusId} {
+        allow get: if statusId == 'latest' && canReadFridge(fridgeId);
+      }
+
+      match /telemetry_minute/{bucket} {
+        allow read: if canReadFridge(fridgeId);
+      }
+
+      match /inventory/{itemId} {
+        allow read: if canReadFridge(fridgeId);
+      }
+
+      match /door_events/{eventId} {
+        allow read: if canReadFridge(fridgeId);
+      }
     }
   }
 }

@@ -2,10 +2,12 @@
   "name": "foodwarden-functions",
   "private": true,
   "main": "lib/index.js",
-  "engines": { "node": "22" },
+  "engines": {
+    "node": "22"
+  },
   "scripts": {
     "build": "tsc",
-    "test:emulator": "node --test test/telemetry.test.cjs"
+    "test:emulator": "node --test"
   },
   "dependencies": {
     "firebase-admin": "^13.10.0",

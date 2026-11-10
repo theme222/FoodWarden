@@ -9,12 +9,25 @@
     "test": "bun test",
     "typecheck": "bunx tsc --noEmit",
     "format": "bunx prettier --write .",
-    "format:check": "bunx prettier --check ."
+    "format:check": "bunx prettier --check .",
+    "dev:dashboard": "vite",
+    "build": "vite build",
+    "preview": "vite preview"
   },
   "devDependencies": {
-    "@types/bun": "latest"
+    "@types/bun": "latest",
+    "@types/react": "^19",
+    "@types/react-dom": "^19",
+    "@vitejs/plugin-react": "^5",
+    "vite": "^7"
   },
   "peerDependencies": {
     "typescript": "^5.7.0"
+  },
+  "dependencies": {
+    "firebase": "^12",
+    "react": "^19",
+    "react-dom": "^19",
+    "react-router-dom": "^7"
   }
 }

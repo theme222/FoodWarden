@@ -10,6 +10,14 @@ This document specifies the cloud infrastructure, runtime environment, third-par
 
 ---
 
+## Implemented dashboard paths
+
+The implementation in this branch adds `/fridges/:fridgeId/devices`, `/fridges/:fridgeId/food/add` and `/fridges/:fridgeId/food/:itemId`. The dashboard reads inventory and telemetry through member-scoped Firestore listeners. The member list stays in the private fridge document. `GET /api/fridges` returns the authenticated user's fridge summaries, and `POST /api/fridges/:fridgeId/inventory` and `GET /api/fridges/:fridgeId/inventory/:itemId/photo` check the user's verified email and current membership.
+
+Gateway `POST /api/status` stores the latest report in `/fridges/{fridgeId}/system_status/latest` with `gateway_seen_s`, `received_s`, and a `nodes` array. Each node has its reported `last_seen_s` and retained `last_known_seen_s`. The dashboard shows both when they differ. Camera recognition, settings and LINE sections below describe the wider system design.
+
+Manual web items may have a JPEG in `food_crops/{fridgeId}/`. They use the same `image_storage_path` convention as camera entries. A fridge member's ID token authorizes photo access through Functions.
+
 ## 1. System Topology & Data Flow
 
 ```text
@@ -219,7 +227,7 @@ In `firebase.json`:
   │       - category: FoodCategory              # Canonical category key (e.g. "Dairy")
   │       - estimated_expiry_date: string       # ISO 8601 date string ("YYYY-MM-DD")
   │       - check_in_timestamp_s: uint64        # Epoch timestamp of check-in
-  │       - image_storage_path: string | null   # Firebase Storage path (null for manual web check-ins; deleted on check-out)
+  │       - image_storage_path: string | null   # Firebase Storage path (null when no photo is available; intended to be deleted on check-out)
   │       - confidence: number                  # Recognition confidence: 0.0-1.0 (defaults to 1.0 for manual web entries)
   │       - check_in_source: string             # "CAMERA" or "WEB_MANUAL"
   │

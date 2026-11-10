@@ -1,4 +1,5 @@
 import type { Firestore } from "firebase-admin/firestore";
+import { findGatewayFridge } from "./gateway";
 
 interface TelemetrySample {
   node_id: string;
@@ -63,13 +64,7 @@ export async function ingestTelemetry(
   buckets: Map<string, TelemetrySample[]>,
 ): Promise<number | null> {
   return firestore.runTransaction(async (transaction) => {
-    const matches = await transaction.get(
-      firestore.collectionGroup("private").where("gatewayTokenHash", "==", tokenHash),
-    );
-    const configs = matches.docs.filter((doc) =>
-      /^fridges\/[^/]+\/private\/config$/.test(doc.ref.path),
-    );
-    const fridgeRef = configs.length === 1 ? configs[0]?.ref.parent.parent : null;
+    const fridgeRef = await findGatewayFridge(firestore, transaction, tokenHash);
     if (!fridgeRef) return null;
 
     const bucketRefs = [...buckets.keys()].map((id) =>
