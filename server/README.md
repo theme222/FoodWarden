@@ -24,6 +24,10 @@ Built as a **Bun** and **TypeScript** project on **Firebase**, it persists senso
 
 ---
 
+### Production regions
+
+The production Firestore database `(default)` uses `asia-southeast3` (Bangkok), matching [firebase.json](firebase.json). Cloud Functions and the Hosting API rewrite use `asia-southeast1` (Singapore). These are separate settings; the existing API URLs and local emulator commands still use the Functions region. Firebase web configuration in `.env.local` does not need a region change.
+
 ## 2. Run the Firebase backend locally
 
 Install Node.js 22, JDK 21, and the Firebase CLI. Run these PowerShell commands from `server/`. The Firebase configuration is already in this directory.
