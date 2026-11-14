@@ -15,6 +15,17 @@ export interface StoredNodeStatus extends NodeStatus {
   last_known_seen_s: number | null;
 }
 
+export interface FridgeStatusSnapshot {
+  gateway_seen_s: number;
+  received_s: number;
+  nodes: StoredNodeStatus[];
+}
+
+export interface IngestStatusResult {
+  updatedCount: number;
+  status: FridgeStatusSnapshot | null;
+}
+
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
@@ -83,7 +94,7 @@ export async function ingestStatus(
   fridgeId: string,
   report: StatusReport,
   receivedS: number,
-): Promise<number> {
+): Promise<IngestStatusResult> {
   const existing = await db
     .prepare(
       "SELECT gateway_seen_s, nodes_json FROM system_status WHERE fridge_id = ?",
@@ -92,7 +103,7 @@ export async function ingestStatus(
     .first<{ gateway_seen_s: number; nodes_json: string }>();
 
   if (existing && existing.gateway_seen_s >= report.gatewaySeenS) {
-    return 0;
+    return { updatedCount: 0, status: null };
   }
 
   const previous = readLastKnown(existing?.nodes_json);
@@ -128,5 +139,16 @@ export async function ingestStatus(
   ]);
 
   const changes = upsertResult?.meta.changes ?? 0;
-  return changes > 0 ? storedNodes.length : 0;
+  if (changes <= 0) {
+    return { updatedCount: 0, status: null };
+  }
+
+  return {
+    updatedCount: storedNodes.length,
+    status: {
+      gateway_seen_s: report.gatewaySeenS,
+      received_s: receivedS,
+      nodes: storedNodes,
+    },
+  };
 }

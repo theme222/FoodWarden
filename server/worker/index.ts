@@ -39,6 +39,7 @@ import {
   readInventoryPhoto,
   updateInventoryItem,
 } from "./lib/inventory";
+import { notifyFridgeRoom } from "./lib/room";
 import { ingestStatus, parseStatus } from "./lib/status";
 import { ingestTelemetry, parseTelemetry } from "./lib/telemetry";
 import type { ApiErrorEnvelope, AppBindings } from "./types";
@@ -95,7 +96,10 @@ async function requireGatewayFridge(
 async function requireUser(
   c: Context<{ Bindings: AppBindings }>,
 ): Promise<AuthenticatedUser | Response> {
-  c.header("Cache-Control", "private, no-store");
+  const isUpgrade = c.req.header("Upgrade")?.toLowerCase() === "websocket";
+  if (!isUpgrade) {
+    c.header("Cache-Control", "private, no-store");
+  }
   const user = await getAuthenticatedUser(c.env, c.req.raw);
   if (!user) {
     return c.json<ApiErrorEnvelope>(
@@ -211,6 +215,26 @@ app.post("/api/fridges", async (c) => {
   return c.json(created, 201);
 });
 
+app.get("/api/fridges/:fridgeId/ws", async (c) => {
+  if (c.req.header("Upgrade")?.toLowerCase() !== "websocket") {
+    return c.json<ApiErrorEnvelope>(
+      { error: "INVALID_PAYLOAD", message: "Expected WebSocket upgrade." },
+      426,
+    );
+  }
+
+  const auth = await requireFridgeRole(c, "any");
+  if (auth instanceof Response) return auth;
+
+  const id = c.env.FRIDGE_ROOM.idFromName(auth.fridgeId);
+  const stub = c.env.FRIDGE_ROOM.get(id);
+  const headers = new Headers(c.req.raw.headers);
+  headers.set("x-fw-user-email", auth.user.email);
+  headers.set("x-fw-fridge-id", auth.fridgeId);
+
+  return stub.fetch(new Request(c.req.raw, { headers }));
+});
+
 app.patch("/api/fridges/:fridgeId", async (c) => {
   const auth = await requireFridgeRole(c, "owner");
   if (auth instanceof Response) return auth;
@@ -280,6 +304,7 @@ app.delete("/api/fridges/:fridgeId", async (c) => {
   if (auth instanceof Response) return auth;
 
   await deleteFridge(c.env.DB, c.env.PHOTOS, auth.fridgeId);
+  await notifyFridgeRoom(c.env, auth.fridgeId, { type: "fridge_deleted" });
   return c.json({ ok: true, deleted: true });
 });
 
@@ -466,6 +491,11 @@ app.delete("/api/fridges/:fridgeId/members/:email", async (c) => {
       409,
     );
   }
+
+  await notifyFridgeRoom(c.env, auth.fridgeId, {
+    type: "member_revoked",
+    email,
+  });
   return c.json({ ok: true, deleted: true });
 });
 
@@ -510,6 +540,13 @@ app.post("/api/fridges/:fridgeId/inventory", async (c) => {
       409,
     );
   }
+  if (outcome === "created") {
+    await notifyFridgeRoom(c.env, auth.fridgeId, {
+      type: "inventory_changed",
+      action: "created",
+      itemId: food.itemId,
+    });
+  }
   return c.json({ item_id: food.itemId }, outcome === "created" ? 201 : 200);
 });
 
@@ -549,6 +586,12 @@ app.patch("/api/fridges/:fridgeId/inventory/:itemId", async (c) => {
       404,
     );
   }
+
+  await notifyFridgeRoom(c.env, auth.fridgeId, {
+    type: "inventory_changed",
+    action: "updated",
+    itemId,
+  });
   return c.json({ ok: true, item_id: itemId });
 });
 
@@ -576,6 +619,12 @@ app.delete("/api/fridges/:fridgeId/inventory/:itemId", async (c) => {
       404,
     );
   }
+
+  await notifyFridgeRoom(c.env, auth.fridgeId, {
+    type: "inventory_changed",
+    action: "deleted",
+    itemId,
+  });
   return c.json({ ok: true, item_id: itemId, deleted: true });
 });
 
@@ -663,6 +712,13 @@ app.all("/api/telemetry", async (c) => {
 
   const nowS = Math.floor(Date.now() / 1000);
   const ingestedCount = await ingestTelemetry(c.env.DB, auth, samples, nowS);
+  if (ingestedCount > 0) {
+    await notifyFridgeRoom(c.env, auth, {
+      type: "telemetry",
+      samples,
+      last_seen_s: nowS,
+    });
+  }
   return c.json({ success: true, ingested_count: ingestedCount });
 });
 
@@ -683,7 +739,18 @@ app.all("/api/status", async (c) => {
     );
   }
 
-  const updatedCount = await ingestStatus(c.env.DB, auth, report, receivedS);
+  const { updatedCount, status } = await ingestStatus(
+    c.env.DB,
+    auth,
+    report,
+    receivedS,
+  );
+  if (updatedCount > 0 && status) {
+    await notifyFridgeRoom(c.env, auth, {
+      type: "status",
+      status,
+    });
+  }
   return c.json({ success: true, updated_count: updatedCount });
 });
 
@@ -705,6 +772,12 @@ app.all("/api/door_events", async (c) => {
 
   const nowS = Math.floor(Date.now() / 1000);
   const ingestedCount = await ingestDoorEvents(c.env.DB, auth, events, nowS);
+  if (ingestedCount > 0) {
+    await notifyFridgeRoom(c.env, auth, {
+      type: "door_events",
+      events,
+    });
+  }
   return c.json({ success: true, ingested_count: ingestedCount });
 });
 
