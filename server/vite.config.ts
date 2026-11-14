@@ -3,15 +3,16 @@ import { defineConfig, loadEnv } from "vite";
 
 export default defineConfig(({ mode }) => {
   const env = loadEnv(mode, process.cwd(), "VITE_");
-  const projectId = env.VITE_FIREBASE_PROJECT_ID || "demo-foodwarden";
+  const target = env.VITE_WORKER_URL || "http://127.0.0.1:8787";
 
   return {
     plugins: [react()],
     server: {
       proxy: {
         "/api": {
-          target: "http://127.0.0.1:" + (env.VITE_EMULATOR_FUNCTIONS_PORT || "5001"),
-          rewrite: (path) => "/" + projectId + "/asia-southeast1" + path,
+          target,
+          changeOrigin: true,
+          ws: true,
         },
       },
     },
