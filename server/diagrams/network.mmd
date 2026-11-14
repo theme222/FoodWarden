@@ -1,11 +1,11 @@
 sequenceDiagram
     accTitle: FoodWarden physical connections and heartbeat
-    accDescr: Device traffic on BLE and the home LAN, followed by the gateway's authenticated connection to Firebase.
+    accDescr: Device traffic on BLE and the home LAN, followed by the gateway's authenticated connection to Cloudflare Workers.
     participant F as F0 · Fridge sensor
     participant C as C0 · Camera gateway
     participant R as Home router / LAN
     participant D as D0 · Door closer
-    participant S as S · Firebase API
+    participant S as S · Cloudflare Worker
 
     rect rgb(233, 243, 255)
         Note over F,C: Direct BLE GATT. Fridge sensor has no Wi-Fi.
