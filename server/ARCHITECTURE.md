@@ -15,7 +15,7 @@ This document specifies the cloud infrastructure, runtime environment, third-par
 ```text
 +-----------------------+              HTTPS JSON / Multipart (CBS.md)       +----------------------------------------+
 |  Node 'C' Gateway     | <==================================================> |  Cloudflare Worker (Hono TypeScript)   |
-|  (Pi-top [4] Python)  |                                                      |  worker/index.ts (API + Scheduled Cron)|
+|  (Pi-top [4] Python)  |                                                      |  workers/index.ts (API + Scheduled Cron)|
 +-----------------------+                                                      +----------------------------------------+
                                                                                      |          |            |
 +------------------------------------------------------+                             |          |            | Context-Enriched
@@ -58,7 +58,7 @@ This document specifies the cloud infrastructure, runtime environment, third-par
 | Component / Layer                       | Specific Technology / Package                                 | Role in FoodWarden                                                                                                                                                                    |
 | --------------------------------------- | ------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | **Package Manager & Test Runner**       | **Bun (`bun`)** + **Vitest**                                  | Fast dependency management, frontend unit testing (`bun test src`), formatting, builds, and Miniflare Worker testing (`@cloudflare/vitest-plugin`).                                   |
-| **Language**                            | **TypeScript (`strict: true`)**                               | Strict static typing across [`worker/`](worker/index.ts), D1 query models, and [`src/`](src/main.tsx) with zero `any`.                                                                |
+| **Language**                            | **TypeScript (`strict: true`)**                               | Strict static typing across [`workers/`](workers/index.ts), D1 query models, and [`src/`](src/main.tsx) with zero `any`.                                                              |
 | **Frontend Framework & Build Tool**     | **Vite 7 + React 19 + React Router 7**                        | Compiles the mobile-first SPA bundle to `dist/`, served directly by Cloudflare Workers Static Assets (`run_worker_first: ["/api/*"]`).                                                |
 | **Edge API Runtime & Router**           | **Cloudflare Workers + Hono (`hono`)**                        | Handles gateway ingestion, AI check-in/out orchestration, member-scoped REST APIs, photo streaming, WebSocket upgrades, and Cron triggers.                                            |
 | **Relational Database**                 | **Cloudflare D1 (SQLite)**                                    | Stores Better Auth sessions, fridge RBAC, FEFO inventory, deduplicated telemetry/door events, node heartbeats, and alert cooldowns (`migrations/0001_init.sql`).                      |
@@ -117,7 +117,7 @@ Users switch cleanly between **Thai (`th`)** and **English (`en`)** without relo
 
 ---
 
-## 4. Database & API Architecture (`worker/`)
+## 4. Database & API Architecture (`workers/`)
 
 ### 4.1 Gateway Endpoints (`Authorization: Bearer <GATEWAY_TOKEN>`)
 

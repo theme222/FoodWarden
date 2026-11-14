@@ -46,4 +46,4 @@
 
 - [x] **Frontend Unit Tests (`bun run test`):** `src/model.test.ts` covers FEFO ordering and bilingual formatters.
 - [x] **Miniflare Worker Integration Tests (`bun run test:worker`):** Covers health, gateway telemetry/status/door events, Better Auth & RBAC, `FridgeRoom` WebSocket hibernation, Gemini check-in/out & retries, LINE alerts/cooldowns, and Cron jobs.
-- [x] **Static Type Verification (`bun run typecheck`):** Passes `tsc --noEmit` for both frontend (`tsconfig.json`) and Worker (`worker/tsconfig.json`).
+- [x] **Static Type Verification (`bun run typecheck`):** Passes `tsc --noEmit` for both frontend (`tsconfig.json`) and Worker (`workers/tsconfig.json`).

@@ -19,7 +19,7 @@ export default defineConfig(async () => {
       }),
     ],
     test: {
-      include: ["worker/**/*.test.ts"],
+      include: ["workers/**/*.test.ts"],
     },
   };
 });
