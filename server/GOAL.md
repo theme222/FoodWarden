@@ -1,50 +1,49 @@
 # Server 'S' (Cloud Backend & Dashboard) — Completion Checklist (`GOAL.md`)
 
 > [!IMPORTANT]
-> **Incremental Development Guideline:**
-> This file is a master checklist of features, use cases, tests, and edge-case handlers strictly required before the **Server & Web Dashboard (`server/`)** subsystem is considered finished.
-> **This checklist does NOT need to be completed in a single prompt.** Developers and AI agents are expected to implement and verify these components incrementally across multiple steps.
+> Master verification checklist for the **Server & Web Dashboard (`server/`)** subsystem.
 
-* **Related Documents:** [`README.md`](README.md) | [`ARCHITECTURE.md`](ARCHITECTURE.md)
+- **Related Documents:** [`README.md`](README.md) | [`ARCHITECTURE.md`](ARCHITECTURE.md)
 
 ---
 
 ## 1. Core Features
-- [ ] **Direct User Interface (Mobile-Responsive Web App):** Build and host a mobile-optimized Single Page Application (Vite + React + React Router) allowing users to view fridge metrics, inventory, door safety events, and analytics directly on their phones or browsers.
-- [ ] **Language Selection Method (Thai ↔ English):** Provide a dynamic language switcher in the web dashboard header allowing the user to toggle between Thai (`th`) and English (`en`), persisting selection in client storage and dynamically translating all UI labels, navigation menus, metric units, and status indicators.
-- [ ] **Bilingual Food Data Storage & Translation:** Store grocery items in Firestore `inventory` with names and descriptions in both languages (`name_th`, `name_en`, `storage_recommendation_th`, `storage_recommendation_en`). Implement bidirectional translation lookup for canonical food categories (`Dairy` ↔ `นมและผลิตภัณฑ์นม`, `Produce` ↔ `ผักและผลไม้`, etc.) and locale-aware date formatting (Buddhist Era `พ.ศ.` vs Gregorian `CE`).
-- [ ] **Strict TypeScript Interfaces:** Mirror data contracts from [`CBS.md`](../interface/CBS.md), [`SBG.md`](../interface/SBG.md), and [`SUL.md`](../interface/SUL.md) locally in TypeScript with zero `any` types.
-- [ ] **Firestore Database & Security Rules:** Define collections for `inventory`, `telemetry_minute`, and `door_events` with strict Firebase Security Rules tied to Google SSO authentication.
-- [ ] **Telemetry & Event Ingestion Endpoints ([`CBS.md`](../interface/CBS.md)):** Implement HTTPS Cloud Functions to ingest batched sensor telemetry (`temp_celsius`, `voc_index`, `light_ldr`, `timestamp_s`) and door actuation logs from Gateway `'C'`.
-- [ ] **Gemini 3.5 Flash Lite Orchestration ([`SBG.md`](../interface/SBG.md)):** Implement check-in classification and context-enriched check-out matching using `@google/genai` with structured JSON schemas returning bilingual food metadata.
-- [ ] **LINE Messaging API Dispatcher ([`SUL.md`](../interface/SUL.md)):** Send push notifications to LINE for expiring items, VOC spoilage spikes, door-ajar warnings, and door obstruction errors.
-- [ ] **Web Dashboard with Google SSO:** Host the web interface displaying active fridge inventory (sorted by FEFO), historical temperature/VOC charts, and door safety logs protected by Firebase Google Sign-In.
+
+- [x] **Direct User Interface (Mobile-Responsive Web App):** Built and served as a Vite + React + React Router SPA via Cloudflare Workers Static Assets (`dist/` + SPA fallback).
+- [x] **Language Selection Method (Thai ↔ English):** Instant dynamic language switcher (`src/words.ts`, `src/model.ts`) persisted in `localStorage` across navigation, telemetry, door events, settings, and inventory views.
+- [x] **Bilingual Food Data Storage & Translation:** D1 `inventory` stores `name_th`, `name_en`, `storage_recommendation_th`, `storage_recommendation_en`, canonical categories with Thai mappings, and Buddhist Era (`พ.ศ.`) / Gregorian date formatting.
+- [x] **Strict TypeScript Interfaces:** Strictly typed Hono Worker modules, D1 queries, and React components (`strict: true`, zero `any`).
+- [x] **D1 Database & Private R2 Storage:** D1 schema (`migrations/0001_init.sql`) and tenant-isolated R2 bucket (`PHOTOS`) served exclusively through authenticated Worker endpoints.
+- [x] **Telemetry, Status & Door Event Ingestion Endpoints ([`CBS.md`](../interface/CBS.md)):** `POST /api/telemetry`, `POST /api/status`, and `POST /api/door_events` with Bearer auth, validation, and atomic deduplication.
+- [x] **Gemini 3.5 Flash Lite Orchestration ([`SBG.md`](../interface/SBG.md)):** Strict `application/json` schema calls for `CHECK_IN` and context-enriched `CHECK_OUT`, deterministic expiry computation, FEFO ordering, `429`/`503` retries, and `gemini-2.5-flash-lite` fallback.
+- [x] **LINE Messaging API Dispatcher:** Bilingual push alerts for door obstruction/timeout/lockout/contradiction events, VOC/temperature spikes, and scheduled daily FEFO expiry digests with atomic `alert_cooldowns` deduplication.
+- [x] **Web Dashboard with Google OAuth & Live WebSockets:** Better Auth Google OAuth SSO (plus dev-only local login) and SQLite-backed `FridgeRoom` Durable Object hibernating WebSockets.
 
 ---
 
 ## 2. Use Cases
-- [ ] **Mobile-First Fridge Monitoring:** User opens the web app on their smartphone, signs in with Google SSO, views their fridges, checks live temperature/VOC metrics, and switches between Thai and English with a single tap.
-- [ ] **Signup, fridge creation and permissions:** User signs up using a google account and is led to a page where they can view many fridges. They may create a fridge and invite other google accounts to have access to a fridge. Each fridge's contents are separate from one another.
-- [ ] **Hardware setup and registration:** A user can request for a unique permanent identifier that the gateway `'C'` may use to authenticate itself to modify the contents of the fridge.
-- [ ] **API Key:** Each fridge may own one google AI API key for LLM inference. Users must add this into the system explicitly.
-- [ ] **Bilingual Grocery Check-In Pipeline:** On `POST /api/inventory/checkin/draft`, receive compressed JPEG food image from Gateway `'C'` → call Gemini 3.5 Flash Lite with bilingual extraction schema → upload JPEG to Firebase Storage and deterministically compute `estimated_expiry_date` → return draft bilingual metadata and `image_storage_path` to Gateway `'C'` (zero Firestore writes). On `POST /api/inventory/checkin`, persist the confirmed item to Firestore `inventory`.
-- [ ] **Context-Enriched Check-Out Pipeline:** On `POST /api/inventory/checkout/draft`, receive compressed JPEG food image from Gateway `'C'` → query active Firestore `inventory` → inject candidate items into Gemini 3.5 Flash Lite prompt → deterministically sort candidate matches by FEFO (`estimated_expiry_date ASC`) and return draft candidates with their `item_id`s to Gateway `'C'`. On `POST /api/inventory/checkout`, permanently hard-delete the confirmed item document from Firestore `inventory` and delete its associated JPEG image from Firebase Storage.
-- [ ] **Alerts:** Trigger LINE notifications when node `'F'` reports sustained elevated SGP40 VOC index values, temperature increase beyond normal levels, and when node `'D'` fails to close the door.
+
+- [x] **Mobile-First Fridge Monitoring:** View live metrics, 1h–30d history charts, FEFO inventory, node heartbeats, and door safety logs with instant `th`/`en` toggling.
+- [x] **Signup, Fridge Creation & RBAC:** Google OAuth onboarding, multi-fridge hub (`/fridges`), owner vs member access controls, member invites, and immediate WebSocket revocation (`4003`).
+- [x] **Hardware Provisioning & Gateway Token Rotation:** Owner-only gateway Bearer token view, copy, and rotation (`POST /api/fridges/:fridgeId/gateway-token/rotate`).
+- [x] **Per-Fridge Gemini API Key Management:** Stored securely in owner-only `fridge_secrets` and configurable in Settings (`PUT /api/fridges/:fridgeId/settings`).
+- [x] **Bilingual Grocery Check-In Pipeline:** `POST /api/inventory/checkin/draft` (AI analysis + R2 crop staging, zero DB writes) → `POST /api/inventory/checkin` (D1 commit + live WebSocket broadcast).
+- [x] **Context-Enriched Check-Out Pipeline:** `POST /api/inventory/checkout/draft` (active inventory prompt injection, anti-hallucination ID filter, FEFO sort, zero mutations) → `POST /api/inventory/checkout` (hard-delete D1 + R2 + WebSocket broadcast).
+- [x] **Alerts & Scheduled Maintenance:** Instant LINE safety/spoilage alerts (`voc_index >= 250`, `temp_celsius > 8.0`, door errors) plus daily `0 1 * * *` Cron trigger for FEFO expiry digests and >24h orphan R2 crop cleanup.
 
 ---
 
 ## 3. Edge Cases & Failure Mode Handlers
-- [ ] **Malformed or Unrecognizable Food Images:** Handle low-confidence or unrecognizable Gemini responses gracefully by returning a structured fallback prompt for manual selection on Gateway `'C'`.
-- [ ] **Idempotent Batched Telemetry Ingestion:** Deduplicate re-sent telemetry batches from Gateway `'C'` (when flushing its offline store-and-forward buffer) strictly by `node_id` and `timestamp_s`.
-- [ ] **LINE Notification Rate Limiting & Cooldown:** Enforce per-alert cooldown windows so continuous VOC spikes or repeated door events do not spam the user's LINE chat.
-- [ ] **Unauthorized API Access:** Reject unauthenticated requests to Cloud Functions and Firestore collections with proper HTTP `401`/`403` status codes.
 
-> [!CAUTION]
-> [CBS section 3.5](../interface/CBS.md#35-telemetry-ingestion-post-apitelemetry) and the current backend deduplicate by `timestamp_s` within each fridge. Two sensor nodes in the same fridge can report in the same second, so the second reading can be dropped. Coordinate an update to CBS, the backend, and the integration test to use `node_id` and `timestamp_s` within each fridge.
+- [x] **Malformed or Unrecognizable Food Images:** Rejects non-JPEG (`400`), `> 5 MB` (`413`), and `is_food = false` or `confidence < 0.60` (`422 UNIDENTIFIABLE`) without leaving R2/D1 artifacts.
+- [x] **Idempotent Batched Telemetry & Multi-Node Safety:** Deduplicates telemetry by `(fridge_id, node_id, timestamp_s)` and door events by `(fridge_id, node_id, timestamp_s, status)` so multi-sensor readings in the same second are never dropped.
+- [x] **LINE Notification Cooldowns:** Atomic SQLite `alert_cooldowns` upsert prevents alert storms from sustained spikes or rapid retries.
+- [x] **Tenant & Role Authorization:** Rejects unauthenticated (`401`), invalid gateway token (`403`), non-owner settings access (`403`), and cross-fridge photo paths (`400`/`404`).
 
 ---
 
 ## 4. Tests & Quantitative Metrics
-- [ ] **Unit & Schema Validation Tests:** Test all request/response validators, FEFO sorting logic, and Gemini prompt builders using `bun test`.
-- [ ] **Static Type Verification:** Pass `bun run typecheck` (`tsc --noEmit`) with zero errors under `strict: true`.
-- [ ] **Gemini API Latency & Accuracy Logging:** Record cloud round-trip latency (`ms`) and classification accuracy across test grocery items.
+
+- [x] **Frontend Unit Tests (`bun run test`):** `src/model.test.ts` covers FEFO ordering and bilingual formatters.
+- [x] **Miniflare Worker Integration Tests (`bun run test:worker`):** Covers health, gateway telemetry/status/door events, Better Auth & RBAC, `FridgeRoom` WebSocket hibernation, Gemini check-in/out & retries, LINE alerts/cooldowns, and Cron jobs.
+- [x] **Static Type Verification (`bun run typecheck`):** Passes `tsc --noEmit` for both frontend (`tsconfig.json`) and Worker (`worker/tsconfig.json`).

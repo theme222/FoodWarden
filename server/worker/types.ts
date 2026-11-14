@@ -9,6 +9,12 @@ export interface AppBindings {
   GOOGLE_CLIENT_ID?: string;
   GOOGLE_CLIENT_SECRET?: string;
   DEV_AUTH_BYPASS_EMAIL?: string;
+  GEMINI_API_KEY?: string;
+  GEMINI_MODEL?: string;
+  GEMINI_FALLBACK_MODEL?: string;
+  GEMINI_API_BASE_URL?: string;
+  LINE_CHANNEL_ACCESS_TOKEN?: string;
+  LINE_API_BASE_URL?: string;
 }
 
 declare global {
@@ -32,6 +38,7 @@ export type ApiErrorCode =
   | "METHOD_NOT_ALLOWED"
   | "CONFLICT"
   | "PHOTO_NOT_FOUND"
+  | "SERVICE_UNAVAILABLE"
   | "INTERNAL_ERROR";
 
 export interface ApiErrorEnvelope {

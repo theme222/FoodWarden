@@ -13,6 +13,7 @@ export default defineConfig(async () => {
         miniflare: {
           bindings: {
             TEST_MIGRATIONS: migrations,
+            LINE_CHANNEL_ACCESS_TOKEN: "test-line-channel-token",
           },
         },
       }),

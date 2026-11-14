@@ -1,5 +1,14 @@
 import { Hono, type Context } from "hono";
 import {
+  commitCameraCheckIn,
+  listCheckOutCandidateRows,
+  parseCheckInCommit,
+  parseCheckOutCommit,
+  parseMultipartJpeg,
+  resolveCheckOutDraft,
+  toPromptCandidates,
+} from "./lib/ai-inventory";
+import {
   createAuth,
   createSignedSessionForEmail,
   getAuthenticatedUser,
@@ -28,7 +37,16 @@ import {
   sha256Hex,
 } from "./lib/gateway";
 import {
+  addDaysToIsoDate,
+  bangkokIsoDate,
+  classifyCheckInImage,
+  GeminiUnavailableError,
+  matchCheckOutImage,
+  resolveFridgeGeminiKey,
+} from "./lib/gemini";
+import {
   addManualFood,
+  CATEGORY_TH_MAP,
   deleteInventoryItem,
   getLatestStatus,
   listDoorEvents,
@@ -39,8 +57,14 @@ import {
   readInventoryPhoto,
   updateInventoryItem,
 } from "./lib/inventory";
+import {
+  maybeSendDoorSafetyAlerts,
+  maybeSendTelemetryAlerts,
+  runDailyCronTasks,
+} from "./lib/line";
 import { notifyFridgeRoom } from "./lib/room";
 import { ingestStatus, parseStatus } from "./lib/status";
+import { putImmutablePhoto, toStoragePath } from "./lib/storage";
 import { ingestTelemetry, parseTelemetry } from "./lib/telemetry";
 import type { ApiErrorEnvelope, AppBindings } from "./types";
 
@@ -694,6 +718,233 @@ app.get("/api/fridges/:fridgeId/door_events", async (c) => {
   return c.json({ events });
 });
 
+app.all("/api/inventory/checkin/draft", async (c) => {
+  const auth = await requireGatewayFridge(c);
+  if (auth instanceof Response) return auth;
+
+  const parsed = await parseMultipartJpeg(c.req.raw);
+  if (parsed.kind === "too_large") {
+    return c.json<ApiErrorEnvelope>(
+      {
+        error: "PAYLOAD_TOO_LARGE",
+        message: "Uploaded JPEG exceeds the 5 MB limit.",
+      },
+      413,
+    );
+  }
+  if (parsed.kind === "invalid") {
+    return c.json<ApiErrorEnvelope>(
+      {
+        error: "INVALID_PAYLOAD",
+        message: "Expected multipart/form-data with a valid JPEG image field.",
+      },
+      400,
+    );
+  }
+
+  const apiKey = await resolveFridgeGeminiKey(c.env.DB, auth, c.env);
+  if (!apiKey) {
+    return c.json<ApiErrorEnvelope>(
+      {
+        error: "SERVICE_UNAVAILABLE",
+        message: "Gemini API key is not configured for this fridge.",
+      },
+      503,
+    );
+  }
+
+  const nowS = Math.floor(Date.now() / 1000);
+  let result;
+  try {
+    result = await classifyCheckInImage(c.env, apiKey, parsed.bytes, nowS);
+  } catch (error) {
+    if (error instanceof GeminiUnavailableError) {
+      return c.json<ApiErrorEnvelope>(
+        { error: "SERVICE_UNAVAILABLE", message: error.message },
+        503,
+      );
+    }
+    throw error;
+  }
+
+  if (!result || !result.is_food || result.confidence < 0.6) {
+    return c.json<ApiErrorEnvelope>(
+      {
+        error: "UNIDENTIFIABLE",
+        message:
+          "Item could not be reliably identified (confidence below 0.60 or non-food item).",
+      },
+      422,
+    );
+  }
+
+  const cropKey = `food_crops/${auth}/crop_${crypto.randomUUID()}.jpg`;
+  await putImmutablePhoto(c.env.PHOTOS, cropKey, parsed.bytes);
+
+  const estimatedExpiryDate = addDaysToIsoDate(
+    bangkokIsoDate(nowS),
+    result.estimated_shelf_life_days,
+  );
+
+  return c.json({
+    name_th: result.name_th,
+    name_en: result.name_en,
+    category: result.category,
+    category_th: CATEGORY_TH_MAP[result.category],
+    estimated_shelf_life_days: result.estimated_shelf_life_days,
+    estimated_expiry_date: estimatedExpiryDate,
+    storage_recommendation_th: result.storage_recommendation_th,
+    storage_recommendation_en: result.storage_recommendation_en,
+    image_storage_path: toStoragePath(cropKey),
+    confidence: result.confidence,
+  });
+});
+
+app.all("/api/inventory/checkin", async (c) => {
+  const auth = await requireGatewayFridge(c);
+  if (auth instanceof Response) return auth;
+
+  const body = await parseJsonBody(c);
+  const payload = parseCheckInCommit(body, auth);
+  if (!payload) {
+    return c.json<ApiErrorEnvelope>(
+      {
+        error: "INVALID_PAYLOAD",
+        message: "Expected a valid check-in commit payload.",
+      },
+      400,
+    );
+  }
+
+  const nowS = Math.floor(Date.now() / 1000);
+  const itemId = await commitCameraCheckIn(c.env.DB, auth, payload, nowS);
+  await notifyFridgeRoom(c.env, auth, {
+    type: "inventory_changed",
+    action: "created",
+    itemId,
+  });
+
+  return c.json(
+    {
+      success: true,
+      item_id: itemId,
+      message: "Item successfully added to inventory.",
+    },
+    201,
+  );
+});
+
+app.all("/api/inventory/checkout/draft", async (c) => {
+  const auth = await requireGatewayFridge(c);
+  if (auth instanceof Response) return auth;
+
+  const parsed = await parseMultipartJpeg(c.req.raw);
+  if (parsed.kind === "too_large") {
+    return c.json<ApiErrorEnvelope>(
+      {
+        error: "PAYLOAD_TOO_LARGE",
+        message: "Uploaded JPEG exceeds the 5 MB limit.",
+      },
+      413,
+    );
+  }
+  if (parsed.kind === "invalid") {
+    return c.json<ApiErrorEnvelope>(
+      {
+        error: "INVALID_PAYLOAD",
+        message: "Expected multipart/form-data with a valid JPEG image field.",
+      },
+      400,
+    );
+  }
+
+  const apiKey = await resolveFridgeGeminiKey(c.env.DB, auth, c.env);
+  if (!apiKey) {
+    return c.json<ApiErrorEnvelope>(
+      {
+        error: "SERVICE_UNAVAILABLE",
+        message: "Gemini API key is not configured for this fridge.",
+      },
+      503,
+    );
+  }
+
+  const rows = await listCheckOutCandidateRows(c.env.DB, auth);
+  let result;
+  try {
+    result = await matchCheckOutImage(
+      c.env,
+      apiKey,
+      parsed.bytes,
+      toPromptCandidates(rows),
+    );
+  } catch (error) {
+    if (error instanceof GeminiUnavailableError) {
+      return c.json<ApiErrorEnvelope>(
+        { error: "SERVICE_UNAVAILABLE", message: error.message },
+        503,
+      );
+    }
+    throw error;
+  }
+
+  if (!result || result.confidence < 0.6) {
+    return c.json<ApiErrorEnvelope>(
+      {
+        error: "UNIDENTIFIABLE",
+        message:
+          "Removed item could not be reliably identified (confidence below 0.60).",
+      },
+      422,
+    );
+  }
+
+  return c.json(resolveCheckOutDraft(rows, result));
+});
+
+app.all("/api/inventory/checkout", async (c) => {
+  const auth = await requireGatewayFridge(c);
+  if (auth instanceof Response) return auth;
+
+  const body = await parseJsonBody(c);
+  const payload = parseCheckOutCommit(body);
+  if (!payload) {
+    return c.json<ApiErrorEnvelope>(
+      {
+        error: "INVALID_PAYLOAD",
+        message: "Expected a valid item_id to check out.",
+      },
+      400,
+    );
+  }
+
+  const deleted = await deleteInventoryItem(
+    c.env.DB,
+    c.env.PHOTOS,
+    auth,
+    payload.item_id,
+  );
+  if (!deleted) {
+    return c.json<ApiErrorEnvelope>(
+      { error: "NOT_FOUND", message: "Item not found." },
+      404,
+    );
+  }
+
+  await notifyFridgeRoom(c.env, auth, {
+    type: "inventory_changed",
+    action: "deleted",
+    itemId: payload.item_id,
+  });
+
+  return c.json({
+    success: true,
+    item_id: payload.item_id,
+    status: "deleted",
+    message: "Item and associated image permanently removed from inventory.",
+  });
+});
+
 app.all("/api/telemetry", async (c) => {
   const auth = await requireGatewayFridge(c);
   if (auth instanceof Response) return auth;
@@ -713,11 +964,14 @@ app.all("/api/telemetry", async (c) => {
   const nowS = Math.floor(Date.now() / 1000);
   const ingestedCount = await ingestTelemetry(c.env.DB, auth, samples, nowS);
   if (ingestedCount > 0) {
-    await notifyFridgeRoom(c.env, auth, {
-      type: "telemetry",
-      samples,
-      last_seen_s: nowS,
-    });
+    await Promise.all([
+      notifyFridgeRoom(c.env, auth, {
+        type: "telemetry",
+        samples,
+        last_seen_s: nowS,
+      }),
+      maybeSendTelemetryAlerts(c.env, auth, samples, nowS),
+    ]);
   }
   return c.json({ success: true, ingested_count: ingestedCount });
 });
@@ -773,10 +1027,13 @@ app.all("/api/door_events", async (c) => {
   const nowS = Math.floor(Date.now() / 1000);
   const ingestedCount = await ingestDoorEvents(c.env.DB, auth, events, nowS);
   if (ingestedCount > 0) {
-    await notifyFridgeRoom(c.env, auth, {
-      type: "door_events",
-      events,
-    });
+    await Promise.all([
+      notifyFridgeRoom(c.env, auth, {
+        type: "door_events",
+        events,
+      }),
+      maybeSendDoorSafetyAlerts(c.env, auth, events, nowS),
+    ]);
   }
   return c.json({ success: true, ingested_count: ingestedCount });
 });
@@ -795,4 +1052,11 @@ app.onError((_err, c) => {
   );
 });
 
-export default app;
+export default {
+  fetch: app.fetch,
+  scheduled(controller, env, ctx) {
+    ctx.waitUntil(
+      runDailyCronTasks(env, Math.floor(controller.scheduledTime / 1000)),
+    );
+  },
+} satisfies ExportedHandler<AppBindings>;

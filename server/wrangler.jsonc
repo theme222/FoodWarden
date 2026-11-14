@@ -38,6 +38,9 @@
       "new_sqlite_classes": ["FridgeRoom"],
     },
   ],
+  "triggers": {
+    "crons": ["0 1 * * *"],
+  },
   "vars": {
     "APP_ENV": "development",
   },
