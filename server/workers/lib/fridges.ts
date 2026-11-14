@@ -10,7 +10,7 @@ export interface FridgeSummary {
   last_telemetry: unknown;
 }
 
-export interface FridgeMemberRow {
+interface FridgeMemberRow {
   email: string;
   role: MemberRole;
   added_at_s: number;
@@ -40,7 +40,7 @@ export function normalizeEmail(email: string): string | null {
   return trimmed;
 }
 
-export function generateGatewayToken(): string {
+function generateGatewayToken(): string {
   const bytes = new Uint8Array(24);
   crypto.getRandomValues(bytes);
   return (

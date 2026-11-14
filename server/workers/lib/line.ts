@@ -9,7 +9,7 @@ const TELEMETRY_ALERT_COOLDOWN_S = 1800;
 const DAILY_DIGEST_COOLDOWN_S = 20 * 3600;
 const ORPHAN_CROP_MAX_AGE_S = 86_400;
 
-export interface LineTextMessage {
+interface LineTextMessage {
   type: "text";
   text: string;
 }
@@ -71,7 +71,7 @@ export async function tryAcquireAlertCooldown(
   return (result.meta.changes ?? 0) > 0;
 }
 
-export async function sendLinePush(
+async function sendLinePush(
   env: AppBindings,
   targetId: string,
   messages: LineTextMessage[],
@@ -228,7 +228,7 @@ export async function maybeSendTelemetryAlerts(
   return sentCount;
 }
 
-export async function cleanupOrphanedFoodCrops(
+async function cleanupOrphanedFoodCrops(
   db: D1Database,
   photos: R2Bucket,
   nowS: number,
@@ -274,7 +274,7 @@ export async function cleanupOrphanedFoodCrops(
   return deletedCount;
 }
 
-export async function dispatchDailyExpiryDigests(
+async function dispatchDailyExpiryDigests(
   env: AppBindings,
   nowS: number,
 ): Promise<number> {

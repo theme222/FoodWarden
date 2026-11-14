@@ -1,7 +1,7 @@
 const MAX_NODES = 200;
 const MAX_CLOCK_SKEW_S = 300;
 
-export interface NodeStatus {
+interface NodeStatus {
   node_id: string;
   last_seen_s: number | null;
 }
@@ -11,7 +11,7 @@ export interface StatusReport {
   gatewaySeenS: number;
 }
 
-export interface StoredNodeStatus extends NodeStatus {
+interface StoredNodeStatus extends NodeStatus {
   last_known_seen_s: number | null;
 }
 

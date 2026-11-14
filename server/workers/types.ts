@@ -27,7 +27,7 @@ declare global {
   }
 }
 
-export type ApiErrorCode =
+type ApiErrorCode =
   | "UNAUTHORIZED"
   | "FORBIDDEN"
   | "INVALID_TOKEN"

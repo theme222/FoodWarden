@@ -1,4 +1,16 @@
-import { StrictMode, useCallback, useEffect, useState } from "react";
+import useSWR from "swr";
+import { SessionCache } from "./components/session-cache";
+import { ConfirmationProvider } from "./components/confirmation";
+import { StatusAlert } from "./components/status-alert";
+import { Toaster } from "./components/ui/sonner";
+import {
+  StrictMode,
+  lazy,
+  Suspense,
+  useCallback,
+  useEffect,
+  useState,
+} from "react";
 import type { FormEvent } from "react";
 import { createRoot } from "react-dom/client";
 import {
@@ -25,9 +37,12 @@ import { Devices } from "./Devices";
 import { AddFood, FoodDetail, Inventory } from "./Food";
 import { Metrics } from "./Metrics";
 import type { Fridge, Language } from "./model";
-import { Settings } from "./Settings";
+
 import { words } from "./words";
 import "./style.css";
+const Settings = lazy(() =>
+  import("./Settings").then((module) => ({ default: module.Settings })),
+);
 
 function Dashboard({
   fridge,
@@ -64,7 +79,7 @@ function Dashboard({
         failed={room.error}
       />
       {room.error ? (
-        <p role="alert">{t.failed}</p>
+        <StatusAlert>{t.failed}</StatusAlert>
       ) : room.inventory ? (
         <Inventory
           fridgeId={fridge.id}
@@ -166,6 +181,12 @@ function FridgeWorkspace({
 
   return (
     <>
+      {(room.connectionState === "reconnecting" ||
+        room.connectionState === "closed") && (
+        <StatusAlert>
+          {t.failed} · {connectionLabel(room.connectionState, language)}
+        </StatusAlert>
+      )}
       <div className="fridge-bar">
         <nav className="tabs" aria-label={fridge.name}>
           <NavLink to={base} end>
@@ -221,11 +242,13 @@ function FridgeWorkspace({
           path="settings"
           element={
             fridge.role === "owner" ? (
-              <Settings
-                fridgeId={fridge.id}
-                language={language}
-                onFridgesChanged={onFridgesChanged}
-              />
+              <Suspense fallback={<output>{t.loading}</output>}>
+                <Settings
+                  fridgeId={fridge.id}
+                  language={language}
+                  onFridgesChanged={onFridgesChanged}
+                />
+              </Suspense>
             ) : (
               <Navigate to={base} replace />
             )
@@ -303,11 +326,7 @@ function FridgeHub({
       )}
       <section className="surface create-fridge" aria-labelledby="create-title">
         <h2 id="create-title">{t.createFridge}</h2>
-        {error && (
-          <p role="alert" className="error">
-            {t.actionFailed}
-          </p>
-        )}
+        {error && <StatusAlert>{t.actionFailed}</StatusAlert>}
         <form
           className="create-fridge-form"
           onSubmit={(event) => void handleCreate(event)}
@@ -321,7 +340,7 @@ function FridgeHub({
             required
             disabled={creating}
           />
-          <button className="primary" disabled={creating}>
+          <button className="primary" disabled={creating} type="submit">
             {creating ? t.creating : t.createFridge}
           </button>
         </form>
@@ -368,12 +387,65 @@ function SignedIn({
   );
 }
 
+function SignInPanel({
+  config,
+  language,
+  signingIn,
+  onGoogle,
+  onDev,
+}: {
+  config: AuthConfig | null;
+  language: Language;
+  signingIn: boolean;
+  onGoogle: () => Promise<void>;
+  onDev: () => Promise<void>;
+}) {
+  const t = words[language];
+  if (!config?.googleEnabled && !config?.devLoginEnabled)
+    return <p className="surface">{t.setup}</p>;
+  return (
+    <section className="surface welcome">
+      <h1>FoodWarden</h1>
+      <p>{t.welcome}</p>
+      <div className="form-actions">
+        {config?.googleEnabled && (
+          <button
+            className="primary"
+            type="button"
+            onClick={() => void onGoogle()}
+            disabled={signingIn}
+          >
+            {signingIn ? t.loading : t.signIn}
+          </button>
+        )}
+        {config?.devLoginEnabled && (
+          <button
+            className="secondary"
+            type="button"
+            onClick={() => void onDev()}
+            disabled={signingIn}
+          >
+            {signingIn ? t.loading : t.devSignIn}
+          </button>
+        )}
+      </div>
+    </section>
+  );
+}
+
 function App() {
   const [language, setLanguage] = useState<Language>(() =>
     localStorage.getItem("foodwarden_locale") === "en" ? "en" : "th",
   );
-  const [user, setUser] = useState<SessionUser | null | undefined>(undefined);
-  const [config, setConfig] = useState<AuthConfig | null>(null);
+  const auth = useSWR("foodwarden-auth", () => fetchAuthState(), {
+    errorRetryCount: 2,
+  });
+  const user = auth.error
+    ? null
+    : auth.isLoading
+      ? undefined
+      : (auth.data?.user ?? null);
+  const config = auth.data?.config ?? null;
   const [failed, setFailed] = useState(false);
   const [signingIn, setSigningIn] = useState(false);
   const t = words[language];
@@ -383,21 +455,10 @@ function App() {
     localStorage.setItem("foodwarden_locale", language);
   }, [language]);
 
-  const refreshAuth = useCallback(async () => {
-    try {
-      const state = await fetchAuthState();
-      setConfig(state.config);
-      setUser(state.user);
-      setFailed(false);
-    } catch {
-      setUser(null);
-      setFailed(true);
-    }
-  }, []);
-
-  useEffect(() => {
-    void refreshAuth();
-  }, [refreshAuth]);
+  const refreshAuth = async () => {
+    await auth.mutate();
+    setFailed(false);
+  };
 
   async function loginGoogle() {
     if (signingIn) return;
@@ -428,18 +489,17 @@ function App() {
   async function handleSignOut() {
     try {
       await signOutSession();
-      setUser(null);
+      await auth.mutate(
+        (state) => (state ? { ...state, user: null } : undefined),
+        { revalidate: false },
+      );
     } catch {
       setFailed(true);
     }
   }
 
-  const hasAuthMethod = Boolean(
-    config?.googleEnabled || config?.devLoginEnabled,
-  );
-
   return (
-    <>
+    <ConfirmationProvider language={language}>
       <header className="header">
         <div className="header-inner">
           <Link to="/fridges" className="brand">
@@ -447,6 +507,11 @@ function App() {
           </Link>
           <div className="header-actions">
             {user && <span className="small user-email">{user.email}</span>}
+            {user && (
+              <a href="/api/reference" className="small">
+                {language === "th" ? "เอกสาร API" : "API reference"}
+              </a>
+            )}
             <button
               className="secondary"
               type="button"
@@ -468,47 +533,25 @@ function App() {
         </div>
       </header>
       <main>
-        {failed && (
-          <p role="alert" className="error">
-            {t.failed}
-          </p>
-        )}
+        {failed && <StatusAlert>{t.failed}</StatusAlert>}
         {user === undefined ? (
           <p role="status">{t.loading}</p>
         ) : user ? (
-          <SignedIn key={user.id} user={user} language={language} />
-        ) : !hasAuthMethod ? (
-          <p className="surface">{t.setup}</p>
+          <SessionCache key={user.id}>
+            <SignedIn user={user} language={language} />
+          </SessionCache>
         ) : (
-          <section className="surface welcome">
-            <h1>FoodWarden</h1>
-            <p>{t.welcome}</p>
-            <div className="form-actions">
-              {config?.googleEnabled && (
-                <button
-                  className="primary"
-                  type="button"
-                  onClick={() => void loginGoogle()}
-                  disabled={signingIn}
-                >
-                  {signingIn ? t.loading : t.signIn}
-                </button>
-              )}
-              {config?.devLoginEnabled && (
-                <button
-                  className="secondary"
-                  type="button"
-                  onClick={() => void loginDev()}
-                  disabled={signingIn}
-                >
-                  {signingIn ? t.loading : t.devSignIn}
-                </button>
-              )}
-            </div>
-          </section>
+          <SignInPanel
+            config={config}
+            language={language}
+            signingIn={signingIn}
+            onGoogle={loginGoogle}
+            onDev={loginDev}
+          />
         )}
       </main>
-    </>
+      <Toaster />
+    </ConfirmationProvider>
   );
 }
 

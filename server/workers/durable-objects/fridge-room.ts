@@ -4,8 +4,6 @@ import type { DoorEvent } from "../lib/door-events";
 import type { FridgeStatusSnapshot } from "../lib/status";
 import type { TelemetrySample } from "../lib/telemetry";
 
-export type { FridgeStatusSnapshot };
-
 export type FridgeRoomEvent =
   | { type: "connected"; fridgeId: string }
   | { type: "telemetry"; samples: TelemetrySample[]; last_seen_s: number }
@@ -25,7 +23,7 @@ interface SocketAttachment {
   connectedAtS: number;
 }
 
-export function memberTag(email: string): string {
+function memberTag(email: string): string {
   return `member:${email.trim().toLowerCase()}`;
 }
 

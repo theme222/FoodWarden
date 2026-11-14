@@ -1,11 +1,23 @@
-import { useCallback, useEffect, useState } from "react";
+import {
+  Select,
+  SelectTrigger,
+  SelectValue,
+  SelectContent,
+  SelectItem,
+} from "./components/ui/select";
+import useSWR from "swr";
+import { getJson, swrOptions, isAccessError } from "./lib/api";
+import { useConfirm } from "./components/confirmation";
+import { StatusAlert } from "./components/status-alert";
+import { toast } from "sonner";
+import { useState } from "react";
 import type { FormEvent } from "react";
 import { useNavigate } from "react-router-dom";
 import { readFridgeSettings } from "./model";
 import type { FridgeSettings, Language, MemberRole } from "./model";
 import { words } from "./words";
 
-export function Settings({
+function useSettings({
   fridgeId,
   language,
   onFridgesChanged,
@@ -16,59 +28,37 @@ export function Settings({
 }) {
   const t = words[language];
   const navigate = useNavigate();
-  const [settings, setSettings] = useState<FridgeSettings | null>(null);
-  const [loading, setLoading] = useState(true);
+  const confirm = useConfirm();
+  const baseUrl = `/api/fridges/${encodeURIComponent(fridgeId)}`;
+  const state = useSWR(
+    `${baseUrl}/settings`,
+    (url) => getJson(url, readFridgeSettings),
+    swrOptions,
+  );
+  const settings: FridgeSettings | null = isAccessError(state.error)
+    ? null
+    : (state.data ?? null);
+  const loading = state.isLoading;
+  const setSettings = (next: FridgeSettings) => {
+    void state.mutate(next, { revalidate: false });
+  };
+  const loadSettings = async () => {
+    await state.mutate();
+  };
   const [busy, setBusy] = useState(false);
   const [notice, setNotice] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
 
-  const [name, setName] = useState("");
-  const [lineTargetId, setLineTargetId] = useState("");
+  const [nameInput, setName] = useState<string | null>(null);
+  const name = nameInput ?? settings?.name ?? "";
+  const [lineInput, setLineTargetId] = useState<string | null>(null);
+  const lineTargetId = lineInput ?? settings?.lineTargetId ?? "";
   const [geminiKeyInput, setGeminiKeyInput] = useState("");
   const [showToken, setShowToken] = useState(false);
   const [copied, setCopied] = useState(false);
 
   const [inviteEmail, setInviteEmail] = useState("");
   const [inviteRole, setInviteRole] = useState<MemberRole>("member");
-
-  const baseUrl = `/api/fridges/${encodeURIComponent(fridgeId)}`;
-
-  const loadSettings = useCallback(
-    async (signal?: AbortSignal) => {
-      try {
-        const res = await fetch(`${baseUrl}/settings`, {
-          signal,
-          credentials: "same-origin",
-        });
-        if (!res.ok) throw new Error("Failed to load settings");
-        const parsed = readFridgeSettings(await res.json());
-        if (signal?.aborted) return;
-        setSettings(parsed);
-        setName(parsed.name);
-        setLineTargetId(parsed.lineTargetId ?? "");
-        setError(null);
-      } catch {
-        if (!signal?.aborted) {
-          setError(t.failed);
-        }
-      } finally {
-        if (!signal?.aborted) {
-          setLoading(false);
-        }
-      }
-    },
-    [baseUrl, t.failed],
-  );
-
-  useEffect(() => {
-    setLoading(true);
-    setSettings(null);
-    setNotice(null);
-    setError(null);
-    const controller = new AbortController();
-    void loadSettings(controller.signal);
-    return () => controller.abort();
-  }, [loadSettings]);
 
   async function saveGeneral(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -98,9 +88,11 @@ export function Settings({
       setLineTargetId(updated.lineTargetId ?? "");
       setGeminiKeyInput("");
       setNotice(t.settingsSaved);
+      toast.success(t.settingsSaved);
       onFridgesChanged();
     } catch {
       setError(t.actionFailed);
+      toast.error(t.actionFailed);
     } finally {
       setBusy(false);
     }
@@ -122,8 +114,10 @@ export function Settings({
       const updated = readFridgeSettings(await res.json());
       setSettings(updated);
       setNotice(t.settingsSaved);
+      toast.success(t.settingsSaved);
     } catch {
       setError(t.actionFailed);
+      toast.error(t.actionFailed);
     } finally {
       setBusy(false);
     }
@@ -131,7 +125,7 @@ export function Settings({
 
   async function rotateToken() {
     if (busy || !settings) return;
-    if (!window.confirm(t.confirmRotateToken)) return;
+    if (!(await confirm(t.confirmRotateToken, t.rotateToken))) return;
     setBusy(true);
     setNotice(null);
     setError(null);
@@ -145,8 +139,10 @@ export function Settings({
       setSettings({ ...settings, gatewayToken: data.gateway_token });
       setShowToken(true);
       setNotice(t.settingsSaved);
+      toast.success(t.settingsSaved);
     } catch {
       setError(t.actionFailed);
+      toast.error(t.actionFailed);
     } finally {
       setBusy(false);
     }
@@ -183,8 +179,10 @@ export function Settings({
       setInviteEmail("");
       await loadSettings();
       setNotice(t.settingsSaved);
+      toast.success(t.settingsSaved);
     } catch {
       setError(t.actionFailed);
+      toast.error(t.actionFailed);
     } finally {
       setBusy(false);
     }
@@ -192,7 +190,7 @@ export function Settings({
 
   async function removeMember(email: string) {
     if (busy) return;
-    if (!window.confirm(t.confirmRemoveMember)) return;
+    if (!(await confirm(t.confirmRemoveMember, t.removeMember))) return;
     setBusy(true);
     setNotice(null);
     setError(null);
@@ -207,8 +205,10 @@ export function Settings({
       if (!res.ok) throw new Error("Remove failed");
       await loadSettings();
       setNotice(t.settingsSaved);
+      toast.success(t.settingsSaved);
     } catch {
       setError(t.actionFailed);
+      toast.error(t.actionFailed);
     } finally {
       setBusy(false);
     }
@@ -216,7 +216,7 @@ export function Settings({
 
   async function removeFridge() {
     if (busy) return;
-    if (!window.confirm(t.confirmDeleteFridge)) return;
+    if (!(await confirm(t.confirmDeleteFridge, t.deleteFridge))) return;
     setBusy(true);
     setError(null);
     try {
@@ -229,17 +229,78 @@ export function Settings({
       navigate("/fridges", { replace: true });
     } catch {
       setError(t.actionFailed);
+      toast.error(t.actionFailed);
+    } finally {
       setBusy(false);
     }
   }
 
+  return {
+    t,
+    settings,
+    loading,
+    busy,
+    notice,
+    error,
+    name,
+    setName,
+    lineTargetId,
+    setLineTargetId,
+    geminiKeyInput,
+    setGeminiKeyInput,
+    showToken,
+    setShowToken,
+    copied,
+    inviteEmail,
+    setInviteEmail,
+    inviteRole,
+    setInviteRole,
+    saveGeneral,
+    clearGeminiKey,
+    copyToken,
+    rotateToken,
+    removeMember,
+    inviteMember,
+    removeFridge,
+  };
+}
+
+export function Settings(props: {
+  fridgeId: string;
+  language: Language;
+  onFridgesChanged: () => void;
+}) {
+  const {
+    t,
+    settings,
+    loading,
+    busy,
+    notice,
+    error,
+    name,
+    setName,
+    lineTargetId,
+    setLineTargetId,
+    geminiKeyInput,
+    setGeminiKeyInput,
+    showToken,
+    setShowToken,
+    copied,
+    inviteEmail,
+    setInviteEmail,
+    inviteRole,
+    setInviteRole,
+    saveGeneral,
+    clearGeminiKey,
+    copyToken,
+    rotateToken,
+    removeMember,
+    inviteMember,
+    removeFridge,
+  } = useSettings(props);
   if (loading) return <p role="status">{t.loading}</p>;
   if (!settings) {
-    return (
-      <p role="alert" className="error">
-        {error ?? t.failed}
-      </p>
-    );
+    return <StatusAlert>{error ?? t.failed}</StatusAlert>;
   }
 
   const ownerCount = settings.members.filter((m) => m.role === "owner").length;
@@ -256,11 +317,7 @@ export function Settings({
           {notice}
         </p>
       )}
-      {error && (
-        <p role="alert" className="error">
-          {error}
-        </p>
-      )}
+      {error && <StatusAlert>{error}</StatusAlert>}
 
       <section className="surface add-form" aria-labelledby="general-title">
         <h2 id="general-title">{t.generalSettings}</h2>
@@ -311,7 +368,7 @@ export function Settings({
             )}
           </fieldset>
           <div className="form-actions">
-            <button className="primary" disabled={busy}>
+            <button className="primary" disabled={busy} type="submit">
               {busy ? t.saving : t.save}
             </button>
           </div>
@@ -389,17 +446,23 @@ export function Settings({
             placeholder={t.inviteEmail}
             required
           />
-          <select
-            aria-label={t.inviteRole}
+          <Select
             value={inviteRole}
-            onChange={(event) =>
-              setInviteRole(event.target.value === "owner" ? "owner" : "member")
+            onValueChange={(value) =>
+              setInviteRole(value === "owner" ? "owner" : "member")
             }
           >
-            <option value="member">{t.memberBadge}</option>
-            <option value="owner">{t.ownerBadge}</option>
-          </select>
-          <button className="primary" disabled={busy}>
+            <SelectTrigger aria-label={t.inviteRole}>
+              <SelectValue>
+                {inviteRole === "owner" ? t.ownerBadge : t.memberBadge}
+              </SelectValue>
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="member">{t.memberBadge}</SelectItem>
+              <SelectItem value="owner">{t.ownerBadge}</SelectItem>
+            </SelectContent>
+          </Select>
+          <button className="primary" disabled={busy} type="submit">
             {t.inviteMember}
           </button>
         </form>

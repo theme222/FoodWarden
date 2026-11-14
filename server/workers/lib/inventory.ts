@@ -192,17 +192,21 @@ export async function addManualFood(
   food: ManualFoodInput,
   nowS: number,
 ): Promise<"created" | "duplicate" | "conflict"> {
-  const photoHash = food.photo ? await sha256Hex(food.photo) : null;
-  const fingerprint = await sha256Hex(
-    JSON.stringify([food.name, food.expiry, food.category, photoHash]),
-  );
-
-  const existing = await db
-    .prepare(
-      "SELECT fridge_id, manual_request_hash FROM inventory WHERE id = ?",
-    )
-    .bind(food.itemId)
-    .first<{ fridge_id: string; manual_request_hash: string | null }>();
+  const [{ fingerprint, photoHash }, existing] = await Promise.all([
+    (async () => {
+      const photoHash = food.photo ? await sha256Hex(food.photo) : null;
+      const fingerprint = await sha256Hex(
+        JSON.stringify([food.name, food.expiry, food.category, photoHash]),
+      );
+      return { fingerprint, photoHash };
+    })(),
+    db
+      .prepare(
+        "SELECT fridge_id, manual_request_hash FROM inventory WHERE id = ?",
+      )
+      .bind(food.itemId)
+      .first<{ fridge_id: string; manual_request_hash: string | null }>(),
+  ]);
 
   if (existing) {
     if (

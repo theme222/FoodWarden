@@ -1,3 +1,6 @@
+import { useConfirm } from "./components/confirmation";
+import { StatusAlert } from "./components/status-alert";
+import { toast } from "sonner";
 import { useRef, useState } from "react";
 import type { FormEvent } from "react";
 import { Link, useNavigate } from "react-router-dom";
@@ -121,6 +124,7 @@ export function FoodDetail({
   const [notice, setNotice] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
 
+  const confirm = useConfirm();
   const group = foodGroups(items).find((entries) =>
     entries.some((food) => food.id === itemId),
   );
@@ -162,8 +166,10 @@ export function FoodDetail({
       onChanged();
       setEditing(false);
       setNotice(t.itemUpdated);
+      toast.success(t.itemUpdated);
     } catch {
       setError(t.saveError);
+      toast.error(t.saveError);
     } finally {
       setBusy(false);
     }
@@ -171,7 +177,7 @@ export function FoodDetail({
 
   async function removeItem() {
     if (busy || !food) return;
-    if (!window.confirm(t.confirmDeleteFood)) return;
+    if (!(await confirm(t.confirmDeleteFood, t.deleteFood))) return;
     setBusy(true);
     setError(null);
     try {
@@ -181,9 +187,12 @@ export function FoodDetail({
       });
       if (!res.ok) throw new Error("Delete failed");
       onChanged();
+      toast.success(t.deleteFood);
       navigate("/fridges/" + encodeURIComponent(fridgeId), { replace: true });
     } catch {
       setError(t.actionFailed);
+      toast.error(t.actionFailed);
+    } finally {
       setBusy(false);
     }
   }
@@ -196,11 +205,7 @@ export function FoodDetail({
           {notice}
         </p>
       )}
-      {error && (
-        <p role="alert" className="error">
-          {error}
-        </p>
-      )}
+      {error && <StatusAlert>{error}</StatusAlert>}
       <FoodPhoto
         key={JSON.stringify([fridgeId, food.id, food.hasPhoto])}
         fridgeId={fridgeId}
@@ -313,7 +318,7 @@ export function FoodDetail({
             </label>
           </fieldset>
           <div className="form-actions">
-            <button className="primary" disabled={busy}>
+            <button className="primary" disabled={busy} type="submit">
               {busy ? t.saving : t.save}
             </button>
           </div>
@@ -492,7 +497,11 @@ export function AddFood({
           </p>
         )}
         <div className="form-actions">
-          <button className="primary" disabled={saving || photoBusy}>
+          <button
+            className="primary"
+            disabled={saving || photoBusy}
+            type="submit"
+          >
             {saving ? t.saving : t.save}
           </button>
           <Link

@@ -41,7 +41,7 @@ export interface CheckOutCandidateRow {
   check_in_timestamp_s: number;
 }
 
-export interface CandidateItem {
+interface CandidateItem {
   item_id: string;
   name_th: string;
   name_en: string;

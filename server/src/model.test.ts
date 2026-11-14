@@ -15,7 +15,7 @@ import {
   readStatusResponse,
   statusTree,
 } from "./model";
-import { chartPoints } from "./Metrics";
+import { chartPoints } from "./chart";
 
 test("expiry dates reject calendar overflow rather than displaying a different day", () => {
   for (const language of ["th", "en"] as const) {

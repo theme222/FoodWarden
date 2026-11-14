@@ -1,7 +1,7 @@
 export type Language = "th" | "en";
 export type MemberRole = "owner" | "member";
 
-export type DoorEventStatus =
+type DoorEventStatus =
   | "CLOSING"
   | "SUCCESS"
   | "OBSTRUCTION_ERROR"
@@ -56,7 +56,7 @@ export interface Food {
   hasPhoto: boolean;
 }
 
-export interface FridgeMember {
+interface FridgeMember {
   email: string;
   role: MemberRole;
   addedAtS: number;
@@ -136,7 +136,7 @@ export function readSample(value: unknown): Sample | null {
   };
 }
 
-export function readFridge(id: string, value: unknown): Fridge {
+function readFridge(id: string, value: unknown): Fridge {
   const data = record(value);
   return {
     id,
@@ -164,7 +164,7 @@ export function readBucket(value: unknown): Sample[] {
     .filter((sample): sample is Sample => sample !== null);
 }
 
-export function readHeartbeat(value: unknown): Heartbeat | null {
+function readHeartbeat(value: unknown): Heartbeat | null {
   const data = record(value);
   const receivedS = epoch(data.received_s);
   const gatewaySeenS = epoch(data.gateway_seen_s);
@@ -219,7 +219,7 @@ export function readInventoryList(value: unknown): Food[] {
   });
 }
 
-export function readDoorEvent(value: unknown): DoorEvent | null {
+function readDoorEvent(value: unknown): DoorEvent | null {
   const data = record(value);
   const nodeId = text(data.node_id);
   const timestampS = epoch(data.timestamp_s);
@@ -450,7 +450,7 @@ export function statusTree(heartbeat: Heartbeat | null): StatusNode[] {
   return [...nodes.values()];
 }
 
-export function locale(language: Language): string {
+function locale(language: Language): string {
   return language === "th" ? "th-TH-u-ca-buddhist" : "en-GB";
 }
 
