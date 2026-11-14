@@ -47,3 +47,6 @@ skills-lock.json
 
 # Cloudflare Wrangler local state
 .wrangler/
+.dev.vars
+.dev.vars.*
+!.dev.vars.example

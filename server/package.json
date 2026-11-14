@@ -32,6 +32,7 @@
     "typescript": "^5.7.0"
   },
   "dependencies": {
+    "better-auth": "^1.7.23",
     "firebase": "13.2.0",
     "hono": "^4.13.18",
     "react": "^19",

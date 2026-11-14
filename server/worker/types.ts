@@ -4,6 +4,11 @@ export interface AppBindings {
   ASSETS: Fetcher;
   FRIDGE_ROOM: DurableObjectNamespace;
   APP_ENV: string;
+  BETTER_AUTH_SECRET?: string;
+  BETTER_AUTH_URL?: string;
+  GOOGLE_CLIENT_ID?: string;
+  GOOGLE_CLIENT_SECRET?: string;
+  DEV_AUTH_BYPASS_EMAIL?: string;
 }
 
 declare global {
