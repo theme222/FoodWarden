@@ -2,6 +2,8 @@
 # Copy to `.dev.vars` (gitignored) when running `bun run dev:worker`.
 # In production, set secrets with `wrangler secret put <NAME>`.
 
+APP_ENV="development"
+
 BETTER_AUTH_SECRET="replace-with-32+-char-random-secret"
 BETTER_AUTH_URL="http://127.0.0.1:8787"
 

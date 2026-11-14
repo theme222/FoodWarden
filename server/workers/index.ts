@@ -1,3 +1,6 @@
+import { SCALAR_ASSET_PATH } from "../scalar-assets";
+import { Scalar } from "@scalar/hono-api-reference";
+import { openApiDocument } from "./lib/openapi";
 import { Hono, type Context } from "hono";
 import {
   commitCameraCheckIn,
@@ -162,6 +165,53 @@ async function requireFridgeRole(
   return { user, fridgeId, role };
 }
 
+app.get("/api/openapi.json", async (c) => {
+  const user = await requireUser(c);
+  if (user instanceof Response) return user;
+  return c.json(openApiDocument);
+});
+
+app.get(
+  "/api/reference",
+  async (c, next) => {
+    const user = await requireUser(c);
+    if (user instanceof Response) return user;
+    c.header("X-Content-Type-Options", "nosniff");
+    c.header("Referrer-Policy", "same-origin");
+    return next();
+  },
+  Scalar((c) => {
+    const nonce = btoa(
+      String.fromCharCode(...crypto.getRandomValues(new Uint8Array(16))),
+    );
+    c.header(
+      "Content-Security-Policy",
+      [
+        "default-src 'none'",
+        `script-src 'self' 'nonce-${nonce}'`,
+        "style-src 'self' 'unsafe-inline'",
+        "img-src 'self' data: blob:",
+        "font-src 'self' data:",
+        "connect-src 'self'",
+        "worker-src 'self' blob:",
+        "frame-ancestors 'none'",
+        "base-uri 'none'",
+        "form-action 'self'",
+      ].join("; "),
+    );
+    return {
+      nonce,
+      url: "/api/openapi.json",
+      pageTitle: "FoodWarden API Reference",
+      theme: "purple",
+      cdn: SCALAR_ASSET_PATH,
+      proxyUrl: "",
+      persistAuth: false,
+      telemetry: false,
+      withDefaultFonts: false,
+    };
+  }),
+);
 app.get("/api/health", async (c) => {
   const row = await c.env.DB.prepare("SELECT 1 AS ok").first<{ ok: number }>();
   if (row?.ok !== 1) {

@@ -42,6 +42,6 @@
     "crons": ["0 1 * * *"],
   },
   "vars": {
-    "APP_ENV": "development",
+    "APP_ENV": "production",
   },
 }

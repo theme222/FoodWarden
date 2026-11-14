@@ -13,6 +13,7 @@ export default defineConfig(async () => {
         miniflare: {
           bindings: {
             TEST_MIGRATIONS: migrations,
+            APP_ENV: "development",
             LINE_CHANNEL_ACCESS_TOKEN: "test-line-channel-token",
             DEV_AUTH_BYPASS_EMAIL: "",
             GOOGLE_CLIENT_ID: "",
