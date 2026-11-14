@@ -2,15 +2,15 @@
 
 [Network sequence](../diagrams/network.mmd) · [Cloud diagram](../diagrams/cloud.mmd)
 
-| Link | Traffic | What a failure means |
-| --- | --- | --- |
-| F0 ↔ C0 | Direct BLE GATT clock sync and AES-128-GCM sensor packets | Recent sensor readings can go stale while the gateway remains available. |
-| D0 ↔ C0 | LAN through home router, MQTT over TLS 8883 and a validated broker certificate | The gateway can lose sight of the closer while continuing to receive fridge readings. The motor has local cutoffs. |
-| C0 → Firebase API | HTTPS and gateway Bearer token for telemetry and status | Queue-based telemetry can retry. Child contact cannot be inferred if the gateway has stopped reporting. |
-| Dashboard ↔ Firebase Auth | Google account, verified email and Firebase ID token | Signing in without fridge membership exposes no fridge data. |
-| Dashboard ↔ Firestore / Functions | Member-scoped live inventory, minute buckets and device report. The API handles fridge listing, writes and private photos. | The UI shows loading, no reading, no item, no photo or an error where appropriate. |
-| Firebase ↔ Gemini | Planned Gemini 3.5 Flash Lite check-in metadata, image crops and active inventory candidates | Camera recognition and automatic multi-pack processing are separate pipeline work. |
-| Firebase → LINE | Planned HTTPS push notifications for expiry and safety events | Issue #3 tracks registration and monthly quota policy. |
+| Link                              | Traffic                                                                                                                    | What a failure means                                                                                               |
+| --------------------------------- | -------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------ |
+| F0 ↔ C0                           | Direct BLE GATT clock sync and AES-128-GCM sensor packets                                                                  | Recent sensor readings can go stale while the gateway remains available.                                           |
+| D0 ↔ C0                           | LAN through home router, MQTT over TLS 8883 and a validated broker certificate                                             | The gateway can lose sight of the closer while continuing to receive fridge readings. The motor has local cutoffs. |
+| C0 → Firebase API                 | HTTPS and gateway Bearer token for telemetry and status                                                                    | Queue-based telemetry can retry. Child contact cannot be inferred if the gateway has stopped reporting.            |
+| Dashboard ↔ Firebase Auth         | Google account, verified email and Firebase ID token                                                                       | Signing in without fridge membership exposes no fridge data.                                                       |
+| Dashboard ↔ Firestore / Functions | Member-scoped live inventory, minute buckets and device report. The API handles fridge listing, writes and private photos. | The UI shows loading, no reading, no item, no photo or an error where appropriate.                                 |
+| Firebase ↔ Gemini                 | Planned Gemini 3.5 Flash Lite check-in metadata, image crops and active inventory candidates                               | Camera recognition and automatic multi-pack processing are separate pipeline work.                                 |
+| Firebase → LINE                   | Planned HTTPS push notifications for expiry and safety events                                                              | Issue #3 tracks registration and monthly quota policy.                                                             |
 
 ## Data kept by the server
 

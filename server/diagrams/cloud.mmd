@@ -8,8 +8,8 @@ flowchart TB
     do_ws["Durable Objects · FridgeRoom<br/>SQLite + WebSocket Hibernation"]
     d1[("Cloudflare D1 (SQLite)<br/>Auth, inventory, telemetry and status")]
     r2[("Cloudflare R2<br/>Private grocery JPEGs")]
-    gemini["G · Gemini 3.5 Flash Lite<br/>Planned camera recognition"]
-    line["L · LINE Messaging API<br/>Planned notifications and Cron digest"]
+    gemini["G · Gemini 3.5 Flash Lite<br/>Camera recognition implemented"]
+    line["L · LINE Messaging API<br/>Notifications and Cron digest implemented"]
 
     gateway -->|"HTTPS Bearer · telemetry, door events and heartbeat"| worker
     user <-->|"OAuth 2.0 and HttpOnly session"| auth
@@ -18,5 +18,5 @@ flowchart TB
     worker -->|"Read and write SQL records"| d1
     worker -->|"Broadcast updates"| do_ws
     worker <-->|"Store and read JPEGs"| r2
-    worker -.->|"Planned · identify food and rank candidates"| gemini
-    worker -.->|"Planned · expiry and safety alerts"| line
+    worker -->|"Identify food and rank candidates"| gemini
+    worker -->|"Expiry and safety alerts"| line

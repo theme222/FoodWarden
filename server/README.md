@@ -6,6 +6,8 @@
 
 ## 1. Documentation & File Index
 
+- **[`API-REFERENCE.md`](API-REFERENCE.md):** authenticated Scalar UI, OpenAPI coverage, test requests, and CDN/runtime costs.
+- **[`DEV-TOOLS.md`](DEV-TOOLS.md):** shadcn/ui components, SWR status, local agent-browser commands, deepsec setup boundaries, and Vercel OSS fit.
 - **[`ARCHITECTURE.md`](ARCHITECTURE.md):** Cloudflare topology, D1 schema, R2 private photo flow, `FridgeRoom` Durable Object WebSockets, React routes, Gemini/LINE pipelines, and security model.
 - **[`GOAL.md`](GOAL.md):** Feature, integration, edge-case, and test verification checklist.
 - **[`wrangler.jsonc`](wrangler.jsonc) & [`migrations/0001_init.sql`](migrations/0001_init.sql):** Cloudflare Worker bindings (`DB`, `PHOTOS`, `FRIDGE_ROOM`, `ASSETS`), Cron Trigger (`0 1 * * *`), and D1 SQLite schema.
@@ -34,6 +36,8 @@ cp .dev.vars.example .dev.vars
 
 Populate `.dev.vars` (gitignored) with:
 
+Set `APP_ENV="development"` locally. The committed Wrangler configuration defaults to `production` and does not enable local login or localhost trusted origins on deployment.
+
 - `BETTER_AUTH_SECRET`: random 32+ character string
 - `BETTER_AUTH_URL`: `http://127.0.0.1:8787`
 - `DEV_AUTH_BYPASS_EMAIL`: local test email (active when `APP_ENV="development"`)
@@ -59,6 +63,10 @@ Open the Vite URL (default `http://localhost:5173`), click **Dev Sign In** (or *
 ---
 
 ## 3. Verification, Build & Deployment Commands
+
+### Quality tooling
+
+See [DEV-TOOLS.md](DEV-TOOLS.md) for `format:check`, `lint`, `knip`, React Doctor, UI tests, SWR and Base UI. See [SECURITY-TOOLS.md](../SECURITY-TOOLS.md) for repository-wide secret protection.
 
 ### Typecheck (`tsc`)
 

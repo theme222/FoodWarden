@@ -4,17 +4,17 @@ Scope: `feat/server`, changes confined to `server/`. Read first: [instructions](
 
 ## Coverage and changes
 
-| Area inspected | Result |
-| --- | --- |
-| API and gateway authentication | Existing token lookup rejects ambiguous credentials and missing parent fridges. Added the missing CBS door-event route using transaction-scoped authentication. |
-| Door events | Validates all seven statuses and the complete batch before writing. Atomic transactions and deterministic IDs preserve distinct same-second transitions while deduplicating concurrent retries. |
-| Telemetry | Backfills preserve newer cached samples. Added a 10,000-sample bound, node ID limits and early rejection above 499 minute buckets. CBS timestamp-only deduplication remains unchanged. |
-| Heartbeats | Existing validation bounds node count, rejects future timestamps and orders reports by C0's clock. Backward gateway clocks can suppress reports until the clock catches up. |
-| Inventory/photos | Existing stable fingerprints, membership checks and private image paths remain. Photo component identity now includes user and fridge to prevent reuse of another fridge's image/error state. |
-| Dashboard | Reviewed routes, listeners, bilingual labels, styling, charts and grouping. Invalid expiry dates now display as unknown instead of rolling into another month. |
-| Rules | Verified members can read permitted subcollections; client writes, private config and raw Storage access remain denied. No rules were broadened. |
-| Tests/build | Added standalone Functions validation tests and explicit unit/emulator commands. Lockfiles and dependency versions are unchanged. |
-| Documentation/diagrams | Reviewed local Markdown and diagram sources; existing drawing exports were not regenerated. Architecture includes planned features as well as implemented paths. |
+| Area inspected                 | Result                                                                                                                                                                                          |
+| ------------------------------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| API and gateway authentication | Existing token lookup rejects ambiguous credentials and missing parent fridges. Added the missing CBS door-event route using transaction-scoped authentication.                                 |
+| Door events                    | Validates all seven statuses and the complete batch before writing. Atomic transactions and deterministic IDs preserve distinct same-second transitions while deduplicating concurrent retries. |
+| Telemetry                      | Backfills preserve newer cached samples. Added a 10,000-sample bound, node ID limits and early rejection above 499 minute buckets. CBS timestamp-only deduplication remains unchanged.          |
+| Heartbeats                     | Existing validation bounds node count, rejects future timestamps and orders reports by C0's clock. Backward gateway clocks can suppress reports until the clock catches up.                     |
+| Inventory/photos               | Existing stable fingerprints, membership checks and private image paths remain. Photo component identity now includes user and fridge to prevent reuse of another fridge's image/error state.   |
+| Dashboard                      | Reviewed routes, listeners, bilingual labels, styling, charts and grouping. Invalid expiry dates now display as unknown instead of rolling into another month.                                  |
+| Rules                          | Verified members can read permitted subcollections; client writes, private config and raw Storage access remain denied. No rules were broadened.                                                |
+| Tests/build                    | Added standalone Functions validation tests and explicit unit/emulator commands. Lockfiles and dependency versions are unchanged.                                                               |
+| Documentation/diagrams         | Reviewed local Markdown and diagram sources; existing drawing exports were not regenerated. Architecture includes planned features as well as implemented paths.                                |
 
 ## Endpoint limits
 

@@ -65,7 +65,7 @@ Estimated from [SUMMARY.md](../../SUMMARY.md), [CBS.md](../../interface/CBS.md),
 
 ### Why Option 2 (Smart Hybrid) Was Not Selected as the Target
 
-- Fast for an initial demo because [data.ts](../src/data.ts) and [firestore.rules](../firestore.rules) already exist, **but**:
+- Fast for an initial demo because [data.ts](../src/data.ts) and the former Firestore rules (removed after migration) already exist, **but**:
   1. Splits data across two cloud providers (Cloudflare edge Workers making cross-cloud HTTPS REST calls to Google Cloud Firestore on every gateway write and token lookup).
   2. Remains bounded by Firestore Spark's **20,000 writes/day** and **50,000 reads/day** and lacks native SQL range aggregation for multi-day analytics and multi-node telemetry deduplication.
 

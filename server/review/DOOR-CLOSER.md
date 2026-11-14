@@ -6,13 +6,13 @@
 
 The wall adapter and barrel jack supply 12 V DC. The buck converter supplies the KidBright32 logic side. The INA219 is in series with the motor-side 12 V supply before the TB6612FNG. The driver powers the JGY-370 worm gear motor (12 V, 18 RPM in the drawing). The arm pushes the door using a rolling end and retracts to free the door. The source photo locates the actuator on top of the fridge. Use the current door branch pinout for physical wiring.
 
-| Input or control | Source drawing | Door implementation branch documentation |
-| --- | --- | --- |
-| TB6612FNG | PWMA 26, AIN1 27, AIN2 25 | PWMA 26, AIN1 27, AIN2 18, STBY pulled to 3.3 V |
-| INA219 | I2C GPIO 21/22, address `0x40`, 100 Hz | External GPIO 4/5 or vertical header GPIO 21/22, at least 50 Hz in the pin table |
-| Optical IR | GPIO 32 at door seam | TCRT5000 detects physical closure and stops forward motion |
-| Roller limit switch | GPIO 33 ISR | Falling-edge home interrupt with pull-up stops reverse motion |
-| Local hardware abort | Four fail-safes listed in the drawing | Door architecture also documents S1 on GPIO 16 and a movement buzzer on GPIO 13 |
+| Input or control     | Source drawing                         | Door implementation branch documentation                                         |
+| -------------------- | -------------------------------------- | -------------------------------------------------------------------------------- |
+| TB6612FNG            | PWMA 26, AIN1 27, AIN2 25              | PWMA 26, AIN1 27, AIN2 18, STBY pulled to 3.3 V                                  |
+| INA219               | I2C GPIO 21/22, address `0x40`, 100 Hz | External GPIO 4/5 or vertical header GPIO 21/22, at least 50 Hz in the pin table |
+| Optical IR           | GPIO 32 at door seam                   | TCRT5000 detects physical closure and stops forward motion                       |
+| Roller limit switch  | GPIO 33 ISR                            | Falling-edge home interrupt with pull-up stops reverse motion                    |
+| Local hardware abort | Four fail-safes listed in the drawing  | Door architecture also documents S1 on GPIO 16 and a movement buzzer on GPIO 13  |
 
 ## Safety and observation
 

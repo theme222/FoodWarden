@@ -4,15 +4,15 @@
 
 ## Hardware
 
-| Part | What it measures or does | Connection to verify |
-| --- | --- | --- |
-| KidBright32 / ESP32 | FreeRTOS tasks, RTC memory and deep sleep | Battery powered, no Wi-Fi in the sensor telemetry path |
-| 18650 cell and BMS | Portable power | Protected pack inside a moisture-sealed enclosure with silica desiccant |
-| SHT31 | Temperature and relative humidity for SGP40 compensation | I2C address `0x44`. The drawing says GPIO 21/22. The fridge fixes branch uses external `Wire1` on GPIO 4/5. |
-| SGP40 | Raw gas signal feeding Sensirion's VOC index | I2C address `0x59` on the same external bus. The drawing shows MOSFET heater gating on GPIO 18. The branch includes an optional software heater-off build flag. |
-| Onboard LDR | Interior light for the door observation | GPIO 36, raw ADC 0–4095 |
-| HT16K33 matrix | Local readout | GPIO 21/22 and address `0x70` in the fridge fixes branch |
-| S1 / S2 | On-device controls | GPIO 16 and GPIO 14. S2 can wake the ESP32. |
+| Part                | What it measures or does                                 | Connection to verify                                                                                                                                            |
+| ------------------- | -------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| KidBright32 / ESP32 | FreeRTOS tasks, RTC memory and deep sleep                | Battery powered, no Wi-Fi in the sensor telemetry path                                                                                                          |
+| 18650 cell and BMS  | Portable power                                           | Protected pack inside a moisture-sealed enclosure with silica desiccant                                                                                         |
+| SHT31               | Temperature and relative humidity for SGP40 compensation | I2C address `0x44`. The drawing says GPIO 21/22. The fridge fixes branch uses external `Wire1` on GPIO 4/5.                                                     |
+| SGP40               | Raw gas signal feeding Sensirion's VOC index             | I2C address `0x59` on the same external bus. The drawing shows MOSFET heater gating on GPIO 18. The branch includes an optional software heater-off build flag. |
+| Onboard LDR         | Interior light for the door observation                  | GPIO 36, raw ADC 0–4095                                                                                                                                         |
+| HT16K33 matrix      | Local readout                                            | GPIO 21/22 and address `0x70` in the fridge fixes branch                                                                                                        |
+| S1 / S2             | On-device controls                                       | GPIO 16 and GPIO 14. S2 can wake the ESP32.                                                                                                                     |
 
 The draw.io photo places F0 inside the fridge door. The enclosure and bus details are design evidence. Battery runtime remains a measured-hardware requirement. The fridge branch power budget contains estimates and a measurement procedure.
 

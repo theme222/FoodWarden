@@ -7,13 +7,13 @@ The original source is [Fridge.drawio](../diagram/Fridge.drawio), Page-1, ID `40
 All six Pele diagrams render and match their committed SVGs (`fridge`, `network`, `cloud`, `gateway`, `fridge-sensor`, `door-closer`). Together they show the architecture required for the proposal diagram in [RUBRIC.md](../../RUBRIC.md), including the fridge sensor, camera gateway, local door actuator, Cloudflare cloud services, and dashboard. The hardware and network views show the gateway's local vision and MQTT close/abort paths.
 
 > [!NOTE]
-> The server block labels in [Fridge.drawio](../diagram/Fridge.drawio) have been updated to the chosen Full Cloudflare 100% stack (`Workers + Static Assets`, `D1`, `R2`, `Durable Objects WebSocket`, `Better Auth + Google OAuth`). The static exports ([HTML](../diagram/Fridge.html), [SVG](../diagram/Fridge.svg), and [PNG](../diagram/Fridge.png)) and the embedded Firebase icon inside `Fridge.drawio` still show the earlier Firebase export until re-exported from draw.io desktop/web.
+> Draw.io exports (HTML, SVG and PNG) were regenerated from the unchanged `Fridge.drawio` source using draw.io 32.6.10 on 2026-11-15. Cloud labels now match the source. The original embedded service bitmap is retained as artwork; the labelled Cloudflare blocks and `cloud.mmd` describe the current implementation. Gemini and LINE handlers are implemented and locally tested; deployment and real-provider validation are still pending.
 
 ## Reading order
 
 1. [System overview](../diagrams/fridge.mmd) shows the physical subsystems, Cloudflare backend, user, and external services (`G`, `L`).
 2. [Network and heartbeat](../diagrams/network.mmd) separates direct BLE, LAN MQTT, and internet HTTPS. The router carries LAN and internet traffic. It hosts neither the MQTT broker nor the Cloudflare Worker API.
-3. [Cloud components](../diagrams/cloud.mmd) separates Better Auth + Google OAuth sign-in, Cloudflare Worker REST/photo routes, D1 SQLite storage, R2 private food photos, Durable Objects WebSocket Hibernation (`FridgeRoom`), and planned Gemini/LINE integrations.
+3. [Cloud components](../diagrams/cloud.mmd) separates Better Auth + Google OAuth sign-in, Cloudflare Worker REST/photo routes, D1 SQLite storage, R2 private food photos, Durable Objects WebSocket Hibernation (`FridgeRoom`), and implemented Gemini/LINE integrations (production deployment pending).
 4. Use the [gateway](GATEWAY.md), [fridge sensor](FRIDGE-SENSOR.md), [door closer](DOOR-CLOSER.md), and [external flows](EXTERNAL-FLOWS.md) notes for each subsystem's internal details and boundaries.
 
 Each source has a matching rendered SVG in [diagrams](../diagrams/).
