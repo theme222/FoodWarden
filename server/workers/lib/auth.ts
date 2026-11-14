@@ -35,14 +35,26 @@ function resolveSecret(env: AppBindings): string {
   return secret || DEV_FALLBACK_SECRET;
 }
 
+const DEV_TRUSTED_ORIGINS = [
+  "http://localhost:5173",
+  "http://127.0.0.1:5173",
+  "http://localhost:8787",
+  "http://127.0.0.1:8787",
+];
+
 export function createAuth(env: AppBindings, requestUrl: string) {
   const origin = env.BETTER_AUTH_URL?.trim() || new URL(requestUrl).origin;
   const secret = resolveSecret(env);
+  const trustedOrigins =
+    env.APP_ENV === "development"
+      ? Array.from(new Set([origin, ...DEV_TRUSTED_ORIGINS]))
+      : [origin];
 
   return betterAuth({
     appName: "FoodWarden",
     baseURL: origin,
     basePath: "/api/auth",
+    trustedOrigins,
     secret,
     database: env.DB,
     socialProviders: isGoogleAuthEnabled(env)

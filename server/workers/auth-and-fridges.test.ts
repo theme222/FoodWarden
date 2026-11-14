@@ -91,6 +91,24 @@ describe("Better Auth, fridge RBAC, and inventory CRUD", () => {
         })
       ).status,
     ).toBe(401);
+
+    // Vite dev server origin (localhost:5173) is trusted for POST /api/auth/sign-out in development.
+    const validCookie = await loginCookie(
+      `signout-${crypto.randomUUID()}@example.com`,
+    );
+    const signOutRes = await exports.default.fetch(
+      "http://localhost:8787/api/auth/sign-out",
+      {
+        method: "POST",
+        headers: {
+          Cookie: validCookie,
+          Origin: "http://localhost:5173",
+          "Content-Type": "application/json",
+        },
+        body: "{}",
+      },
+    );
+    expect(signOutRes.status).toBe(200);
   });
 
   it("creates fridges, enforces owner vs member RBAC, rotates gateway tokens, and cleans up on delete", async () => {

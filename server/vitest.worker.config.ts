@@ -14,6 +14,10 @@ export default defineConfig(async () => {
           bindings: {
             TEST_MIGRATIONS: migrations,
             LINE_CHANNEL_ACCESS_TOKEN: "test-line-channel-token",
+            DEV_AUTH_BYPASS_EMAIL: "",
+            GOOGLE_CLIENT_ID: "",
+            GOOGLE_CLIENT_SECRET: "",
+            BETTER_AUTH_URL: "",
           },
         },
       }),
