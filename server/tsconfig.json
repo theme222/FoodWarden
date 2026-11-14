@@ -1,5 +1,5 @@
 {
-  "include": ["src", "vite.config.ts", "index.ts"],
+  "include": ["src", "test", "vite.config.ts", "index.ts"],
   "compilerOptions": {
     // Environment setup & latest features
     "lib": ["ESNext", "DOM", "DOM.Iterable"],
@@ -8,7 +8,11 @@
     "moduleDetection": "force",
     "jsx": "react-jsx",
     "allowJs": true,
-    "types": ["bun"],
+    "types": ["bun", "node"],
+    "baseUrl": ".",
+    "paths": {
+      "@/*": ["./src/*"]
+    },
 
     // Bundler mode
     "moduleResolution": "bundler",

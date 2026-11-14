@@ -1,3 +1,7 @@
+@import "tailwindcss";
+@import "tw-animate-css";
+@import "./ui-theme.css";
+
 :root {
   font-family: system-ui, "Leelawadee UI", sans-serif;
   color: #173229;
@@ -9,47 +13,51 @@
   --radius: 15px;
   color-scheme: light;
 }
-* {
-  box-sizing: border-box;
+
+@layer base {
+  * {
+    box-sizing: border-box;
+  }
+  body {
+    margin: 0;
+    min-width: 280px;
+  }
+  h1,
+  h2,
+  p {
+    margin: 0;
+  }
+  h1 {
+    font-size: clamp(1.7rem, 5vw, 2.35rem);
+    line-height: 1.25;
+    margin-block: 0.4rem 1rem;
+  }
+  h2 {
+    font-size: 1.15rem;
+  }
+  p {
+    margin-block: 0.55rem;
+  }
+  a {
+    color: inherit;
+  }
+  button,
+  input,
+  select {
+    font: inherit;
+  }
+  button,
+  a,
+  input,
+  select {
+    -webkit-tap-highlight-color: transparent;
+  }
+  :focus-visible {
+    outline: 3px solid #1d6cad;
+    outline-offset: 3px;
+  }
 }
-body {
-  margin: 0;
-  min-width: 280px;
-}
-h1,
-h2,
-p {
-  margin: 0;
-}
-h1 {
-  font-size: clamp(1.7rem, 5vw, 2.35rem);
-  line-height: 1.25;
-  margin-block: 0.4rem 1rem;
-}
-h2 {
-  font-size: 1.15rem;
-}
-p {
-  margin-block: 0.55rem;
-}
-a {
-  color: inherit;
-}
-button,
-input,
-select {
-  font: inherit;
-}
-button,
-a,
-input,
-select {
-  -webkit-tap-highlight-color: transparent;
-}
-:focus-visible {
-  outline: 3px solid #1d6cad;
-  outline-offset: 3px;
-}
+
 .header {
   background: var(--surface);
   border-bottom: 1px solid var(--border);
@@ -701,3 +709,6 @@ button:disabled {
     width: 0.9rem;
   }
 }
+
+/* Light-only application theme; dark utilities require an explicit .dark ancestor. */
+@custom-variant dark (&:where(.dark, .dark *));

@@ -8,3 +8,12 @@
 *.vsix
 
 **/.zed/
+# Local development tools
+/.tools/
+
+# Private environment files across every subsystem
+**/.env.*
+!**/.env.example
+**/.dev.vars
+**/.dev.vars.*
+!**/.dev.vars.example
