@@ -14,7 +14,7 @@
     {
       "binding": "DB",
       "database_name": "foodwarden-db",
-      "database_id": "00000000-0000-0000-0000-000000000000",
+      "database_id": "5331bc4a-8ed9-4017-a7ae-f493e05434e6",
       "migrations_dir": "migrations",
     },
   ],
@@ -43,5 +43,6 @@
   },
   "vars": {
     "APP_ENV": "production",
+    "BETTER_AUTH_URL": "https://foodwarden.newisnooby.workers.dev",
   },
 }

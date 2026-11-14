@@ -26,4 +26,4 @@ Browser testing used temporary, in-memory local Worker storage because this Wind
 
 ## Production status
 
-Wrangler defaults to `APP_ENV=production`; local and test overrides explicitly opt into development. Production credentials, remote resource provisioning and deployment require the final setup stage. No score certifies those external settings.
+Wrangler defaults to `APP_ENV=production`; local and test overrides explicitly opt into development. The remote D1 database and private R2 bucket are provisioned and the initial migration is applied. Production OAuth credentials and deployment remain pending; see [PRODUCTION.md](../PRODUCTION.md). No score certifies those external settings.
