@@ -1,3 +1,10 @@
+import { lineRoutes } from "./line-routes";
+import {
+  personalDoorAlerts,
+  personalTelemetryAlerts,
+  queueMorningDigests,
+  dispatchPersonalOutbox,
+} from "./lib/personal-notifications";
 import { dispatchLineOutbox } from "./lib/line";
 import { InferenceQuotaError, withInferenceQuota } from "./lib/ai-quota";
 import { SCALAR_ASSET_PATH } from "../scalar-assets";
@@ -1049,7 +1056,10 @@ app.all("/api/telemetry", async (c) => {
       }),
     ]);
   }
-  await maybeSendTelemetryAlerts(c.env, auth, samples, nowS);
+  await Promise.all([
+    maybeSendTelemetryAlerts(c.env, auth, samples, nowS),
+    personalTelemetryAlerts(c.env, auth, samples, nowS),
+  ]);
   return c.json({ success: true, ingested_count: ingestedCount });
 });
 
@@ -1111,9 +1121,14 @@ app.all("/api/door_events", async (c) => {
       }),
     ]);
   }
-  await maybeSendDoorSafetyAlerts(c.env, auth, events, nowS);
+  await Promise.all([
+    maybeSendDoorSafetyAlerts(c.env, auth, events, nowS),
+    personalDoorAlerts(c.env, auth, events, nowS),
+  ]);
   return c.json({ success: true, ingested_count: ingestedCount });
 });
+
+app.route("/api", lineRoutes);
 
 app.all("/api/*", (c) => {
   return c.json<ApiErrorEnvelope>(
@@ -1142,7 +1157,14 @@ export default {
   scheduled(controller, env, ctx) {
     ctx.waitUntil(
       controller.cron === "* * * * *"
-        ? dispatchLineOutbox(env, Math.floor(controller.scheduledTime / 1000))
+        ? (async () => {
+            const nowS = Math.floor(controller.scheduledTime / 1000);
+            await queueMorningDigests(env, nowS);
+            await Promise.all([
+              dispatchLineOutbox(env, nowS),
+              dispatchPersonalOutbox(env, nowS),
+            ]);
+          })()
         : runDailyCronTasks(env, Math.floor(controller.scheduledTime / 1000)),
     );
   },

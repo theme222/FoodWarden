@@ -745,6 +745,141 @@ route("/api/door_events", post, "Upload door safety events", "Gateway", {
   },
 });
 
+const pairing = object({
+  code: { type: "string", pattern: "^FW-[A-HJ-NP-Z2-9]{4}-[A-HJ-NP-Z2-9]{4}$" },
+  expires_at_s: timestamp,
+  friend_url: { type: ["string", "null"] },
+});
+route("/api/line/webhook", post, "Receive signed LINE webhook events", "LINE", {
+  security: [],
+  description:
+    "Public transport endpoint, authenticated by HMAC-SHA256 X-Line-Signature over the unchanged raw request body. Not a browser/session endpoint. Rejects bodies above 1 MB; consumes pairing codes once and rechecks issuer permissions.",
+  parameters: [
+    {
+      name: "x-line-signature",
+      in: "header",
+      required: true,
+      schema: { type: "string" },
+    },
+  ],
+  requestBody: body({
+    type: "object",
+    properties: { events: { type: "array", items: { type: "object" } } },
+    required: ["events"],
+  }),
+  responses: {
+    "200": response("Processed", ok),
+    "403": response("Invalid webhook signature", ref("Error")),
+    "413": response("Body too large", ref("Error")),
+    "503": response("LINE not configured", ref("Error")),
+  },
+});
+for (const prefix of ["/api/me/line", "/api/fridges/{fridgeId}/line"]) {
+  const owner = prefix.includes("fridges")
+    ? "Fridge owner only. "
+    : "Current account only. ";
+  route(prefix, get, "Read LINE connection status", "LINE", {
+    description:
+      "Returns connection status and the public add-friend URL, never recipient IDs or secrets.",
+    responses: { "200": response("Connection status", { type: "object" }) },
+  });
+  route(prefix, del, "Disconnect LINE", "LINE", {
+    description: owner + "Revokes pending codes and queued delivery attempts.",
+    responses: { "200": response("Disconnected", ok) },
+  });
+  route(
+    prefix + "/pair",
+    post,
+    "Create a one-time LINE connection code",
+    "LINE",
+    {
+      description:
+        owner +
+        "Code expires in ten minutes. Personal codes only work in direct chat. Five issued codes per account per ten minutes.",
+      responses: {
+        "201": response("Pairing code", pairing),
+        "429": response("Rate limited", ref("Error")),
+        "503": response("LINE not configured", ref("Error")),
+      },
+    },
+  );
+  route(prefix + "/test", post, "Queue a LINE test notification", "LINE", {
+    description:
+      owner + "One test per minute; delivery acceptance is not guaranteed.",
+    responses: {
+      "202": response("Queued", object({ queued: { const: true } })),
+      "409": response("Connect LINE first", ref("Error")),
+      "429": response("Wait before another test", ref("Error")),
+    },
+  });
+}
+route(
+  "/api/me/line",
+  patch,
+  "Update your private notification preferences",
+  "LINE",
+  {
+    requestBody: body(
+      object(
+        {
+          morning_enabled: { type: "boolean" },
+          morning_time: {
+            type: "string",
+            pattern: "^([01]\\d|2[0-3]):[0-5]\\d$",
+            description: "Asia/Bangkok, 24-hour HH:MM",
+          },
+          inst_obstruct: { type: "boolean" },
+          inst_warm: { type: "boolean" },
+          inst_spoil: { type: "boolean" },
+        },
+        [],
+      ),
+    ),
+    responses: { "200": response("Saved", ok) },
+  },
+);
+route(
+  "/api/fridges/{fridgeId}/favorites",
+  get,
+  "Read your private favorite foods and categories",
+  "Favorites",
+  {
+    responses: {
+      "200": response("Favorites with current stock counts", {
+        type: "object",
+      }),
+    },
+  },
+);
+route(
+  "/api/fridges/{fridgeId}/favorites/categories",
+  put,
+  "Set your favorite food categories",
+  "Favorites",
+  {
+    requestBody: body(object({ categories: array(ref("Category")) })),
+    responses: { "200": response("Saved", ok) },
+  },
+);
+route(
+  "/api/fridges/{fridgeId}/favorites/{itemId}",
+  put,
+  "Favorite an existing inventory item",
+  "Favorites",
+  {
+    description:
+      "Private to the current account. Requires membership and an item in this fridge.",
+    responses: { "200": response("Saved", ok) },
+  },
+);
+route(
+  "/api/fridges/{fridgeId}/favorites/{key}",
+  del,
+  "Remove a favorite, including out-of-stock foods",
+  "Favorites",
+  { responses: { "200": response("Removed", ok) } },
+);
+
 // This local reference mirrors existing validators; it does not change runtime validation.
 // Keep it aligned with handlers and the canonical interface documents.
 export const openApiDocument: OpenAPIV3_1.Document = {
@@ -764,6 +899,8 @@ export const openApiDocument: OpenAPIV3_1.Document = {
     "Inventory",
     "Monitoring",
     "Gateway",
+    "LINE",
+    "Favorites",
   ].map((name) => ({ name })),
   components: {
     securitySchemes: {

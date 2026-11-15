@@ -1,3 +1,4 @@
+import { LinePairingError } from "./line-pairing";
 import { retireUnreferencedPhoto } from "./storage";
 import type { AppBindings } from "../types";
 import type { DoorEvent, DoorEventStatus } from "./door-events";
@@ -507,4 +508,41 @@ export async function dispatchLineOutbox(
     }
   }
   return sent;
+}
+export async function enqueueFridgeLineTest(
+  env: AppBindings,
+  fridgeId: string,
+  nowS: number,
+): Promise<void> {
+  const config = await getFridgeAlertConfig(env.DB, fridgeId);
+  if (!config)
+    throw new LinePairingError("Connect this fridge to LINE first.", 409);
+  if (
+    !(await tryAcquireAlertCooldown(
+      env.DB,
+      fridgeId,
+      "line_test_request",
+      nowS,
+      60,
+    ))
+  )
+    throw new LinePairingError(
+      "Please wait one minute before another test.",
+      429,
+    );
+  await queueLineAlert(
+    env,
+    fridgeId,
+    "line_test",
+    config.line_target_id,
+    [
+      {
+        type: "text",
+        text: `[${config.name}] เชื่อมต่อ FoodWarden แล้ว ✅ การแจ้งเตือนของตู้เย็นจะส่งมาที่แชทนี้`,
+      },
+    ],
+    nowS,
+    0,
+    [crypto.randomUUID()],
+  );
 }

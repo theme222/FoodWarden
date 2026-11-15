@@ -19,3 +19,5 @@ GEMINI_API_KEY=""
 
 # LINE Messaging API Channel Access Token for push alerts & daily expiry digest
 LINE_CHANNEL_ACCESS_TOKEN=""
+LINE_CHANNEL_SECRET=""
+LINE_BOT_BASIC_ID=""

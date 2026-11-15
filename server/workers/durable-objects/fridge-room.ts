@@ -5,6 +5,7 @@ import type { FridgeStatusSnapshot } from "../lib/status";
 import type { TelemetrySample } from "../lib/telemetry";
 
 export type FridgeRoomEvent =
+  | { type: "line_settings_changed" }
   | { type: "connected"; fridgeId: string }
   | { type: "telemetry"; samples: TelemetrySample[]; last_seen_s: number }
   | { type: "status"; status: FridgeStatusSnapshot }

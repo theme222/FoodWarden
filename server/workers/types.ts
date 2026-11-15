@@ -14,6 +14,8 @@ export interface AppBindings {
   GEMINI_FALLBACK_MODEL?: string;
   GEMINI_API_BASE_URL?: string;
   LINE_CHANNEL_ACCESS_TOKEN?: string;
+  LINE_CHANNEL_SECRET?: string;
+  LINE_BOT_BASIC_ID?: string;
   LINE_API_BASE_URL?: string;
 }
 

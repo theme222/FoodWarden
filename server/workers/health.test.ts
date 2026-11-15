@@ -8,6 +8,15 @@ interface TestEnv {
 }
 
 const EXPECTED_TABLES = [
+  "line_pairing_codes",
+  "line_webhook_attempts",
+  "line_target_resets",
+  "user_line_profiles",
+  "user_fridge_favorites",
+  "user_fridge_fav_categories",
+  "user_alert_cooldowns",
+  "user_line_events",
+  "user_line_outbox",
   "account",
   "ai_reservations",
   "alert_cooldowns",
@@ -39,7 +48,7 @@ describe("worker scaffold and D1 schema", () => {
     ).all<{ name: string }>();
 
     const tableNames = results.map((row) => row.name);
-    expect(tableNames).toEqual(EXPECTED_TABLES);
+    expect(tableNames).toEqual([...EXPECTED_TABLES].sort());
   });
 
   it("returns 200 ok from GET /api/health", async () => {
