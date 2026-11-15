@@ -322,31 +322,41 @@ class IdleScreen(QWidget):
                 "background-color: #7F1D1D; color: #FCA5A5; font-size: 11px; font-weight: bold; padding: 4px 8px; border-radius: 4px;"
             )
 
-    def update_motion_state(self, has_motion: bool, idle_duration_s: float = 0.0) -> None:
+    def update_motion_state(
+        self,
+        has_motion: bool,
+        idle_duration_s: float = 0.0,
+        hw_status: str = "",
+    ) -> None:
         """Updates PIR motion sensor badge and debug status card."""
+        hw_suffix = f" [{hw_status}]" if hw_status else ""
         if has_motion:
-            self.pill_motion.setText("Motion: DETECTED")
+            self.pill_motion.setText(f"Motion: DETECTED{hw_suffix}")
             self.pill_motion.setStyleSheet(
                 "background-color: #064E3B; color: #34D399; font-size: 11px; font-weight: bold; padding: 4px 8px; border-radius: 4px;"
             )
-            self.motion_label.setText("ตรวจจับการเคลื่อนไหว: พบการเคลื่อนไหว! (Motion Detected)")
+            self.motion_label.setText(
+                f"ตรวจจับการเคลื่อนไหว: พบการเคลื่อนไหว! (Motion Detected){hw_suffix}"
+            )
             self.motion_label.setStyleSheet("font-size: 13px; font-weight: bold; color: #10B981;")
             return
 
         secs = max(0, int(idle_duration_s))
         if secs < 60:
-            self.pill_motion.setText(f"Motion: None ({secs}s)")
+            self.pill_motion.setText(f"Motion: None ({secs}s){hw_suffix}")
             self.motion_label.setText(
-                f"ตรวจจับการเคลื่อนไหว: นิ่งมาแล้ว {secs} วินาที (No Motion: {secs}s)"
+                f"ตรวจจับการเคลื่อนไหว: นิ่งมาแล้ว {secs} วินาที (No Motion: {secs}s){hw_suffix}"
             )
         else:
             mins, rem_s = divmod(secs, 60)
-            self.pill_motion.setText(f"Motion: None ({mins}m {rem_s:02d}s)")
+            self.pill_motion.setText(f"Motion: None ({mins}m {rem_s:02d}s){hw_suffix}")
             self.motion_label.setText(
-                f"ตรวจจับการเคลื่อนไหว: นิ่งมาแล้ว {mins} นาที {rem_s} วินาที (No Motion: {secs}s)"
+                f"ตรวจจับการเคลื่อนไหว: นิ่งมาแล้ว {mins} นาที {rem_s} วินาที (No Motion: {secs}s){hw_suffix}"
             )
 
+        pill_bg = "#78350F" if "Disabled" in hw_status or "Sim" in hw_status else "#1F2937"
+        pill_fg = "#FBBF24" if "Disabled" in hw_status or "Sim" in hw_status else "#9CA3AF"
         self.pill_motion.setStyleSheet(
-            "background-color: #1F2937; color: #9CA3AF; font-size: 11px; font-weight: bold; padding: 4px 8px; border-radius: 4px;"
+            f"background-color: {pill_bg}; color: {pill_fg}; font-size: 11px; font-weight: bold; padding: 4px 8px; border-radius: 4px;"
         )
-        self.motion_label.setStyleSheet("font-size: 13px; color: #9CA3AF;")
+        self.motion_label.setStyleSheet(f"font-size: 13px; color: {pill_fg};")

@@ -48,7 +48,7 @@ class FoodWardenMainWindow(QMainWindow):
     _sig_update_telemetry = pyqtSignal(object, object, object)
     _sig_update_door_state = pyqtSignal(bool, float)
     _sig_update_wifi_status = pyqtSignal(bool)
-    _sig_update_motion_state = pyqtSignal(bool, float)
+    _sig_update_motion_state = pyqtSignal(bool, float, str)
     _sig_person_abort_alert = pyqtSignal()
     _sig_offline_warning = pyqtSignal()
 
@@ -60,9 +60,11 @@ class FoodWardenMainWindow(QMainWindow):
         on_commit_checkin: Callable[[CheckInDraftResult, str], None] | None = None,
         on_commit_checkout: Callable[[CheckOutCandidate], None] | None = None,
         on_save_settings: Callable[[str, int, int], None] | None = None,
+        on_save_pir_pin: Callable[[int], None] | None = None,
         initial_token: str = "",
         autocomplete_timeout_s: int = 5,
         sleep_timeout_s: int = 600,
+        initial_pir_gpio_pin: int = 22,
     ) -> None:
         super().__init__()
         self.button_controller = button_controller
@@ -71,10 +73,12 @@ class FoodWardenMainWindow(QMainWindow):
         self.on_commit_checkin = on_commit_checkin
         self.on_commit_checkout = on_commit_checkout
         self.on_save_settings = on_save_settings
+        self.on_save_pir_pin = on_save_pir_pin
 
         self._current_token = initial_token
         self._current_autocomplete_s = autocomplete_timeout_s
         self._current_sleep_s = sleep_timeout_s
+        self._current_pir_gpio_pin = initial_pir_gpio_pin
 
         self.setWindowTitle("FoodWarden Gateway (Node 'C')")
         self.resize(MAIN_WINDOW_WIDTH, MAIN_WINDOW_HEIGHT)
@@ -134,9 +138,11 @@ class FoodWardenMainWindow(QMainWindow):
             on_minimize=self.minimize_window,
             on_toggle_fullscreen=self.toggle_fullscreen,
             on_quit=self.quit_application,
+            on_save_pir_pin=self._handle_pir_pin_saved,
             initial_token=self._current_token,
             initial_autocomplete_s=self._current_autocomplete_s,
             initial_sleep_s=self._current_sleep_s,
+            initial_pir_gpio_pin=self._current_pir_gpio_pin,
             parent=self.stack,
         )
         self.stack.addWidget(self.settings_screen)
@@ -195,6 +201,7 @@ class FoodWardenMainWindow(QMainWindow):
             self._current_token,
             self._current_autocomplete_s,
             self._current_sleep_s,
+            self._current_pir_gpio_pin,
         )
         self.stack.setCurrentIndex(3)
         logger.info("Transitioned to Settings screen (mouse-only)")
@@ -331,6 +338,11 @@ class FoodWardenMainWindow(QMainWindow):
             sleep_s,
         )
 
+    def _handle_pir_pin_saved(self, pir_gpio_pin: int) -> None:
+        self._current_pir_gpio_pin = pir_gpio_pin
+        if self.on_save_pir_pin:
+            self.on_save_pir_pin(pir_gpio_pin)
+
     def _handle_checkin_confirmed(self, draft: CheckInDraftResult, expiry_date: str) -> None:
         logger.info("Check-in confirmed with expiry: %s", expiry_date)
         if self.on_commit_checkin:
@@ -400,11 +412,16 @@ class FoodWardenMainWindow(QMainWindow):
         else:
             self._sig_update_wifi_status.emit(is_online)
 
-    def update_motion_state(self, has_motion: bool, idle_duration_s: float = 0.0) -> None:
+    def update_motion_state(
+        self,
+        has_motion: bool,
+        idle_duration_s: float = 0.0,
+        hw_status: str = "",
+    ) -> None:
         if self._is_gui_thread():
-            self.idle_screen.update_motion_state(has_motion, idle_duration_s)
+            self.idle_screen.update_motion_state(has_motion, idle_duration_s, hw_status)
         else:
-            self._sig_update_motion_state.emit(has_motion, idle_duration_s)
+            self._sig_update_motion_state.emit(has_motion, idle_duration_s, hw_status)
 
     def show_person_abort_alert(self) -> None:
         if self._is_gui_thread():

@@ -1,6 +1,11 @@
 """Unit tests for ButtonController and PIRController hardware abstractions."""
 
+import subprocess
+import sys
 import time
+from unittest.mock import MagicMock
+
+import pytest
 
 from foodwarden_camera.hardware.buttons import ButtonController, ButtonType
 from foodwarden_camera.hardware.pir import PIRController
@@ -131,3 +136,36 @@ def test_pir_idle_duration_and_motion_change_callback() -> None:
     assert controller.idle_duration_s >= 12.0
     assert events[-1][0] is False
     assert events[-1][1] >= 12.0
+
+
+def test_pir_pinctrl_fallback_and_reconfigure(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(sys, "platform", "linux")
+    monkeypatch.setattr(
+        "shutil.which", lambda cmd: "/usr/bin/pinctrl" if cmd == "pinctrl" else None
+    )
+
+    def fake_run(cmd: list[str], **_kwargs: object) -> subprocess.CompletedProcess[str]:
+        if cmd[:2] == ["pinctrl", "get"]:
+            return subprocess.CompletedProcess(
+                cmd, 0, stdout="22: ip    pd | hi // GPIO22 = input\n", stderr=""
+            )
+        return subprocess.CompletedProcess(cmd, 0, stdout="", stderr="")
+
+    monkeypatch.setattr("subprocess.run", fake_run)
+    # Force gpiozero import inside _init_hardware to fail so pinctrl fallback triggers
+    monkeypatch.setitem(
+        sys.modules,
+        "gpiozero",
+        MagicMock(DigitalInputDevice=MagicMock(side_effect=RuntimeError("no lgpio"))),
+    )
+
+    controller = PIRController(gpio_pin=22)
+    assert controller.is_hardware_available is True
+    assert controller._use_pinctrl is True
+    assert controller.hardware_status_text == "GPIO 22: HW"
+    assert controller._read_hardware_pin() is True
+
+    # Disabling pin (-1) turns off hardware binding
+    controller.reconfigure_pin(-1)
+    assert controller.is_hardware_available is False
+    assert controller.hardware_status_text == "PIR Disabled"

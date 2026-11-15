@@ -8,6 +8,9 @@ the display after 10 minutes (600s) of continuous inactivity per SUMMARY.md §5.
 from __future__ import annotations
 
 import logging
+import shutil
+import subprocess
+import sys
 import threading
 import time
 from collections.abc import Callable
@@ -37,6 +40,8 @@ class PIRController:
         self._is_display_awake: bool = True
         self._last_motion_time: float = time.time()
         self.is_hardware_available: bool = False
+        self._pir_device: Any = None
+        self._use_pinctrl: bool = False
 
         self._running: bool = False
         self._thread: threading.Thread | None = None
@@ -63,10 +68,33 @@ class PIRController:
             return 0.0
         return max(0.0, time.time() - self._last_motion_time)
 
+    @property
+    def hardware_status_text(self) -> str:
+        """Human-readable status of the PIR GPIO hardware binding."""
+        if self.gpio_pin < 0:
+            return "PIR Disabled"
+        if self.is_hardware_available:
+            return f"GPIO {self.gpio_pin}: HW"
+        return f"GPIO {self.gpio_pin}: Sim"
+
+    def _close_hardware(self) -> None:
+        """Releases any bound gpiozero device."""
+        if self._pir_device is not None:
+            close_fn = getattr(self._pir_device, "close", None)
+            if callable(close_fn):
+                try:
+                    close_fn()
+                except Exception:
+                    logger.debug("Ignoring error closing old PIR device", exc_info=True)
+        self._pir_device = None
+        self._use_pinctrl = False
+        self.is_hardware_available = False
+
     def _init_hardware(self) -> None:
         """Attempts to bind to hardware GPIO pin on Raspberry Pi OS."""
+        self._close_hardware()
+
         if self.gpio_pin < 0:
-            self.is_hardware_available = False
             logger.info(
                 "PIR sensor disabled (gpio_pin=%d). Display will stay awake.", self.gpio_pin
             )
@@ -75,17 +103,77 @@ class PIRController:
         try:
             from gpiozero import DigitalInputDevice  # type: ignore[import-not-found]
 
-            self._pir_device: Any = DigitalInputDevice(self.gpio_pin, pull_up=False)
+            self._pir_device = DigitalInputDevice(self.gpio_pin, pull_up=False)
             self._pir_device.when_activated = lambda: self.record_motion(True)
             self._pir_device.when_deactivated = lambda: self.record_motion(False)
             self.is_hardware_available = True
+            if bool(self._pir_device.value):
+                self._is_motion_detected = True
+                self._last_motion_time = time.time()
             logger.info("Bound PIR sensor to GPIO %d via gpiozero", self.gpio_pin)
-        except (ImportError, RuntimeError, OSError) as exc:
-            self.is_hardware_available = False
+            return
+        except Exception as exc:  # noqa: BLE001
             logger.info(
-                "GPIO hardware not available (%s). Running PIR in Dev/Simulation mode.",
-                exc,
+                "gpiozero PIR init failed on GPIO %d (%s); checking pinctrl", self.gpio_pin, exc
             )
+
+        if sys.platform.startswith("linux") and shutil.which("pinctrl"):
+            try:
+                subprocess.run(
+                    ["pinctrl", "set", str(self.gpio_pin), "ip", "pd"],
+                    check=True,
+                    timeout=2.0,
+                    stdout=subprocess.DEVNULL,
+                    stderr=subprocess.DEVNULL,
+                )
+                self._use_pinctrl = True
+                self.is_hardware_available = True
+                logger.info("Bound PIR sensor to GPIO %d via pinctrl fallback", self.gpio_pin)
+                return
+            except (OSError, subprocess.SubprocessError) as exc:
+                logger.warning("pinctrl fallback failed on GPIO %d: %s", self.gpio_pin, exc)
+
+        self.is_hardware_available = False
+        logger.info(
+            "GPIO hardware not available for PIR pin %d. Running in Sim mode.", self.gpio_pin
+        )
+
+    def reconfigure_pin(self, new_gpio_pin: int) -> None:
+        """Re-binds PIR sensor to a different GPIO pin (or -1 to disable)."""
+        with self._lock:
+            self.gpio_pin = new_gpio_pin
+            self._is_motion_detected = False
+            self._last_motion_time = time.time()
+            self._init_hardware()
+            motion_state = self._is_motion_detected
+            idle_s = 0.0 if motion_state else max(0.0, time.time() - self._last_motion_time)
+
+        if self.on_motion_change is not None:
+            try:
+                self.on_motion_change(motion_state, idle_s)
+            except Exception:
+                logger.exception("Error in PIR on_motion_change callback")
+
+    def _read_hardware_pin(self) -> bool | None:
+        """Reads current logical level of PIR sensor pin via gpiozero or pinctrl."""
+        if not self.is_hardware_available or self.gpio_pin < 0:
+            return None
+
+        if self._pir_device is not None:
+            return bool(self._pir_device.value)
+
+        if self._use_pinctrl:
+            res = subprocess.run(
+                ["pinctrl", "get", str(self.gpio_pin)],
+                capture_output=True,
+                text=True,
+                check=False,
+                timeout=1.0,
+            )
+            if res.returncode == 0:
+                return "| hi" in res.stdout.lower()
+
+        return None
 
     def record_motion(self, has_motion: bool) -> None:
         """Called upon sensor reading changes or simulation events."""
@@ -199,11 +287,12 @@ class PIRController:
 
     def _monitor_loop(self, poll_interval_s: float) -> None:
         while self._running:
-            pir_device = getattr(self, "_pir_device", None)
-            if self.is_hardware_available and pir_device is not None:
+            if self.is_hardware_available:
                 try:
-                    current_val = bool(pir_device.value)
-                    if current_val != self._is_motion_detected or current_val:
+                    current_val = self._read_hardware_pin()
+                    if current_val is not None and (
+                        current_val != self._is_motion_detected or current_val
+                    ):
                         self.record_motion(current_val)
                 except Exception:
                     logger.exception("Error polling PIR hardware state")
@@ -223,4 +312,5 @@ class PIRController:
         self._running = False
         if self._thread is not None and self._thread.is_alive():
             self._thread.join(timeout=2.0)
+        self._close_hardware()
         logger.info("PIR monitor stopped")

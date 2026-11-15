@@ -49,9 +49,11 @@ class SettingsScreen(QWidget):
         on_minimize: Callable[[], None] | None = None,
         on_toggle_fullscreen: Callable[[], None] | None = None,
         on_quit: Callable[[], None] | None = None,
+        on_save_pir_pin: Callable[[int], None] | None = None,
         initial_token: str = "",
         initial_autocomplete_s: int = 5,
         initial_sleep_s: int = 600,
+        initial_pir_gpio_pin: int = 22,
         parent: QWidget | None = None,
     ) -> None:
         super().__init__(parent)
@@ -60,13 +62,20 @@ class SettingsScreen(QWidget):
         self._on_minimize = on_minimize
         self._on_toggle_fullscreen = on_toggle_fullscreen
         self._on_quit = on_quit
+        self._on_save_pir_pin = on_save_pir_pin
 
         self._initial_token = initial_token
         self._initial_autocomplete_s = initial_autocomplete_s
         self._initial_sleep_s = sleep_timeout_clamp(initial_sleep_s)
+        self._initial_pir_gpio_pin = initial_pir_gpio_pin
 
         self._init_ui()
-        self.load_values(initial_token, initial_autocomplete_s, initial_sleep_s)
+        self.load_values(
+            initial_token,
+            initial_autocomplete_s,
+            initial_sleep_s,
+            initial_pir_gpio_pin,
+        )
 
     def _init_ui(self) -> None:
         main_layout = QVBoxLayout(self)
@@ -251,6 +260,43 @@ class SettingsScreen(QWidget):
         )
         timeout_layout.addLayout(sleep_row)
 
+        # 3c. PIR Motion Sensor GPIO Pin
+        pir_row = QHBoxLayout()
+        pir_row.setSpacing(6)
+        pir_label_box = QVBoxLayout()
+        pir_th = QLabel("ขา GPIO เซนเซอร์ตรวจจับการเคลื่อนไหว (PIR GPIO Pin)", timeout_card)
+        pir_th.setStyleSheet("font-size: 13px; font-weight: bold; color: #E5E7EB; border: none;")
+        pir_en = QLabel("BCM GPIO pin for SEN0018 PIR (default 22, -1 = disabled)", timeout_card)
+        pir_en.setStyleSheet("font-size: 11px; color: #9CA3AF; border: none;")
+        pir_label_box.addWidget(pir_th)
+        pir_label_box.addWidget(pir_en)
+        pir_row.addLayout(pir_label_box)
+        pir_row.addStretch()
+
+        self.pir_pin_spin = QSpinBox(timeout_card)
+        self.pir_pin_spin.setFocusPolicy(Qt.FocusPolicy.ClickFocus)
+        self.pir_pin_spin.setRange(-1, 27)
+        self.pir_pin_spin.setSpecialValueText("-1 (Off)")
+        self.pir_pin_spin.setPrefix("GPIO ")
+        self.pir_pin_spin.setFixedWidth(104)
+        self.pir_pin_spin.setStyleSheet(spin_style)
+
+        pir_row.addWidget(
+            _make_mouse_button(
+                "Off (-1)", btn_step_style, timeout_card, lambda: self.pir_pin_spin.setValue(-1)
+            )
+        )
+        pir_row.addWidget(self.pir_pin_spin)
+        pir_row.addWidget(
+            _make_mouse_button(
+                "Default (22)",
+                btn_step_style,
+                timeout_card,
+                lambda: self.pir_pin_spin.setValue(22),
+            )
+        )
+        timeout_layout.addLayout(pir_row)
+
         main_layout.addWidget(timeout_card)
 
         # 4. Window & App Controls Card
@@ -315,11 +361,18 @@ class SettingsScreen(QWidget):
         footer.addWidget(self.btn_save)
         main_layout.addLayout(footer)
 
-    def load_values(self, token: str, autocomplete_s: int, sleep_s: int) -> None:
+    def load_values(
+        self,
+        token: str,
+        autocomplete_s: int,
+        sleep_s: int,
+        pir_gpio_pin: int = 22,
+    ) -> None:
         """Populates controls with current runtime settings."""
         self.token_input.setText(token)
         self.autocomplete_spin.setValue(max(1, min(120, autocomplete_s)))
         self.sleep_spin.setValue(sleep_timeout_clamp(sleep_s))
+        self.pir_pin_spin.setValue(max(-1, min(27, pir_gpio_pin)))
 
     def _toggle_token_visibility(self) -> None:
         if self.token_input.echoMode() == QLineEdit.EchoMode.Password:
@@ -348,8 +401,11 @@ class SettingsScreen(QWidget):
         token = self.token_input.text().strip()
         autocomplete_s = int(self.autocomplete_spin.value())
         sleep_s = int(self.sleep_spin.value())
+        pir_pin = int(self.pir_pin_spin.value())
         if self._on_save_settings is not None:
             self._on_save_settings(token, autocomplete_s, sleep_s)
+        if self._on_save_pir_pin is not None:
+            self._on_save_pir_pin(pir_pin)
         if self._on_back is not None:
             self._on_back()
 

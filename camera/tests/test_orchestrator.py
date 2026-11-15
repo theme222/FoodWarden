@@ -200,3 +200,9 @@ def test_apply_settings_updates_runtime_subsystems(
     assert test_orchestrator.pir.inactivity_timeout_s == 180.0
     assert test_orchestrator.window.checkin_screen.autocomplete_timeout_s == 11
     assert test_orchestrator.window.checkout_screen.autocomplete_timeout_s == 11
+
+    test_orchestrator.apply_pir_pin(17)
+    assert test_orchestrator.pir.gpio_pin == 17
+    assert "PIR_GPIO_PIN='17'" in (tmp_path / ".env").read_text(
+        encoding="utf-8"
+    ) or "PIR_GPIO_PIN=17" in (tmp_path / ".env").read_text(encoding="utf-8")

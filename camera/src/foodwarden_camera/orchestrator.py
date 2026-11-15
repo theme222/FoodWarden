@@ -100,9 +100,11 @@ class GatewayOrchestrator:
             on_commit_checkin=self.handle_commit_checkin,
             on_commit_checkout=self.handle_commit_checkout,
             on_save_settings=self.apply_settings,
+            on_save_pir_pin=self.apply_pir_pin,
             initial_token=settings.gateway_token,
             autocomplete_timeout_s=settings.autocomplete_timeout_s,
             sleep_timeout_s=settings.sleep_timeout_s,
+            initial_pir_gpio_pin=settings.pir_gpio_pin,
         )
 
         # Safety & State Tracking
@@ -123,9 +125,9 @@ class GatewayOrchestrator:
         self._running = True
         logger.info("Starting FoodWarden Gateway Orchestrator...")
 
-        # Start Camera & PIR
+        # Start Camera & PIR (0.25s poll keeps quick SEN0018 motion pulses responsive)
         self.camera.start()
-        self.pir.start_monitor(poll_interval_s=2.0)
+        self.pir.start_monitor(poll_interval_s=0.25)
 
         # Start Cloud Sync Manager
         self.sync_manager.start_background_sync(interval_s=20.0)
@@ -285,7 +287,11 @@ class GatewayOrchestrator:
                 logger.debug("Could not invoke xset dpms force off: %s", exc)
 
     def _on_pir_motion_change(self, has_motion: bool, idle_duration_s: float) -> None:
-        self.window.update_motion_state(has_motion, idle_duration_s)
+        self.window.update_motion_state(
+            has_motion,
+            idle_duration_s,
+            self.pir.hardware_status_text,
+        )
 
     def apply_settings(
         self,
@@ -307,6 +313,22 @@ class GatewayOrchestrator:
             autocomplete_timeout_s,
             sleep_timeout_s,
         )
+
+    def apply_pir_pin(self, pir_gpio_pin: int) -> None:
+        """Re-binds PIR GPIO pin at runtime and persists PIR_GPIO_PIN to .env."""
+        self.pir.reconfigure_pin(pir_gpio_pin)
+        self.settings.save_runtime_settings(
+            gateway_token=self.settings.gateway_token,
+            autocomplete_timeout_s=self.settings.autocomplete_timeout_s,
+            sleep_timeout_s=self.settings.sleep_timeout_s,
+            pir_gpio_pin=pir_gpio_pin,
+        )
+        self.window.update_motion_state(
+            self.pir.is_motion_detected,
+            self.pir.idle_duration_s,
+            self.pir.hardware_status_text,
+        )
+        logger.info("Applied PIR GPIO pin: %d (%s)", pir_gpio_pin, self.pir.hardware_status_text)
 
     # ==========================================================================
     # Door Safety Reflex Loop
@@ -361,6 +383,7 @@ class GatewayOrchestrator:
                 self.window.update_motion_state(
                     self.pir.is_motion_detected,
                     self.pir.idle_duration_s,
+                    self.pir.hardware_status_text,
                 )
                 if self.pir.is_display_awake:
                     has_frame, frame = self.camera.get_latest_frame()

@@ -268,13 +268,15 @@ def test_window_controls_and_motion_debug_ui(
     window = FoodWardenMainWindow(button_ctrl)
     window.show()
 
-    # Motion sensor UI updates (active vs. idle duration)
-    window.update_motion_state(True, 0.0)
+    # Motion sensor UI updates (active vs. idle duration + hw status)
+    window.update_motion_state(True, 0.0, "GPIO 22: HW")
     assert "DETECTED" in window.idle_screen.pill_motion.text()
+    assert "GPIO 22: HW" in window.idle_screen.pill_motion.text()
     assert "พบการเคลื่อนไหว" in window.idle_screen.motion_label.text()
 
-    window.update_motion_state(False, 75.0)
+    window.update_motion_state(False, 75.0, "PIR Disabled")
     assert "1m 15s" in window.idle_screen.pill_motion.text()
+    assert "PIR Disabled" in window.idle_screen.motion_label.text()
     assert "1 นาที 15 วินาที" in window.idle_screen.motion_label.text()
 
     # Fullscreen / Unfullscreen / Minimize controls

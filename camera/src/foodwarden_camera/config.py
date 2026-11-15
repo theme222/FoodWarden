@@ -112,12 +112,15 @@ class GatewaySettings(BaseModel):
         gateway_token: str,
         autocomplete_timeout_s: int,
         sleep_timeout_s: int,
+        pir_gpio_pin: int | None = None,
         target_env_path: Path | None = None,
     ) -> None:
         """Updates runtime settings in memory and persists them to the .env file."""
         self.gateway_token = gateway_token
         self.autocomplete_timeout_s = autocomplete_timeout_s
         self.sleep_timeout_s = sleep_timeout_s
+        if pir_gpio_pin is not None:
+            self.pir_gpio_pin = pir_gpio_pin
 
         resolved_path = target_env_path or env_path
         resolved_path.parent.mkdir(parents=True, exist_ok=True)
@@ -127,6 +130,8 @@ class GatewaySettings(BaseModel):
         set_key(str(resolved_path), "GATEWAY_TOKEN", gateway_token)
         set_key(str(resolved_path), "AUTOCOMPLETE_TIMEOUT_S", str(autocomplete_timeout_s))
         set_key(str(resolved_path), "SLEEP_TIMEOUT_S", str(sleep_timeout_s))
+        if pir_gpio_pin is not None:
+            set_key(str(resolved_path), "PIR_GPIO_PIN", str(pir_gpio_pin))
 
 
 settings = GatewaySettings()
