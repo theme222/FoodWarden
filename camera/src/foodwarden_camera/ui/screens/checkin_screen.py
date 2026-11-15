@@ -29,16 +29,18 @@ class CheckInScreen(QWidget):
         self,
         on_confirm_callback: Callable[[CheckInDraftResult, str], None],
         on_cancel_callback: Callable[[], None],
+        autocomplete_timeout_s: int = 5,
         parent: QWidget | None = None,
     ) -> None:
         super().__init__(parent)
         self.on_confirm = on_confirm_callback
         self.on_cancel = on_cancel_callback
+        self.autocomplete_timeout_s = max(1, autocomplete_timeout_s)
 
         self._draft: CheckInDraftResult | None = None
         self._current_date = datetime.now() + timedelta(days=7)
         self._selected_segment = 0  # 0: Day, 1: Month, 2: Year
-        self._countdown_seconds = 5
+        self._countdown_seconds = self.autocomplete_timeout_s
 
         self._countdown_timer = QTimer(self)
         self._countdown_timer.timeout.connect(self._tick_countdown)
@@ -63,7 +65,10 @@ class CheckInScreen(QWidget):
 
         header.addStretch()
 
-        self.countdown_label = QLabel("ยืนยันอัตโนมัติใน: 5 วินาที (Auto: 5s)", self)
+        self.countdown_label = QLabel(
+            f"ยืนยันอัตโนมัติใน: {self.autocomplete_timeout_s} วินาที (Auto: {self.autocomplete_timeout_s}s)",
+            self,
+        )
         self.countdown_label.setStyleSheet(
             "font-size: 13px; font-weight: bold; color: #F59E0B; background-color: #2D2310; padding: 4px 10px; border-radius: 4px; border: 1px solid #78350F;"
         )
@@ -177,6 +182,16 @@ class CheckInScreen(QWidget):
     # State & Workflow Controls
     # ==========================================================================
 
+    def set_autocomplete_timeout(self, seconds: int) -> None:
+        """Updates the inactivity auto-confirm duration in seconds."""
+        self.autocomplete_timeout_s = max(1, seconds)
+
+    def _reset_countdown_display(self) -> None:
+        self._countdown_seconds = self.autocomplete_timeout_s
+        self.countdown_label.setText(
+            f"ยืนยันอัตโนมัติใน: {self._countdown_seconds} วินาที (Auto: {self._countdown_seconds}s)"
+        )
+
     def load_draft(self, draft: CheckInDraftResult, image_bytes: bytes) -> None:
         """Loads AI metadata and starts auto-confirm countdown."""
         self._draft = draft
@@ -207,9 +222,8 @@ class CheckInScreen(QWidget):
         self._selected_segment = 0
         self._refresh_date_display()
 
-        # Start 5s countdown
-        self._countdown_seconds = 5
-        self.countdown_label.setText("ยืนยันอัตโนมัติใน: 5 วินาที (Auto: 5s)")
+        # Start configured countdown
+        self._reset_countdown_display()
         self._countdown_timer.start(1000)
 
     def _refresh_date_display(self) -> None:
@@ -233,7 +247,7 @@ class CheckInScreen(QWidget):
 
     def handle_up(self) -> None:
         """Increments highlighted date segment."""
-        self._countdown_seconds = 5  # Reset countdown on user adjustment
+        self._reset_countdown_display()  # Reset countdown on user adjustment
         if self._selected_segment == 0:
             self._current_date += timedelta(days=1)
         elif self._selected_segment == 1:
@@ -251,7 +265,7 @@ class CheckInScreen(QWidget):
 
     def handle_down(self) -> None:
         """Decrements highlighted date segment."""
-        self._countdown_seconds = 5
+        self._reset_countdown_display()
         if self._selected_segment == 0:
             self._current_date = max(datetime.now(), self._current_date - timedelta(days=1))
         elif self._selected_segment == 1:
@@ -273,7 +287,7 @@ class CheckInScreen(QWidget):
         """Advances date segment or commits on final segment."""
         if self._selected_segment < 2:
             self._selected_segment += 1
-            self._countdown_seconds = 5
+            self._reset_countdown_display()
             self._refresh_date_display()
         else:
             self._commit()

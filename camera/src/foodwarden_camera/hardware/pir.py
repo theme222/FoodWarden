@@ -25,11 +25,13 @@ class PIRController:
         inactivity_timeout_s: float = 600.0,  # 10 minutes
         on_wake: Callable[[], None] | None = None,
         on_sleep: Callable[[], None] | None = None,
+        on_motion_change: Callable[[bool, float], None] | None = None,
     ) -> None:
         self.gpio_pin = gpio_pin
         self.inactivity_timeout_s = inactivity_timeout_s
         self.on_wake = on_wake
         self.on_sleep = on_sleep
+        self.on_motion_change = on_motion_change
 
         self._is_motion_detected: bool = False
         self._is_display_awake: bool = True
@@ -57,6 +59,8 @@ class PIRController:
     @property
     def idle_duration_s(self) -> float:
         """Seconds elapsed since last detected human motion."""
+        if self._is_motion_detected:
+            return 0.0
         return max(0.0, time.time() - self._last_motion_time)
 
     def _init_hardware(self) -> None:
@@ -85,18 +89,35 @@ class PIRController:
 
     def record_motion(self, has_motion: bool) -> None:
         """Called upon sensor reading changes or simulation events."""
+        wake_cb: Callable[[], None] | None = None
+        motion_cb: Callable[[bool, float], None] | None = None
+        motion_state = False
+        idle_s = 0.0
+
         with self._lock:
+            was_motion = self._is_motion_detected
             self._is_motion_detected = has_motion
-            if has_motion:
+            if has_motion or (was_motion and not has_motion):
                 self._last_motion_time = time.time()
-                if not self._is_display_awake:
-                    logger.info("Motion detected after sleep. Waking display and camera stream.")
-                    self._is_display_awake = True
-                    if self.on_wake:
-                        try:
-                            self.on_wake()
-                        except Exception:
-                            logger.exception("Error in PIR on_wake callback")
+            if has_motion and not self._is_display_awake:
+                logger.info("Motion detected after sleep. Waking display and camera stream.")
+                self._is_display_awake = True
+                wake_cb = self.on_wake
+            motion_cb = self.on_motion_change
+            motion_state = self._is_motion_detected
+            idle_s = 0.0 if motion_state else max(0.0, time.time() - self._last_motion_time)
+
+        if wake_cb is not None:
+            try:
+                wake_cb()
+            except Exception:
+                logger.exception("Error in PIR on_wake callback")
+
+        if motion_cb is not None:
+            try:
+                motion_cb(motion_state, idle_s)
+            except Exception:
+                logger.exception("Error in PIR on_motion_change callback")
 
     def check_inactivity(self) -> bool:
         """Checks if idle duration exceeded timeout; puts display to sleep if so.
@@ -125,8 +146,32 @@ class PIRController:
         return False
 
     def wake(self) -> None:
-        """Manually forces display wake."""
-        self.record_motion(True)
+        """Manually forces display wake without latching motion state."""
+        wake_cb: Callable[[], None] | None = None
+        motion_cb: Callable[[bool, float], None] | None = None
+        motion_state = False
+        idle_s = 0.0
+
+        with self._lock:
+            self._last_motion_time = time.time()
+            if not self._is_display_awake:
+                self._is_display_awake = True
+                wake_cb = self.on_wake
+            motion_cb = self.on_motion_change
+            motion_state = self._is_motion_detected
+            idle_s = 0.0 if motion_state else max(0.0, time.time() - self._last_motion_time)
+
+        if wake_cb is not None:
+            try:
+                wake_cb()
+            except Exception:
+                logger.exception("Error in PIR on_wake callback")
+
+        if motion_cb is not None:
+            try:
+                motion_cb(motion_state, idle_s)
+            except Exception:
+                logger.exception("Error in PIR on_motion_change callback")
 
     def sleep(self) -> None:
         """Manually forces display sleep."""
@@ -154,7 +199,23 @@ class PIRController:
 
     def _monitor_loop(self, poll_interval_s: float) -> None:
         while self._running:
+            pir_device = getattr(self, "_pir_device", None)
+            if self.is_hardware_available and pir_device is not None:
+                try:
+                    current_val = bool(pir_device.value)
+                    if current_val != self._is_motion_detected or current_val:
+                        self.record_motion(current_val)
+                except Exception:
+                    logger.exception("Error polling PIR hardware state")
+
             self.check_inactivity()
+
+            if self.on_motion_change is not None:
+                try:
+                    self.on_motion_change(self.is_motion_detected, self.idle_duration_s)
+                except Exception:
+                    logger.exception("Error in PIR on_motion_change callback")
+
             time.sleep(poll_interval_s)
 
     def stop_monitor(self) -> None:

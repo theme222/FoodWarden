@@ -1,8 +1,10 @@
 [Desktop Entry]
 Type=Application
 Name=FoodWarden Camera Gateway (Node C)
-Comment=Auto-start FoodWarden 5-inch LCD UI on boot
-Exec=/bin/bash -c "cd $HOME/FoodWarden/camera && $HOME/.local/bin/uv run --no-sync foodwarden-camera"
+Comment=Launch FoodWarden Smart Fridge Camera UI
+Exec=/bin/bash -c "export PATH=$HOME/.local/bin:$HOME/.cargo/bin:$PATH && cd $HOME/FoodWarden/camera && uv run --no-sync foodwarden-camera"
+Icon=foodwarden-camera
 Terminal=false
+Categories=Utility;Application;
+StartupNotify=true
 X-GNOME-Autostart-enabled=true
-

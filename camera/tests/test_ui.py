@@ -2,10 +2,15 @@
 
 import os
 from collections.abc import Generator
+from pathlib import Path
+from unittest.mock import MagicMock
 
 import pytest
+from PyQt6.QtCore import Qt
+from PyQt6.QtGui import QKeyEvent
 from PyQt6.QtWidgets import QApplication
 
+from foodwarden_camera.config import GatewaySettings
 from foodwarden_camera.hardware.buttons import ButtonController, ButtonType
 from foodwarden_camera.models.cloud_cbs import CheckInDraftResult, CheckOutCandidate
 from foodwarden_camera.ui.main_window import FoodWardenMainWindow
@@ -156,3 +161,140 @@ def test_alert_banner_display(qapp: QApplication) -> None:
     assert window.alert_banner.isHidden() is False
     assert "ตรวจพบบุคคล" in window.alert_banner.label_th.text()
     window.close()
+
+
+def test_settings_screen_mouse_only_and_save(qapp: QApplication, tmp_path: Path) -> None:
+    button_ctrl = ButtonController()
+    saved_values: list[tuple[str, int, int]] = []
+    checkin_called = False
+
+    def on_checkin() -> None:
+        nonlocal checkin_called
+        checkin_called = True
+
+    def on_save(token: str, autocomplete_s: int, sleep_s: int) -> None:
+        saved_values.append((token, autocomplete_s, sleep_s))
+
+    window = FoodWardenMainWindow(
+        button_controller=button_ctrl,
+        on_trigger_checkin_capture=on_checkin,
+        on_save_settings=on_save,
+        initial_token="old_tok",
+        autocomplete_timeout_s=7,
+        sleep_timeout_s=600,
+    )
+
+    # Open Settings via Idle screen mouse button
+    window.idle_screen.btn_settings.click()
+    assert window.stack.currentIndex() == 3
+    assert window.settings_screen.token_input.text() == "old_tok"
+    assert window.settings_screen.autocomplete_spin.value() == 7
+    assert window.settings_screen.sleep_spin.value() == 600
+
+    # Physical buttons & keyboard shortcuts for O/X must NOT trigger actions on Settings page
+    button_ctrl.emit_button_press(ButtonType.SELECT)
+    button_ctrl.emit_button_press(ButtonType.CANCEL)
+    button_ctrl.emit_button_press(ButtonType.UP)
+    button_ctrl.emit_button_press(ButtonType.DOWN)
+    key_o = QKeyEvent(QKeyEvent.Type.KeyPress, Qt.Key.Key_O, Qt.KeyboardModifier.NoModifier, "o")
+    window.keyPressEvent(key_o)
+    assert window.stack.currentIndex() == 3
+    assert checkin_called is False
+
+    # Adjust values via UI controls and save
+    window.settings_screen.token_input.setText("new_secret_token")
+    window.settings_screen.autocomplete_spin.setValue(12)
+    window.settings_screen.sleep_spin.setValue(300)
+    window.settings_screen.btn_save.click()
+
+    assert saved_values == [("new_secret_token", 12, 300)]
+    assert window.stack.currentIndex() == 0
+    assert window.checkin_screen.autocomplete_timeout_s == 12
+    assert window.checkout_screen.autocomplete_timeout_s == 12
+
+    # Verify GatewaySettings persists values to .env
+    env_file = tmp_path / ".env"
+    cfg = GatewaySettings()
+    cfg.save_runtime_settings("new_secret_token", 12, 300, target_env_path=env_file)
+    content = env_file.read_text(encoding="utf-8")
+    assert (
+        "GATEWAY_TOKEN='new_secret_token'" in content or "GATEWAY_TOKEN=new_secret_token" in content
+    )
+    assert "AUTOCOMPLETE_TIMEOUT_S='12'" in content or "AUTOCOMPLETE_TIMEOUT_S=12" in content
+    assert "SLEEP_TIMEOUT_S='300'" in content or "SLEEP_TIMEOUT_S=300" in content
+
+
+def test_configurable_countdown_timers(qapp: QApplication) -> None:
+    button_ctrl = ButtonController()
+    window = FoodWardenMainWindow(
+        button_controller=button_ctrl,
+        autocomplete_timeout_s=9,
+    )
+
+    draft = CheckInDraftResult(
+        name_th="นมสด",
+        name_en="Milk",
+        category="Dairy",
+        category_th="นม",
+        estimated_shelf_life_days=7,
+        estimated_expiry_date="2026-11-23",
+        storage_recommendation_th="แช่เย็น",
+        storage_recommendation_en="Keep cold",
+        image_storage_path="milk.jpg",
+        confidence=0.95,
+    )
+    window.show_checkin_draft(draft, b"")
+    assert "9" in window.checkin_screen.countdown_label.text()
+    window.checkin_screen.handle_cancel()
+
+    cand = CheckOutCandidate(
+        item_id="cand_9",
+        name_th="นมสด",
+        name_en="Milk",
+        category="Dairy",
+        category_th="นม",
+        expiry_date="2026-11-23",
+        confidence=0.95,
+    )
+    window.show_checkout_candidates([cand])
+    assert "9" in window.checkout_screen.countdown_label.text()
+    window.checkout_screen.handle_cancel()
+
+
+def test_window_controls_and_motion_debug_ui(
+    qapp: QApplication, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    button_ctrl = ButtonController()
+    window = FoodWardenMainWindow(button_ctrl)
+    window.show()
+
+    # Motion sensor UI updates (active vs. idle duration)
+    window.update_motion_state(True, 0.0)
+    assert "DETECTED" in window.idle_screen.pill_motion.text()
+    assert "พบการเคลื่อนไหว" in window.idle_screen.motion_label.text()
+
+    window.update_motion_state(False, 75.0)
+    assert "1m 15s" in window.idle_screen.pill_motion.text()
+    assert "1 นาที 15 วินาที" in window.idle_screen.motion_label.text()
+
+    # Fullscreen / Unfullscreen / Minimize controls
+    window.showFullScreen()
+    window.unfullscreen_window()
+    assert window.isFullScreen() is False
+    assert window.width() == 800
+    assert window.height() == 480
+
+    window.toggle_fullscreen()
+    assert window.isFullScreen() is True
+    window.toggle_fullscreen()
+    assert window.isFullScreen() is False
+
+    window.minimize_window()
+    assert window.isMinimized() is True
+
+    # Quit application closes window and triggers app.quit()
+    quit_mock = MagicMock()
+    monkeypatch.setattr(qapp, "quit", quit_mock)
+    window.quit_application()
+    assert window.isVisible() is False
+    quit_mock.assert_called_once()

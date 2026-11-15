@@ -3,12 +3,14 @@
 import os
 import time
 from collections.abc import Generator
+from pathlib import Path
 from unittest.mock import MagicMock
 
 import numpy as np
 import pytest
 from PyQt6.QtWidgets import QApplication
 
+import foodwarden_camera.config as config_module
 from foodwarden_camera.config import GatewaySettings
 from foodwarden_camera.models.ble_fuc import SensorPacket, SensorSample, TelemetryHeader
 from foodwarden_camera.models.cloud_cbs import CheckInDraftResult
@@ -171,3 +173,30 @@ def test_ir_light_mismatch_alert(test_orchestrator: GatewayOrchestrator) -> None
     call_kwargs = test_orchestrator.sync_manager.send_or_enqueue_door_event.call_args.kwargs
     assert call_kwargs["event_type"] == "IR_LIGHT_MISMATCH_ERROR"
     assert call_kwargs["details"]["ldr_light"] == 250
+
+
+def test_pir_sleep_and_wake_controls_camera(test_orchestrator: GatewayOrchestrator) -> None:
+    test_orchestrator._on_pir_sleep()
+    test_orchestrator.camera.stop.assert_called_once()
+
+    test_orchestrator._on_pir_wake()
+    test_orchestrator.camera.start.assert_called_once()
+
+
+def test_apply_settings_updates_runtime_subsystems(
+    test_orchestrator: GatewayOrchestrator,
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    monkeypatch.setattr(config_module, "env_path", tmp_path / ".env")
+
+    test_orchestrator.apply_settings(
+        gateway_token="gw_tok_updated",
+        autocomplete_timeout_s=11,
+        sleep_timeout_s=180,
+    )
+
+    assert test_orchestrator.cloud_client.gateway_token == "gw_tok_updated"
+    assert test_orchestrator.pir.inactivity_timeout_s == 180.0
+    assert test_orchestrator.window.checkin_screen.autocomplete_timeout_s == 11
+    assert test_orchestrator.window.checkout_screen.autocomplete_timeout_s == 11

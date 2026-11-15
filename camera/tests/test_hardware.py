@@ -101,3 +101,33 @@ def test_pir_manual_controls() -> None:
     controller.wake()
     assert controller.is_display_awake is True
     assert wake_called is True
+    assert controller.is_motion_detected is False
+
+
+def test_pir_idle_duration_and_motion_change_callback() -> None:
+    events: list[tuple[bool, float]] = []
+
+    controller = PIRController(
+        inactivity_timeout_s=60.0,
+        on_motion_change=lambda has_motion, idle_s: events.append((has_motion, idle_s)),
+    )
+
+    controller.record_motion(True)
+    assert controller.is_motion_detected is True
+    assert controller.idle_duration_s == 0.0
+    assert events[-1][0] is True
+    assert events[-1][1] == 0.0
+
+    # Transitioning from motion -> no motion resets the idle counter to ~0s
+    controller.record_motion(False)
+    assert controller.is_motion_detected is False
+    assert controller.idle_duration_s < 1.0
+    assert events[-1][0] is False
+    assert events[-1][1] < 1.0
+
+    # Simulate 12 seconds of no motion and ensure repeated False does not reset timer
+    controller._last_motion_time = time.time() - 12.0
+    controller.record_motion(False)
+    assert controller.idle_duration_s >= 12.0
+    assert events[-1][0] is False
+    assert events[-1][1] >= 12.0

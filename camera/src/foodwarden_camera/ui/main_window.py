@@ -13,6 +13,7 @@ from typing import Any
 from PyQt6.QtCore import Qt, QThread, pyqtSignal
 from PyQt6.QtGui import QKeyEvent
 from PyQt6.QtWidgets import (
+    QApplication,
     QMainWindow,
     QStackedWidget,
     QVBoxLayout,
@@ -25,6 +26,7 @@ from foodwarden_camera.ui.screens.alert_overlay import AlertBanner
 from foodwarden_camera.ui.screens.checkin_screen import CheckInScreen
 from foodwarden_camera.ui.screens.checkout_screen import CheckOutScreen
 from foodwarden_camera.ui.screens.idle_screen import IdleScreen
+from foodwarden_camera.ui.screens.settings_screen import SettingsScreen
 from foodwarden_camera.ui.styles import (
     DARK_STYLESHEET,
     MAIN_WINDOW_HEIGHT,
@@ -46,6 +48,7 @@ class FoodWardenMainWindow(QMainWindow):
     _sig_update_telemetry = pyqtSignal(object, object, object)
     _sig_update_door_state = pyqtSignal(bool, float)
     _sig_update_wifi_status = pyqtSignal(bool)
+    _sig_update_motion_state = pyqtSignal(bool, float)
     _sig_person_abort_alert = pyqtSignal()
     _sig_offline_warning = pyqtSignal()
 
@@ -56,6 +59,10 @@ class FoodWardenMainWindow(QMainWindow):
         on_trigger_checkout_capture: Callable[[], None] | None = None,
         on_commit_checkin: Callable[[CheckInDraftResult, str], None] | None = None,
         on_commit_checkout: Callable[[CheckOutCandidate], None] | None = None,
+        on_save_settings: Callable[[str, int, int], None] | None = None,
+        initial_token: str = "",
+        autocomplete_timeout_s: int = 5,
+        sleep_timeout_s: int = 600,
     ) -> None:
         super().__init__()
         self.button_controller = button_controller
@@ -63,9 +70,15 @@ class FoodWardenMainWindow(QMainWindow):
         self.on_trigger_checkout_capture = on_trigger_checkout_capture
         self.on_commit_checkin = on_commit_checkin
         self.on_commit_checkout = on_commit_checkout
+        self.on_save_settings = on_save_settings
+
+        self._current_token = initial_token
+        self._current_autocomplete_s = autocomplete_timeout_s
+        self._current_sleep_s = sleep_timeout_s
 
         self.setWindowTitle("FoodWarden Gateway (Node 'C')")
-        self.setFixedSize(MAIN_WINDOW_WIDTH, MAIN_WINDOW_HEIGHT)
+        self.resize(MAIN_WINDOW_WIDTH, MAIN_WINDOW_HEIGHT)
+        self.setMinimumSize(640, 400)
         self.setStyleSheet(DARK_STYLESHEET)
 
         self._init_ui()
@@ -87,13 +100,20 @@ class FoodWardenMainWindow(QMainWindow):
         self.stack = QStackedWidget(central_widget)
 
         # Screen 0: Idle Screen
-        self.idle_screen = IdleScreen(self.stack)
+        self.idle_screen = IdleScreen(
+            parent=self.stack,
+            on_open_settings=self.show_settings_screen,
+            on_minimize=self.minimize_window,
+            on_toggle_fullscreen=self.toggle_fullscreen,
+            on_quit=self.quit_application,
+        )
         self.stack.addWidget(self.idle_screen)
 
         # Screen 1: Check-In Screen
         self.checkin_screen = CheckInScreen(
             on_confirm_callback=self._handle_checkin_confirmed,
             on_cancel_callback=self.show_idle_screen,
+            autocomplete_timeout_s=self._current_autocomplete_s,
             parent=self.stack,
         )
         self.stack.addWidget(self.checkin_screen)
@@ -102,9 +122,24 @@ class FoodWardenMainWindow(QMainWindow):
         self.checkout_screen = CheckOutScreen(
             on_confirm_callback=self._handle_checkout_confirmed,
             on_cancel_callback=self.show_idle_screen,
+            autocomplete_timeout_s=self._current_autocomplete_s,
             parent=self.stack,
         )
         self.stack.addWidget(self.checkout_screen)
+
+        # Screen 3: Mouse-Only Settings Screen
+        self.settings_screen = SettingsScreen(
+            on_save_settings=self._handle_settings_saved,
+            on_back=self.show_idle_screen,
+            on_minimize=self.minimize_window,
+            on_toggle_fullscreen=self.toggle_fullscreen,
+            on_quit=self.quit_application,
+            initial_token=self._current_token,
+            initial_autocomplete_s=self._current_autocomplete_s,
+            initial_sleep_s=self._current_sleep_s,
+            parent=self.stack,
+        )
+        self.stack.addWidget(self.settings_screen)
 
         root_layout.addWidget(self.stack)
 
@@ -121,6 +156,7 @@ class FoodWardenMainWindow(QMainWindow):
         self._sig_update_telemetry.connect(self.idle_screen.update_telemetry)
         self._sig_update_door_state.connect(self.idle_screen.update_door_state)
         self._sig_update_wifi_status.connect(self.idle_screen.update_wifi_status)
+        self._sig_update_motion_state.connect(self.idle_screen.update_motion_state)
         self._sig_person_abort_alert.connect(self.alert_banner.show_person_abort_alert)
         self._sig_offline_warning.connect(self.alert_banner.show_offline_warning)
 
@@ -153,6 +189,53 @@ class FoodWardenMainWindow(QMainWindow):
         self.stack.setCurrentIndex(2)
         logger.info("Transitioned to Check-Out screen with %d candidates", len(candidates))
 
+    def show_settings_screen(self) -> None:
+        """Transitions to mouse-only Settings screen."""
+        self.settings_screen.load_values(
+            self._current_token,
+            self._current_autocomplete_s,
+            self._current_sleep_s,
+        )
+        self.stack.setCurrentIndex(3)
+        logger.info("Transitioned to Settings screen (mouse-only)")
+
+    # ==========================================================================
+    # Window & Runtime Controls
+    # ==========================================================================
+
+    def set_autocomplete_timeout(self, seconds: int) -> None:
+        """Updates Check-In and Check-Out auto-confirm timeout in seconds."""
+        self._current_autocomplete_s = max(1, seconds)
+        self.checkin_screen.set_autocomplete_timeout(self._current_autocomplete_s)
+        self.checkout_screen.set_autocomplete_timeout(self._current_autocomplete_s)
+
+    def minimize_window(self) -> None:
+        """Minimizes the gateway window."""
+        self.showMinimized()
+        logger.info("Window minimized")
+
+    def unfullscreen_window(self) -> None:
+        """Restores normal windowed mode at default LCD dimensions."""
+        self.showNormal()
+        self.resize(MAIN_WINDOW_WIDTH, MAIN_WINDOW_HEIGHT)
+        logger.info("Window restored from fullscreen")
+
+    def toggle_fullscreen(self) -> None:
+        """Toggles between fullscreen and windowed mode."""
+        if self.isFullScreen():
+            self.unfullscreen_window()
+        else:
+            self.showFullScreen()
+            logger.info("Window switched to fullscreen")
+
+    def quit_application(self) -> None:
+        """Closes window and exits the Qt application loop."""
+        logger.info("Quit requested from UI")
+        self.close()
+        app = QApplication.instance()
+        if app is not None:
+            app.quit()
+
     # ==========================================================================
     # Button Event Handlers
     # ==========================================================================
@@ -166,6 +249,8 @@ class FoodWardenMainWindow(QMainWindow):
 
     def _handle_button_select(self) -> None:
         idx = self.stack.currentIndex()
+        if idx == 3:
+            return
         if idx == 0:
             # Idle screen -> Trigger Check-In capture
             logger.info("User triggered Check-In from Idle screen")
@@ -185,6 +270,8 @@ class FoodWardenMainWindow(QMainWindow):
 
     def _handle_button_cancel(self) -> None:
         idx = self.stack.currentIndex()
+        if idx == 3:
+            return
         if idx == 0:
             # Idle screen -> Trigger Check-Out capture
             logger.info("User triggered Check-Out from Idle screen")
@@ -204,6 +291,8 @@ class FoodWardenMainWindow(QMainWindow):
 
     def _handle_button_up(self) -> None:
         idx = self.stack.currentIndex()
+        if idx == 3:
+            return
         if idx == 1:
             self.checkin_screen.handle_up()
         elif idx == 2:
@@ -218,14 +307,29 @@ class FoodWardenMainWindow(QMainWindow):
 
     def _handle_button_down(self) -> None:
         idx = self.stack.currentIndex()
+        if idx == 3:
+            return
         if idx == 1:
             self.checkin_screen.handle_down()
         elif idx == 2:
             self.checkout_screen.handle_down()
 
     # ==========================================================================
-    # Commit Handlers
+    # Commit & Settings Handlers
     # ==========================================================================
+
+    def _handle_settings_saved(self, gateway_token: str, autocomplete_s: int, sleep_s: int) -> None:
+        self._current_token = gateway_token
+        self._current_autocomplete_s = max(1, autocomplete_s)
+        self._current_sleep_s = sleep_s
+        self.set_autocomplete_timeout(self._current_autocomplete_s)
+        if self.on_save_settings:
+            self.on_save_settings(gateway_token, self._current_autocomplete_s, sleep_s)
+        logger.info(
+            "Settings updated (autocomplete=%ds, sleep=%ds)",
+            self._current_autocomplete_s,
+            sleep_s,
+        )
 
     def _handle_checkin_confirmed(self, draft: CheckInDraftResult, expiry_date: str) -> None:
         logger.info("Check-in confirmed with expiry: %s", expiry_date)
@@ -249,6 +353,14 @@ class FoodWardenMainWindow(QMainWindow):
             return
 
         key = event.key()
+        if key == Qt.Key.Key_F11:
+            self.toggle_fullscreen()
+            return
+
+        if self.stack.currentIndex() == 3:
+            super().keyPressEvent(event)
+            return
+
         if key in (Qt.Key.Key_O, Qt.Key.Key_Return, Qt.Key.Key_Space):
             self.button_controller.emit_button_press(ButtonType.SELECT)
         elif key in (Qt.Key.Key_X, Qt.Key.Key_Escape, Qt.Key.Key_Backspace):
@@ -287,6 +399,12 @@ class FoodWardenMainWindow(QMainWindow):
             self.idle_screen.update_wifi_status(is_online)
         else:
             self._sig_update_wifi_status.emit(is_online)
+
+    def update_motion_state(self, has_motion: bool, idle_duration_s: float = 0.0) -> None:
+        if self._is_gui_thread():
+            self.idle_screen.update_motion_state(has_motion, idle_duration_s)
+        else:
+            self._sig_update_motion_state.emit(has_motion, idle_duration_s)
 
     def show_person_abort_alert(self) -> None:
         if self._is_gui_thread():

@@ -54,9 +54,10 @@ class GatewayOrchestrator:
         self.buttons = ButtonController()
         self.pir = PIRController(
             gpio_pin=settings.pir_gpio_pin,
-            inactivity_timeout_s=600.0,
+            inactivity_timeout_s=float(settings.sleep_timeout_s),
             on_wake=self._on_pir_wake,
             on_sleep=self._on_pir_sleep,
+            on_motion_change=self._on_pir_motion_change,
         )
         # Any physical button press also wakes display & resets inactivity timer
         for btn in self.buttons._callbacks:
@@ -98,6 +99,10 @@ class GatewayOrchestrator:
             on_trigger_checkout_capture=self.handle_checkout_capture,
             on_commit_checkin=self.handle_commit_checkin,
             on_commit_checkout=self.handle_commit_checkout,
+            on_save_settings=self.apply_settings,
+            initial_token=settings.gateway_token,
+            autocomplete_timeout_s=settings.autocomplete_timeout_s,
+            sleep_timeout_s=settings.sleep_timeout_s,
         )
 
         # Safety & State Tracking
@@ -250,7 +255,8 @@ class GatewayOrchestrator:
         logger.info("Mosquitto broker connection changed: %s", connected)
 
     def _on_pir_wake(self) -> None:
-        logger.info("PIR detected human: waking display")
+        logger.info("PIR detected human: waking display and starting camera")
+        self.camera.start()
         if sys.platform.startswith("linux"):
             try:
                 subprocess.run(
@@ -264,7 +270,8 @@ class GatewayOrchestrator:
                 logger.debug("Could not invoke xset dpms force on: %s", exc)
 
     def _on_pir_sleep(self) -> None:
-        logger.info("PIR timeout reached: putting display to sleep")
+        logger.info("PIR timeout reached: putting display and camera to sleep")
+        self.camera.stop()
         if sys.platform.startswith("linux"):
             try:
                 subprocess.run(
@@ -276,6 +283,30 @@ class GatewayOrchestrator:
                 )
             except (OSError, subprocess.SubprocessError) as exc:
                 logger.debug("Could not invoke xset dpms force off: %s", exc)
+
+    def _on_pir_motion_change(self, has_motion: bool, idle_duration_s: float) -> None:
+        self.window.update_motion_state(has_motion, idle_duration_s)
+
+    def apply_settings(
+        self,
+        gateway_token: str,
+        autocomplete_timeout_s: int,
+        sleep_timeout_s: int,
+    ) -> None:
+        """Persists runtime configuration changes and applies them immediately."""
+        self.settings.save_runtime_settings(
+            gateway_token=gateway_token,
+            autocomplete_timeout_s=autocomplete_timeout_s,
+            sleep_timeout_s=sleep_timeout_s,
+        )
+        self.cloud_client.gateway_token = gateway_token
+        self.pir.inactivity_timeout_s = float(sleep_timeout_s)
+        self.window.set_autocomplete_timeout(autocomplete_timeout_s)
+        logger.info(
+            "Applied runtime settings (autocomplete=%ds, sleep=%ds)",
+            autocomplete_timeout_s,
+            sleep_timeout_s,
+        )
 
     # ==========================================================================
     # Door Safety Reflex Loop
@@ -326,10 +357,15 @@ class GatewayOrchestrator:
     def _viewfinder_stream_loop(self) -> None:
         """Streams webcam frames to Idle screen preview at ~15 FPS."""
         while self._running:
-            if self.window.stack.currentIndex() == 0 and self.pir.is_display_awake:
-                has_frame, frame = self.camera.get_latest_frame()
-                if has_frame and frame is not None:
-                    self.window.update_camera_frame(frame)
+            if self.window.stack.currentIndex() == 0:
+                self.window.update_motion_state(
+                    self.pir.is_motion_detected,
+                    self.pir.idle_duration_s,
+                )
+                if self.pir.is_display_awake:
+                    has_frame, frame = self.camera.get_latest_frame()
+                    if has_frame and frame is not None:
+                        self.window.update_camera_frame(frame)
             time.sleep(0.066)
 
     # ==========================================================================

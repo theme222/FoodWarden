@@ -98,12 +98,15 @@ if [ ! -f "$CAMERA_DIR/.env" ]; then
     cp "$CAMERA_DIR/../.env.example" "$CAMERA_DIR/.env"
     sed -i "s|MQTT_PASSWORD=YOUR_MQTT_PASSWORD|MQTT_PASSWORD=$MQTT_PASS|g" "$CAMERA_DIR/.env"
     sed -i "s|MOCK_CLOUD=false|MOCK_CLOUD=true|g" "$CAMERA_DIR/.env"
-    echo "PIR_GPIO_PIN=-1" >> "$CAMERA_DIR/.env"
-    echo "Created $CAMERA_DIR/.env with MOCK_CLOUD=true and PIR_GPIO_PIN=-1."
+    echo "PIR_GPIO_PIN=22" >> "$CAMERA_DIR/.env"
+    echo "Created $CAMERA_DIR/.env with MOCK_CLOUD=true and PIR_GPIO_PIN=22."
 fi
 
-# 6. Configure Kiosk Autostart (supports both OS Lite B2 Console Autologin & Desktop)
-echo "[6/6] Configuring Kiosk Autostart..."
+# 6. Configure Kiosk Autostart & Desktop Launcher Icon
+echo "[6/6] Configuring Kiosk Autostart & Desktop Icon..."
+chmod +x "$SCRIPT_DIR/install-desktop-icon.sh"
+"$SCRIPT_DIR/install-desktop-icon.sh"
+
 mkdir -p "$USER_HOME/.config/autostart"
 cat > "$USER_HOME/.config/autostart/foodwarden-camera.desktop" <<EOF
 [Desktop Entry]
@@ -111,6 +114,7 @@ Type=Application
 Name=FoodWarden Camera Gateway (Node C)
 Comment=Auto-start FoodWarden 5-inch LCD UI on boot
 Exec=/bin/bash -c "cd $CAMERA_DIR && $USER_HOME/.local/bin/uv run --no-sync foodwarden-camera"
+Icon=$SCRIPT_DIR/foodwarden-icon.svg
 Terminal=false
 X-GNOME-Autostart-enabled=true
 EOF

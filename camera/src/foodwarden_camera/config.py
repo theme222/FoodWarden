@@ -5,7 +5,7 @@ from __future__ import annotations
 import os
 from pathlib import Path
 
-from dotenv import load_dotenv
+from dotenv import load_dotenv, set_key
 from pydantic import BaseModel, Field
 
 # Automatically load .env if present
@@ -92,10 +92,41 @@ class GatewaySettings(BaseModel):
         description="Pi-top Hub GPIO pin for PIR motion sensor",
     )
 
+    # Runtime UI & Power-Saving Timeouts
+    autocomplete_timeout_s: int = Field(
+        default=int(os.getenv("AUTOCOMPLETE_TIMEOUT_S", "5")),
+        description="Seconds until Check-In/Check-Out action auto-completes",
+    )
+    sleep_timeout_s: int = Field(
+        default=int(os.getenv("SLEEP_TIMEOUT_S", "600")),
+        description="Seconds of inactivity before screen and camera turn off",
+    )
+
     @property
     def aes_key(self) -> bytes:
         """Returns the 16-byte decoded AES key."""
         return bytes.fromhex(self.aes_key_hex)
+
+    def save_runtime_settings(
+        self,
+        gateway_token: str,
+        autocomplete_timeout_s: int,
+        sleep_timeout_s: int,
+        target_env_path: Path | None = None,
+    ) -> None:
+        """Updates runtime settings in memory and persists them to the .env file."""
+        self.gateway_token = gateway_token
+        self.autocomplete_timeout_s = autocomplete_timeout_s
+        self.sleep_timeout_s = sleep_timeout_s
+
+        resolved_path = target_env_path or env_path
+        resolved_path.parent.mkdir(parents=True, exist_ok=True)
+        if not resolved_path.exists():
+            resolved_path.touch()
+
+        set_key(str(resolved_path), "GATEWAY_TOKEN", gateway_token)
+        set_key(str(resolved_path), "AUTOCOMPLETE_TIMEOUT_S", str(autocomplete_timeout_s))
+        set_key(str(resolved_path), "SLEEP_TIMEOUT_S", str(sleep_timeout_s))
 
 
 settings = GatewaySettings()

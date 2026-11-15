@@ -29,14 +29,16 @@ class CheckOutScreen(QWidget):
         self,
         on_confirm_callback: Callable[[CheckOutCandidate], None],
         on_cancel_callback: Callable[[], None],
+        autocomplete_timeout_s: int = 5,
         parent: QWidget | None = None,
     ) -> None:
         super().__init__(parent)
         self.on_confirm = on_confirm_callback
         self.on_cancel = on_cancel_callback
+        self.autocomplete_timeout_s = max(1, autocomplete_timeout_s)
 
         self._candidates: list[CheckOutCandidate] = []
-        self._countdown_seconds = 5
+        self._countdown_seconds = self.autocomplete_timeout_s
 
         self._countdown_timer = QTimer(self)
         self._countdown_timer.timeout.connect(self._tick_countdown)
@@ -61,7 +63,10 @@ class CheckOutScreen(QWidget):
 
         header.addStretch()
 
-        self.countdown_label = QLabel("ยืนยันอัตโนมัติใน: 5 วินาที (Auto: 5s)", self)
+        self.countdown_label = QLabel(
+            f"ยืนยันอัตโนมัติใน: {self.autocomplete_timeout_s} วินาที (Auto: {self.autocomplete_timeout_s}s)",
+            self,
+        )
         self.countdown_label.setStyleSheet(
             "font-size: 13px; font-weight: bold; color: #F59E0B; background-color: #2D2310; padding: 4px 10px; border-radius: 4px; border: 1px solid #78350F;"
         )
@@ -117,6 +122,16 @@ class CheckOutScreen(QWidget):
     # State & Candidate List Management
     # ==========================================================================
 
+    def set_autocomplete_timeout(self, seconds: int) -> None:
+        """Updates the inactivity auto-confirm duration in seconds."""
+        self.autocomplete_timeout_s = max(1, seconds)
+
+    def _reset_countdown_display(self) -> None:
+        self._countdown_seconds = self.autocomplete_timeout_s
+        self.countdown_label.setText(
+            f"ยืนยันอัตโนมัติใน: {self._countdown_seconds} วินาที (Auto: {self._countdown_seconds}s)"
+        )
+
     def load_candidates(self, candidates: list[CheckOutCandidate]) -> None:
         """Populates candidates sorted by FEFO and initiates countdown."""
         self._candidates = candidates
@@ -141,9 +156,8 @@ class CheckOutScreen(QWidget):
         # Select top FEFO item by default
         self.list_widget.setCurrentRow(0)
 
-        # Start 5s countdown
-        self._countdown_seconds = 5
-        self.countdown_label.setText("ยืนยันอัตโนมัติใน: 5 วินาที (Auto: 5s)")
+        # Start configured countdown
+        self._reset_countdown_display()
         self._countdown_timer.start(1000)
 
     def handle_up(self) -> None:
@@ -151,14 +165,14 @@ class CheckOutScreen(QWidget):
         current_row = self.list_widget.currentRow()
         if current_row > 0:
             self.list_widget.setCurrentRow(current_row - 1)
-            self._countdown_seconds = 5  # Reset countdown on user navigation
+            self._reset_countdown_display()  # Reset countdown on user navigation
 
     def handle_down(self) -> None:
         """Selects next candidate item in list."""
         current_row = self.list_widget.currentRow()
         if current_row < self.list_widget.count() - 1:
             self.list_widget.setCurrentRow(current_row + 1)
-            self._countdown_seconds = 5
+            self._reset_countdown_display()
 
     def handle_select(self) -> None:
         """Confirms removal of currently highlighted item."""
