@@ -122,3 +122,39 @@ def test_mqtt_door_telemetry_and_ajar_duration() -> None:
     client._handle_door_telemetry(closed_data)
     assert client.is_door_open is False
     assert client.door_ajar_duration_s == 0.0
+
+
+def test_mqtt_canonical_cbd_telemetry_and_status_last_seen() -> None:
+    now_s = int(time.time())
+    telems: list[DoorTelemetryPayload] = []
+    client = DoorMQTTClient(on_door_telemetry=lambda t: telems.append(t))
+
+    # Canonical CBD.md status message ("ONLINE")
+    client._handle_door_status(
+        {
+            "node_id": "D0",
+            "state": "ONLINE",
+            "timestamp": 1729930100,
+        }
+    )
+    assert client.last_seen_by_node["D0"] >= now_s
+
+    # Canonical CBD.md telemetry fields (ir_door_closed, limit_switch_homed, motor_state)
+    canonical_telem = {
+        "node_id": "D0",
+        "timestamp": 1729930120,
+        "motor_state": "IDLE_OPEN",
+        "ir_door_closed": False,
+        "limit_switch_homed": True,
+        "current_ma": 15,
+    }
+    client._handle_door_telemetry(canonical_telem)
+    assert len(telems) == 1
+    assert telems[0].state == "IDLE_OPEN"
+    assert telems[0].motor_state == "IDLE_OPEN"
+    assert telems[0].ir_closed is False
+    assert telems[0].ir_door_closed is False
+    assert telems[0].limit_switch_home is True
+    assert telems[0].limit_switch_homed is True
+    assert client.is_door_open is True
+    assert client.last_seen_by_node["D0"] >= now_s

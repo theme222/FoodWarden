@@ -10,6 +10,8 @@ import socket
 import subprocess
 import sys
 import time
+import urllib.error
+import urllib.request
 from pathlib import Path
 
 from dotenv import dotenv_values, set_key
@@ -46,47 +48,99 @@ def read_pinctrl_levels(pins: list[int]) -> dict[int, bool]:
     return levels
 
 
-def check_and_fix_env(env_path: Path, fix_env: bool) -> int:
-    """Checks PIR_GPIO_PIN in camera/.env and optionally updates -1 -> 22."""
+def _detect_lan_ip() -> str:
+    """Best-effort detection of Pi-top LAN IPv4 address for Node 'D' configuration."""
+    if sys.platform.startswith("linux") and shutil.which("hostname"):
+        res = subprocess.run(
+            ["hostname", "-I"],
+            capture_output=True,
+            text=True,
+            check=False,
+            timeout=2.0,
+        )
+        if res.returncode == 0 and res.stdout.strip():
+            return res.stdout.strip().split()[0]
+
+    try:
+        with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as sock:
+            sock.connect(("8.8.8.8", 80))
+            return str(sock.getsockname()[0])
+    except OSError:
+        return "127.0.0.1"
+
+
+def _is_bluetooth_powered() -> bool | None:
+    """Returns True if Bluetooth adapter is powered, False if off, None if unavailable."""
+    if not shutil.which("bluetoothctl"):
+        return None
+    bt = subprocess.run(
+        ["bluetoothctl", "show"],
+        capture_output=True,
+        text=True,
+        check=False,
+        timeout=2.0,
+    )
+    return "Powered: yes" in bt.stdout
+
+
+def check_and_fix_env(env_path: Path, fix_env: bool) -> tuple[int, dict[str, str | None]]:
+    """Checks PIR_GPIO_PIN and integration variables in camera/.env."""
     print(f"[1/4] Checking .env at: {env_path}")
     if not env_path.exists():
         print("  ! WARNING: camera/.env does not exist yet.")
-        return 22
+        return 22, {}
 
-    values = dotenv_values(env_path)
+    values = dict(dotenv_values(env_path))
     raw_pin = values.get("PIR_GPIO_PIN")
+    pin = 22
     if raw_pin is None:
         print("  ! WARNING: PIR_GPIO_PIN not set in .env (code defaults to 22).")
-        return 22
+    else:
+        try:
+            pin = int(str(raw_pin).strip())
+        except ValueError:
+            print(f"  ! ERROR: Invalid PIR_GPIO_PIN='{raw_pin}' in .env.")
+            pin = 22
+        else:
+            if pin < 0:
+                print(f"  ! FOUND ISSUE: PIR_GPIO_PIN={pin} (PIR sensor is DISABLED in .env!)")
+                should_fix = fix_env
+                if not should_fix and sys.stdin.isatty():
+                    ans = (
+                        input("    Update PIR_GPIO_PIN=-1 to PIR_GPIO_PIN=22 now? [Y/n]: ")
+                        .strip()
+                        .lower()
+                    )
+                    should_fix = ans in ("", "y", "yes")
+                if should_fix:
+                    set_key(str(env_path), "PIR_GPIO_PIN", "22")
+                    print("  -> FIXED: Updated PIR_GPIO_PIN=22 in .env")
+                    pin = 22
+                else:
+                    print(
+                        "  -> Run with --fix-env or change PIR_GPIO_PIN=22 manually to enable PIR."
+                    )
+            else:
+                print(f"  OK: PIR_GPIO_PIN={pin}")
 
-    try:
-        pin = int(str(raw_pin).strip())
-    except ValueError:
-        print(f"  ! ERROR: Invalid PIR_GPIO_PIN='{raw_pin}' in .env.")
-        return 22
+    token = (values.get("GATEWAY_TOKEN") or "").strip()
+    if not token or token == "YOUR_GATEWAY_TOKEN":
+        print("  ! GATEWAY_TOKEN: NOT SET (still placeholder 'YOUR_GATEWAY_TOKEN')")
+    else:
+        print(f"  OK: GATEWAY_TOKEN configured (length={len(token)})")
 
-    if pin < 0:
-        print(f"  ! FOUND ISSUE: PIR_GPIO_PIN={pin} (PIR sensor is DISABLED in .env!)")
-        should_fix = fix_env
-        if not should_fix and sys.stdin.isatty():
-            ans = (
-                input("    Update PIR_GPIO_PIN=-1 to PIR_GPIO_PIN=22 now? [Y/n]: ").strip().lower()
-            )
-            should_fix = ans in ("", "y", "yes")
-        if should_fix:
-            set_key(str(env_path), "PIR_GPIO_PIN", "22")
-            print("  -> FIXED: Updated PIR_GPIO_PIN=22 in .env")
-            return 22
-        print("  -> Run with --fix-env or change PIR_GPIO_PIN=22 manually to enable PIR.")
-        return 22
+    mock_cloud = (values.get("MOCK_CLOUD") or "false").strip().lower()
+    mode_desc = "simulated" if mock_cloud in ("true", "1", "yes") else "real Server 'S'"
+    print(f"  - MOCK_CLOUD={mock_cloud} ({mode_desc})")
 
-    print(f"  OK: PIR_GPIO_PIN={pin}")
-    return pin
+    return pin, values
 
 
-def check_peripherals() -> None:
-    """Checks camera device, Mosquitto TLS port 8883, and Bluetooth adapter."""
-    print("[2/4] Checking Peripherals (Webcam / Mosquitto / Bluetooth)...")
+def check_peripherals(
+    fix_env: bool = False, env_values: dict[str, str | None] | None = None
+) -> None:
+    """Checks camera, Mosquitto TLS, LAN IP, Bluetooth adapter, and Server 'S' health."""
+    print("[2/4] Checking Peripherals & Integration Links...")
     video0 = Path("/dev/video0")
     print(f"  - Webcam (/dev/video0): {'FOUND' if video0.exists() else 'NOT FOUND'}")
 
@@ -96,18 +150,43 @@ def check_peripherals() -> None:
     except OSError:
         print("  - Mosquitto MQTTS (127.0.0.1:8883): NOT REACHABLE")
 
-    if shutil.which("bluetoothctl"):
-        bt = subprocess.run(
-            ["bluetoothctl", "show"],
-            capture_output=True,
-            text=True,
-            check=False,
-            timeout=2.0,
-        )
-        powered = "Powered: yes" in bt.stdout
-        print(f"  - Bluetooth Adapter: {'POWERED ON' if powered else 'OFF / UNKNOWN'}")
-    else:
+    tls_conf = Path("/etc/mosquitto/conf.d/foodwarden-tls.conf")
+    print(
+        f"  - Mosquitto TLS Config ({tls_conf}): {'INSTALLED' if tls_conf.exists() else 'NOT FOUND'}"
+    )
+    print(f"  - Pi-top LAN IP (for Node 'D' MQTT_BROKER_HOST): {_detect_lan_ip()}")
+
+    bt_powered = _is_bluetooth_powered()
+    if bt_powered is None:
         print("  - Bluetooth Adapter: bluetoothctl not installed")
+    elif bt_powered:
+        print("  - Bluetooth Adapter: POWERED ON")
+    else:
+        print("  - Bluetooth Adapter: OFF / UNKNOWN")
+        if fix_env and sys.platform.startswith("linux"):
+            print("  -> Attempting to enable Bluetooth (--fix-env)...")
+            subprocess.run(["sudo", "rfkill", "unblock", "bluetooth"], check=False, timeout=5.0)
+            subprocess.run(["sudo", "systemctl", "start", "bluetooth"], check=False, timeout=5.0)
+            subprocess.run(["bluetoothctl", "power", "on"], check=False, timeout=5.0)
+            recheck = _is_bluetooth_powered()
+            print(
+                f"  -> Bluetooth Adapter after fix: {'POWERED ON' if recheck else 'STILL OFF / UNKNOWN'}"
+            )
+
+    base_url = (
+        (env_values or {}).get("FIREBASE_API_BASE_URL")
+        or "https://asia-southeast1-foodwarden-app.cloudfunctions.net/api"
+    ).rstrip("/")
+    health_url = f"{base_url}/health"
+    try:
+        with urllib.request.urlopen(health_url, timeout=3.0) as resp:
+            print(f"  - Server 'S' Health ({health_url}): REACHABLE (HTTP {resp.status})")
+    except urllib.error.HTTPError as exc:
+        print(
+            f"  - Server 'S' Health ({health_url}): HTTP {exc.code} (reachable, endpoint returned error)"
+        )
+    except (urllib.error.URLError, OSError, TimeoutError) as exc:
+        print(f"  - Server 'S' Health ({health_url}): UNREACHABLE ({exc})")
 
 
 def check_gpiozero_binding(pin: int) -> bool:
@@ -226,8 +305,8 @@ def main() -> int:
     if os.name == "nt":
         print("Note: Running on Windows; GPIO hardware checks apply on Raspberry Pi OS.")
 
-    target_pin = check_and_fix_env(env_path, fix_env=args.fix_env)
-    check_peripherals()
+    target_pin, env_values = check_and_fix_env(env_path, fix_env=args.fix_env)
+    check_peripherals(fix_env=args.fix_env, env_values=env_values)
     check_gpiozero_binding(target_pin)
     live_pir_scan(target_pin, duration_s=args.duration)
     return 0

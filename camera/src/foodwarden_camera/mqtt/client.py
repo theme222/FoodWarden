@@ -69,6 +69,7 @@ class DoorMQTTClient:
         self._door_opened_at: float | None = None
         self._is_door_open: bool = False
         self._last_state: str = "UNKNOWN"
+        self.last_seen_by_node: dict[str, int] = {}
 
         # Initialize paho-mqtt client with Protocol version 5 / 3.1.1
         self._client = mqtt.Client(
@@ -206,6 +207,7 @@ class DoorMQTTClient:
         try:
             req = TimeSyncRequest.model_validate(data)
             now_s = int(time.time())
+            self.last_seen_by_node[req.node_id] = now_s
             res = TimeSyncResponse(node_id=req.node_id, timestamp=now_s)
             self._client.publish(
                 TIME_RES_TOPIC,
@@ -222,6 +224,7 @@ class DoorMQTTClient:
         """Parses and handles discrete actuation events."""
         try:
             envelope = DoorEventEnvelope.model_validate(data)
+            self.last_seen_by_node[envelope.node_id] = int(time.time())
             logger.info("Received door event from %s: %s", envelope.node_id, envelope.event.type)
 
             if envelope.event.type == "SUCCESS":
@@ -238,6 +241,7 @@ class DoorMQTTClient:
         """Parses 1 Hz periodic telemetry from Node 'D'."""
         try:
             telem = DoorTelemetryPayload.model_validate(data)
+            self.last_seen_by_node[telem.node_id] = int(time.time())
             self._last_state = telem.state
 
             # If IR sensor says closed -> not open
@@ -251,9 +255,11 @@ class DoorMQTTClient:
 
     def _handle_door_status(self, data: dict[str, Any]) -> None:
         """Tracks online / offline status of Node 'D'."""
-        status = data.get("status", "unknown")
-        node_id = data.get("node_id", "D0")
-        logger.info("Node '%s' status update: %s", node_id, status)
+        state = str(data.get("state") or data.get("status", "unknown"))
+        node_id = str(data.get("node_id", "D0"))
+        if state.upper() == "ONLINE":
+            self.last_seen_by_node[node_id] = int(time.time())
+        logger.info("Node '%s' status update: %s", node_id, state)
 
     def set_door_state(self, is_open: bool) -> None:
         """Updates internal door open/closed tracking."""

@@ -182,6 +182,7 @@ class GatewayOrchestrator:
             return
 
         latest_sample = packet.samples[-1]
+        self.sync_manager.record_node_seen(packet.header.node_id, latest_sample.timestamp_s)
 
         # Update UI climate card
         self.window.update_telemetry(
@@ -196,17 +197,27 @@ class GatewayOrchestrator:
             is_door_light_on = latest_sample.light_ldr >= 100
             self.mqtt.set_door_state(is_door_light_on)
 
-        # Forward or buffer to cloud
-        self.sync_manager.send_or_enqueue_telemetry(packet.header.node_id, latest_sample)
+        # Forward all packet samples or single sample (preserving single-sample test hook)
+        if len(packet.samples) > 1:
+            self.sync_manager.send_or_enqueue_telemetry_batch(packet.header.node_id, packet.samples)
+        else:
+            self.sync_manager.send_or_enqueue_telemetry(packet.header.node_id, latest_sample)
 
     def _on_door_event(self, envelope: DoorEventEnvelope) -> None:
         """Triggered upon discrete actuation state changes from Node 'D'."""
         evt_type = envelope.event.type
+        self.sync_manager.record_node_seen(envelope.node_id, envelope.timestamp)
 
         if evt_type == "CLOSING":
             self._is_door_closing = True
             logger.info("Motorized door closure initiated by Node 'D'")
-        elif evt_type in ("SUCCESS", "OBSTRUCTION_ERROR", "ABORTED", "TIMEOUT_ERROR"):
+        elif evt_type in (
+            "SUCCESS",
+            "OBSTRUCTION_ERROR",
+            "ABORTED",
+            "TIMEOUT_ERROR",
+            "FAULT_LOCKOUT",
+        ):
             self._is_door_closing = False
             if evt_type == "SUCCESS":
                 self.window.update_door_state(is_open=False)
@@ -224,6 +235,7 @@ class GatewayOrchestrator:
 
     def _on_door_telemetry(self, telem: DoorTelemetryPayload) -> None:
         """Triggered upon 1 Hz periodic telemetry from Node 'D'."""
+        self.sync_manager.record_node_seen(telem.node_id, telem.timestamp)
         self.window.update_door_state(
             is_open=self.mqtt.is_door_open,
             ajar_duration_s=self.mqtt.door_ajar_duration_s,

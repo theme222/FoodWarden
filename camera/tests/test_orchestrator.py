@@ -18,6 +18,7 @@ from foodwarden_camera.models.mqtt_cbd import (
     ClosingEventData,
     DoorEventEnvelope,
     DoorTelemetryPayload,
+    FaultLockoutEventData,
     SuccessEventData,
 )
 from foodwarden_camera.orchestrator import GatewayOrchestrator
@@ -206,3 +207,32 @@ def test_apply_settings_updates_runtime_subsystems(
     assert "PIR_GPIO_PIN='17'" in (tmp_path / ".env").read_text(
         encoding="utf-8"
     ) or "PIR_GPIO_PIN=17" in (tmp_path / ".env").read_text(encoding="utf-8")
+
+
+def test_ble_multi_sample_telemetry_and_last_seen(test_orchestrator: GatewayOrchestrator) -> None:
+    sample1 = SensorSample.from_raw(1729930000, 320, 110, 40)
+    sample2 = SensorSample.from_raw(1729930030, 340, 120, 45)
+    header = TelemetryHeader(version=1, node_id="F0", session_salt=b"12345678", counter=2)
+    packet = SensorPacket(header=header, samples=[sample1, sample2])
+
+    test_orchestrator._on_ble_telemetry(packet)
+
+    assert "3.4 °C" in test_orchestrator.window.idle_screen.temp_label.text()
+    test_orchestrator.sync_manager.record_node_seen.assert_called_once_with("F0", 1729930030)
+    test_orchestrator.sync_manager.send_or_enqueue_telemetry_batch.assert_called_once_with(
+        "F0", [sample1, sample2]
+    )
+
+
+def test_door_fault_lockout_clears_closing_state(test_orchestrator: GatewayOrchestrator) -> None:
+    test_orchestrator._is_door_closing = True
+    fault_env = DoorEventEnvelope(
+        node_id="D0",
+        event=FaultLockoutEventData(),
+        timestamp=1729930200,
+    )
+
+    test_orchestrator._on_door_event(fault_env)
+
+    assert test_orchestrator._is_door_closing is False
+    test_orchestrator.sync_manager.record_node_seen.assert_called_once_with("D0", 1729930200)

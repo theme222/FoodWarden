@@ -16,9 +16,13 @@ from foodwarden_camera.cloud.client import CloudClient
 from foodwarden_camera.models.ble_fuc import SensorSample
 from foodwarden_camera.models.cloud_cbs import (
     CheckInCommitPayload,
+    DoorEventItem,
     DoorEventSyncPayload,
-    TelemetryItem,
+    NodeStatusItem,
+    StatusPayload,
+    TelemetrySamplePayload,
     TelemetrySyncPayload,
+    normalize_door_event_status,
 )
 from foodwarden_camera.storage.offline_queue import OfflineQueue
 
@@ -43,24 +47,68 @@ class CloudSyncManager:
         self._thread: threading.Thread | None = None
         self._is_online: bool = True
         self._lock = threading.Lock()
+        self._node_last_seen: dict[str, int | None] = {"F0": None, "D0": None}
+        self._last_status_sent_at: float = 0.0
 
     @property
     def is_online(self) -> bool:
         return self._is_online
 
     # ==========================================================================
+    # Node Heartbeat Tracking (CBS.md §3.7)
+    # ==========================================================================
+
+    def record_node_seen(self, node_id: str, timestamp_s: int | None = None) -> None:
+        """Records latest contact timestamp for a hardware component."""
+        ts = int(time.time()) if timestamp_s is None else int(timestamp_s)
+        with self._lock:
+            prev = self._node_last_seen.get(node_id)
+            if prev is None or ts > prev:
+                self._node_last_seen[node_id] = ts
+
+    def send_status_heartbeat(self, gateway_node_id: str = "C0") -> bool:
+        """Dispatches component status heartbeat to Server 'S' per CBS.md §3.7."""
+        now_s = int(time.time())
+        with self._lock:
+            nodes_snapshot: dict[str, int | None] = {gateway_node_id: now_s}
+            for node_id, last_seen in self._node_last_seen.items():
+                if node_id != gateway_node_id:
+                    nodes_snapshot[node_id] = last_seen
+
+        payload = StatusPayload(
+            nodes=[
+                NodeStatusItem(node_id=node_id, last_seen_s=last_seen)
+                for node_id, last_seen in nodes_snapshot.items()
+            ]
+        )
+        ok = self.client.sync_status(payload)
+        self._is_online = ok
+        return ok
+
+    # ==========================================================================
     # Real-Time or Offline Enqueue
     # ==========================================================================
 
     def send_or_enqueue_telemetry(self, node_id: str, sample: SensorSample) -> bool:
-        """Attempts real-time cloud sync; buffers to SQLite if offline."""
-        item = TelemetryItem(
-            timestamp=sample.timestamp_s,
-            temperature_c=sample.temp_celsius,
-            voc_index=sample.voc_index,
-            light_level=sample.light_ldr,
-        )
-        payload = TelemetrySyncPayload(node_id=node_id, telemetry=[item])
+        """Attempts real-time cloud sync for one sample; buffers to SQLite if offline."""
+        return self.send_or_enqueue_telemetry_batch(node_id, [sample])
+
+    def send_or_enqueue_telemetry_batch(self, node_id: str, samples: list[SensorSample]) -> bool:
+        """Attempts real-time cloud sync for batched samples; buffers to SQLite if offline."""
+        if not samples:
+            return True
+
+        sample_items = [
+            TelemetrySamplePayload(
+                node_id=node_id,
+                timestamp_s=sample.timestamp_s,
+                temp_celsius=sample.temp_celsius,
+                voc_index=sample.voc_index,
+                light_ldr=sample.light_ldr,
+            )
+            for sample in samples
+        ]
+        payload = TelemetrySyncPayload(samples=sample_items)
 
         success = self.client.sync_telemetry(payload)
         if success:
@@ -69,8 +117,10 @@ class CloudSyncManager:
 
         # Failed: buffer to SQLite
         self._is_online = False
-        self.queue.enqueue_telemetry(node_id, sample)
-        logger.info("Buffered telemetry reading from %s to offline queue", node_id)
+        self.queue.enqueue_telemetry_batch(node_id, samples)
+        logger.info(
+            "Buffered %d telemetry sample(s) from %s to offline queue", len(samples), node_id
+        )
         return False
 
     def send_or_enqueue_door_event(
@@ -131,37 +181,32 @@ class CloudSyncManager:
         """
         counts = {"telemetry": 0, "door_events": 0, "checkins": 0}
 
-        # 1. Flush Pending Telemetry in Batches
+        # 1. Flush Pending Telemetry in Batches (CBS.md §3.5)
         pending_telemetry = self.queue.get_pending_telemetry(limit=100)
         if pending_telemetry:
-            # Group by node_id
-            by_node: dict[str, list[dict[str, Any]]] = {}
-            for row in pending_telemetry:
-                by_node.setdefault(str(row["node_id"]), []).append(row)
+            sample_items = [
+                TelemetrySamplePayload(
+                    node_id=str(r["node_id"]),
+                    timestamp_s=int(r["timestamp_s"]),
+                    temp_celsius=float(r["temp_cdeg"]) if r["temp_cdeg"] is not None else None,
+                    voc_index=int(r["voc_index"]) if r["voc_index"] is not None else None,
+                    light_ldr=int(r["light_ldr"]) if r["light_ldr"] is not None else None,
+                )
+                for r in pending_telemetry
+            ]
+            payload = TelemetrySyncPayload(samples=sample_items)
+            if self.client.sync_telemetry(payload):
+                synced_ids = [int(r["id"]) for r in pending_telemetry]
+                self.queue.delete_telemetry(synced_ids)
+                counts["telemetry"] += len(synced_ids)
+                self._is_online = True
+            else:
+                self._is_online = False
 
-            for node_id, rows in by_node.items():
-                items = [
-                    TelemetryItem(
-                        timestamp=int(r["timestamp_s"]),
-                        temperature_c=float(r["temp_cdeg"]) if r["temp_cdeg"] is not None else None,
-                        voc_index=int(r["voc_index"]) if r["voc_index"] is not None else None,
-                        light_level=int(r["light_ldr"]) if r["light_ldr"] is not None else None,
-                    )
-                    for r in rows
-                ]
-                payload = TelemetrySyncPayload(node_id=node_id, telemetry=items)
-                if self.client.sync_telemetry(payload):
-                    synced_ids = [int(r["id"]) for r in rows]
-                    self.queue.delete_telemetry(synced_ids)
-                    counts["telemetry"] += len(synced_ids)
-                    self._is_online = True
-                else:
-                    self._is_online = False
-                    break
-
-        # 2. Flush Pending Door Events
+        # 2. Flush Pending Door Events in Batches (CBS.md §3.6)
         pending_events = self.queue.get_pending_door_events(limit=50)
-        for evt in pending_events:
+        if len(pending_events) == 1:
+            evt = pending_events[0]
             event_payload = DoorEventSyncPayload(
                 node_id=str(evt["node_id"]),
                 event_type=str(evt["event_type"]),
@@ -174,7 +219,22 @@ class CloudSyncManager:
                 self._is_online = True
             else:
                 self._is_online = False
-                break
+        elif len(pending_events) > 1:
+            event_items = [
+                DoorEventItem(
+                    node_id=str(evt["node_id"]),
+                    timestamp_s=int(evt["timestamp"]),
+                    status=normalize_door_event_status(str(evt["event_type"])),
+                )
+                for evt in pending_events
+            ]
+            if self.client.sync_door_events_batch(event_items):
+                synced_evt_ids = [int(evt["id"]) for evt in pending_events]
+                self.queue.delete_door_events(synced_evt_ids)
+                counts["door_events"] += len(synced_evt_ids)
+                self._is_online = True
+            else:
+                self._is_online = False
 
         # 3. Flush Pending Offline Check-Ins (E4 & Goal.md §3)
         pending_checkins = self.queue.get_pending_checkins(limit=5)
@@ -202,7 +262,7 @@ class CloudSyncManager:
                     category=draft_res.category,
                     category_th=draft_res.category_th,
                     estimated_shelf_life_days=draft_res.estimated_shelf_life_days,
-                    expiry_date=expiry,
+                    estimated_expiry_date=expiry,
                     storage_recommendation_th=draft_res.storage_recommendation_th,
                     storage_recommendation_en=draft_res.storage_recommendation_en,
                     image_storage_path=draft_res.image_storage_path,
@@ -251,6 +311,11 @@ class CloudSyncManager:
         backoff_s = interval_s
         while self._running:
             try:
+                now_mono = time.monotonic()
+                if now_mono - self._last_status_sent_at >= 60.0 or self._last_status_sent_at == 0.0:
+                    self.send_status_heartbeat()
+                    self._last_status_sent_at = now_mono
+
                 self.flush_offline_queue()
                 if self._is_online:
                     backoff_s = interval_s

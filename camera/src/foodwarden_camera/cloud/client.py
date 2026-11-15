@@ -20,8 +20,12 @@ from foodwarden_camera.models.cloud_cbs import (
     CheckOutCommitPayload,
     CheckOutCommitResult,
     CheckOutDraftResult,
+    DoorEventBatchPayload,
+    DoorEventItem,
     DoorEventSyncPayload,
+    StatusPayload,
     TelemetrySyncPayload,
+    normalize_door_event_status,
 )
 
 logger = logging.getLogger(__name__)
@@ -133,9 +137,9 @@ class CloudClient:
         url = "/inventory/checkin"
         try:
             with self._get_client() as client:
-                resp = client.post(url, json=payload.model_dump())
+                resp = client.post(url, json=payload.to_cbs_dict())
 
-            if resp.status_code == 200:
+            if resp.status_code in (200, 201):
                 result = CheckInCommitResult.model_validate(resp.json())
                 logger.info("Committed grocery check-in: item_id=%s", result.item_id)
                 return True, result, ""
@@ -229,9 +233,9 @@ class CloudClient:
         url = "/inventory/checkout"
         try:
             with self._get_client() as client:
-                resp = client.post(url, json=payload.model_dump())
+                resp = client.post(url, json=payload.to_cbs_dict())
 
-            if resp.status_code == 200:
+            if resp.status_code in (200, 201):
                 result = CheckOutCommitResult.model_validate(resp.json())
                 logger.info("Committed grocery check-out: item_id=%s", result.item_id)
                 return True, result, ""
@@ -246,21 +250,21 @@ class CloudClient:
             return False, None, err_msg
 
     # ==========================================================================
-    # 3. Telemetry & Door Events (CBS.md §5 & §6)
+    # 3. Telemetry, Door Events & Node Status (CBS.md §3.5, §3.6 & §3.7)
     # ==========================================================================
 
     def sync_telemetry(self, payload: TelemetrySyncPayload) -> bool:
         """Uploads a batch of telemetry sensor readings to Server 'S'."""
         if self.mock_cloud:
-            logger.debug("[MOCK_CLOUD] Synced %d telemetry readings", len(payload.telemetry))
+            logger.debug("[MOCK_CLOUD] Synced %d telemetry readings", len(payload.samples))
             return True
 
         url = "/telemetry"
         try:
             with self._get_client() as client:
-                resp = client.post(url, json=payload.model_dump())
-            if resp.status_code == 200:
-                logger.debug("Successfully synced %d telemetry readings", len(payload.telemetry))
+                resp = client.post(url, json=payload.to_cbs_dict())
+            if resp.status_code in (200, 201):
+                logger.debug("Successfully synced %d telemetry readings", len(payload.samples))
                 return True
             logger.warning("Telemetry sync rejected: HTTP %d - %s", resp.status_code, resp.text)
             return False
@@ -268,21 +272,64 @@ class CloudClient:
             logger.warning("Network connection error during telemetry sync: %s", exc)
             return False
 
-    def sync_door_event(self, payload: DoorEventSyncPayload) -> bool:
-        """Uploads a discrete door actuation safety event to Server 'S'."""
+    def sync_door_events_batch(self, events: list[DoorEventItem]) -> bool:
+        """Uploads a batch of door safety events to POST /door_events (with legacy fallback)."""
+        if not events:
+            return True
         if self.mock_cloud:
-            logger.info("[MOCK_CLOUD] Synced door event: %s", payload.event_type)
+            logger.info("[MOCK_CLOUD] Synced %d door event(s)", len(events))
             return True
 
-        url = "/events/door"
+        batch = DoorEventBatchPayload(events=events)
         try:
             with self._get_client() as client:
-                resp = client.post(url, json=payload.model_dump())
-            if resp.status_code == 200:
-                logger.info("Successfully synced door event: %s", payload.event_type)
+                resp = client.post("/door_events", json=batch.model_dump())
+                if resp.status_code == 404:
+                    resp = client.post("/events/door", json=batch.model_dump())
+            if resp.status_code in (200, 201):
+                logger.info("Successfully synced %d door event(s)", len(events))
                 return True
             logger.warning("Door event sync rejected: HTTP %d - %s", resp.status_code, resp.text)
             return False
         except (httpx.RequestError, OSError) as exc:
             logger.warning("Network connection error during door event sync: %s", exc)
+            return False
+
+    def sync_door_event(self, payload: DoorEventSyncPayload) -> bool:
+        """Uploads a single discrete door actuation safety event to Server 'S'."""
+        item = DoorEventItem(
+            node_id=payload.node_id,
+            timestamp_s=payload.timestamp,
+            status=normalize_door_event_status(payload.event_type),
+        )
+        return self.sync_door_events_batch([item])
+
+    def sync_status(self, payload: StatusPayload) -> bool:
+        """Dispatches component connectivity heartbeat to POST /status per CBS.md §3.7."""
+        if self.mock_cloud:
+            logger.debug("[MOCK_CLOUD] Synced component status for %d node(s)", len(payload.nodes))
+            return True
+
+        try:
+            with self._get_client() as client:
+                resp = client.post("/status", json=payload.model_dump())
+            if resp.status_code in (200, 201):
+                logger.debug("Successfully synced status for %d node(s)", len(payload.nodes))
+                return True
+            logger.warning("Status heartbeat rejected: HTTP %d - %s", resp.status_code, resp.text)
+            return False
+        except (httpx.RequestError, OSError) as exc:
+            logger.warning("Network connection error during status heartbeat: %s", exc)
+            return False
+
+    def check_health(self) -> bool:
+        """Checks connectivity to Server 'S' via GET /health."""
+        if self.mock_cloud:
+            return True
+        try:
+            with self._get_client() as client:
+                resp = client.get("/health")
+            return resp.status_code == 200
+        except (httpx.RequestError, OSError) as exc:
+            logger.warning("Server health check failed: %s", exc)
             return False
