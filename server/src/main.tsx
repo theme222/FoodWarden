@@ -495,6 +495,66 @@ function SignInPanel({
   );
 }
 
+function DashboardHeader({
+  user,
+  language,
+  onLanguageChange,
+  onSignOut,
+}: {
+  user: SessionUser | null | undefined;
+  language: Language;
+  onLanguageChange: () => void;
+  onSignOut: () => Promise<void>;
+}) {
+  const t = words[language];
+  return (
+    <header className="header">
+      <div className="header-inner">
+        <Link to="/fridges" className="brand">
+          <FridgeLogo /> FoodWarden
+        </Link>
+        <div className="header-actions">
+          {user && (
+            <Link
+              className="user-link"
+              to="/me"
+              aria-label={
+                language === "th"
+                  ? "บัญชีและการแจ้งเตือนของฉัน"
+                  : "My account and notifications"
+              }
+            >
+              {user.name || user.email}
+            </Link>
+          )}
+          {user && (
+            <a href="/api/reference" className="small">
+              {language === "th" ? "เอกสาร API" : "API reference"}
+            </a>
+          )}
+          <button
+            className="secondary"
+            type="button"
+            onClick={onLanguageChange}
+            lang={language === "th" ? "en" : "th"}
+          >
+            {language === "th" ? "English" : "ภาษาไทย"}
+          </button>
+          {user && (
+            <button
+              className="secondary"
+              type="button"
+              onClick={() => void onSignOut()}
+            >
+              {t.signOut}
+            </button>
+          )}
+        </div>
+      </div>
+    </header>
+  );
+}
+
 function App() {
   const [language, setLanguage] = useState<Language>(() =>
     localStorage.getItem("foodwarden_locale") === "en" ? "en" : "th",
@@ -562,50 +622,12 @@ function App() {
 
   return (
     <ConfirmationProvider language={language}>
-      <header className="header">
-        <div className="header-inner">
-          <Link to="/fridges" className="brand">
-            <FridgeLogo /> FoodWarden
-          </Link>
-          <div className="header-actions">
-            {user && (
-              <Link
-                className="user-link"
-                to="/me"
-                aria-label={
-                  language === "th"
-                    ? "บัญชีและการแจ้งเตือนของฉัน"
-                    : "My account and notifications"
-                }
-              >
-                {user.name || user.email}
-              </Link>
-            )}
-            {user && (
-              <a href="/api/reference" className="small">
-                {language === "th" ? "เอกสาร API" : "API reference"}
-              </a>
-            )}
-            <button
-              className="secondary"
-              type="button"
-              onClick={() => setLanguage(language === "th" ? "en" : "th")}
-              lang={language === "th" ? "en" : "th"}
-            >
-              {language === "th" ? "English" : "ภาษาไทย"}
-            </button>
-            {user && (
-              <button
-                className="secondary"
-                type="button"
-                onClick={() => void handleSignOut()}
-              >
-                {t.signOut}
-              </button>
-            )}
-          </div>
-        </div>
-      </header>
+      <DashboardHeader
+        user={user}
+        language={language}
+        onLanguageChange={() => setLanguage(language === "th" ? "en" : "th")}
+        onSignOut={handleSignOut}
+      />
       <main>
         {failed && <StatusAlert>{t.failed}</StatusAlert>}
         {user === undefined ? (

@@ -260,49 +260,294 @@ function useSettings({
   };
 }
 
+type SettingsController = ReturnType<typeof useSettings>;
+type SettingsView = SettingsController & {
+  settings: NonNullable<SettingsController["settings"]>;
+  language: Language;
+  fridgeId: string;
+};
+function FamilySetupGuide({ view }: { view: SettingsView }) {
+  const { language } = view;
+  return (
+    <section className="surface setup-flow">
+      <h2>
+        {language === "th"
+          ? "เตรียมตู้เย็นให้ครอบครัวใช้งาน"
+          : "Set up your family fridge"}
+      </h2>
+      <ol>
+        <li>
+          {language === "th"
+            ? "เชื่อม LINE ของครอบครัวด้านบน"
+            : "Connect your family LINE above"}
+        </li>
+        <li>
+          {language === "th"
+            ? "นำโทเคนกล้องด้านล่างไปตั้งค่า Gateway"
+            : "Configure your gateway with its camera token below"}
+        </li>
+        <li>
+          {language === "th"
+            ? "เพิ่มอีเมล Google ของสมาชิก ทุกคนใช้บัญชีของตัวเอง"
+            : "Add each family member’s Google email; everyone signs in with their own account"}
+        </li>
+        <li>
+          {language === "th"
+            ? "เปิดหน้าอุปกรณ์เพื่อดูว่ามีข้อมูลเข้าจริง และให้แต่ละคนตั้ง LINE ส่วนตัวในหน้าของฉัน"
+            : "Verify real device reports and let each person connect LINE under Me"}
+        </li>
+      </ol>
+    </section>
+  );
+}
+function GeneralSettings({ view }: { view: SettingsView }) {
+  const {
+    t,
+    settings,
+    busy,
+    name,
+    setName,
+    geminiKeyInput,
+    setGeminiKeyInput,
+    saveGeneral,
+    clearGeminiKey,
+  } = view;
+  return (
+    <section className="surface add-form" aria-labelledby="general-title">
+      <h2 id="general-title">{t.generalSettings}</h2>
+      <form onSubmit={(event) => void saveGeneral(event)}>
+        <fieldset disabled={busy}>
+          <label>
+            {t.fridgeName}
+            <input
+              value={name}
+              onChange={(event) => setName(event.target.value)}
+              required
+              maxLength={80}
+            />
+          </label>
+          <label>
+            {t.geminiKey}
+            <input
+              type="password"
+              value={geminiKeyInput}
+              onChange={(event) => setGeminiKeyInput(event.target.value)}
+              maxLength={256}
+              placeholder={t.geminiKeyPlaceholder}
+              autoComplete="off"
+            />
+          </label>
+          {settings.hasGeminiApiKey && (
+            <div className="inline-note">
+              <span className="small">{t.geminiKeySaved}</span>
+              <button
+                type="button"
+                className="secondary"
+                disabled={busy}
+                onClick={() => void clearGeminiKey()}
+              >
+                {t.clearGeminiKey}
+              </button>
+            </div>
+          )}
+        </fieldset>
+        <div className="form-actions">
+          <button className="primary" disabled={busy} type="submit">
+            {busy ? t.saving : t.save}
+          </button>
+        </div>
+      </form>
+    </section>
+  );
+}
+function GatewaySettings({ view }: { view: SettingsView }) {
+  const {
+    t,
+    settings,
+    busy,
+    showToken,
+    setShowToken,
+    copied,
+    copyToken,
+    rotateToken,
+  } = view;
+  const maskedToken =
+    settings.gatewayToken.slice(0, 10) +
+    "••••••••••••••••" +
+    settings.gatewayToken.slice(-4);
+  return (
+    <section className="surface settings-card" aria-labelledby="token-title">
+      <h2 id="token-title">{t.gatewayToken}</h2>
+      <p className="small">{t.gatewayTokenHelp}</p>
+      <code className="token-box">
+        {showToken ? settings.gatewayToken : maskedToken}
+      </code>
+      <div className="form-actions">
+        <button
+          type="button"
+          className="secondary"
+          onClick={() => setShowToken((prev) => !prev)}
+        >
+          {showToken ? t.hideToken : t.showToken}
+        </button>
+        <button
+          type="button"
+          className="secondary"
+          onClick={() => void copyToken()}
+        >
+          {copied ? t.copied : t.copyToken}
+        </button>
+        <button
+          type="button"
+          className="danger"
+          disabled={busy}
+          onClick={() => void rotateToken()}
+        >
+          {t.rotateToken}
+        </button>
+      </div>
+    </section>
+  );
+}
+function MemberSettings({ view }: { view: SettingsView }) {
+  const {
+    t,
+    settings,
+    busy,
+    inviteEmail,
+    setInviteEmail,
+    inviteRole,
+    setInviteRole,
+    removeMember,
+    inviteMember,
+    language,
+    fridgeId,
+  } = view;
+  const ownerCount = settings.members.filter((m) => m.role === "owner").length;
+  return (
+    <section className="surface settings-card" aria-labelledby="members-title">
+      <h2 id="members-title">{t.members}</h2>
+      <p className="small">
+        {language === "th"
+          ? "เพิ่มอีเมลเพื่อให้สิทธิ์ จากนั้นส่งลิงก์เว็บให้สมาชิกเข้าด้วย Google อีเมลเดียวกัน ระบบไม่ได้ส่งอีเมลเชิญให้อัตโนมัติ"
+          : "Add an email to grant access, then share this link. Sign in with the same Google email. Invitation emails are not sent automatically."}
+      </p>
+      <button
+        type="button"
+        className="secondary"
+        onClick={() =>
+          void navigator.clipboard
+            .writeText(
+              new URL(
+                "/fridges/" + encodeURIComponent(fridgeId),
+                window.location.origin,
+              ).href,
+            )
+            .then(() =>
+              toast.success(language === "th" ? "คัดลอกลิงก์แล้ว" : "Link copied"),
+            )
+            .catch(() =>
+              toast.error(
+                language === "th"
+                  ? "คัดลอกไม่ได้ กรุณาคัดลอกจากแถบที่อยู่"
+                  : "Copy the link from your address bar",
+              ),
+            )
+        }
+      >
+        {language === "th" ? "คัดลอกลิงก์ให้ครอบครัว" : "Copy family link"}
+      </button>
+      <ul className="member-list">
+        {settings.members.map((member) => {
+          const isLastOwner = member.role === "owner" && ownerCount <= 1;
+          return (
+            <li key={member.email} className="member-row">
+              <div>
+                <strong>{member.email}</strong>
+                <span className="badge">
+                  {member.role === "owner" ? t.ownerBadge : t.memberBadge}
+                </span>
+              </div>
+              <button
+                type="button"
+                className="secondary"
+                disabled={busy || isLastOwner}
+                onClick={() => void removeMember(member.email)}
+              >
+                {t.removeMember}
+              </button>
+            </li>
+          );
+        })}
+      </ul>
+      <form
+        className="invite-form"
+        onSubmit={(event) => void inviteMember(event)}
+      >
+        <input
+          type="email"
+          value={inviteEmail}
+          onChange={(event) => setInviteEmail(event.target.value)}
+          aria-label={t.inviteEmail}
+          placeholder={t.inviteEmail}
+          required
+        />
+        <Select
+          value={inviteRole}
+          onValueChange={(value) =>
+            setInviteRole(value === "owner" ? "owner" : "member")
+          }
+        >
+          <SelectTrigger aria-label={t.inviteRole}>
+            <SelectValue>
+              {inviteRole === "owner" ? t.ownerBadge : t.memberBadge}
+            </SelectValue>
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value="member">{t.memberBadge}</SelectItem>
+            <SelectItem value="owner">{t.ownerBadge}</SelectItem>
+          </SelectContent>
+        </Select>
+        <button className="primary" disabled={busy} type="submit">
+          {t.inviteMember}
+        </button>
+      </form>
+    </section>
+  );
+}
+function DangerZone({ view }: { view: SettingsView }) {
+  const { t, busy, removeFridge } = view;
+  return (
+    <section className="surface danger-zone" aria-labelledby="danger-title">
+      <h2 id="danger-title">{t.dangerZone}</h2>
+      <div className="form-actions">
+        <button
+          type="button"
+          className="danger"
+          disabled={busy}
+          onClick={() => void removeFridge()}
+        >
+          {t.deleteFridge}
+        </button>
+      </div>
+    </section>
+  );
+}
 export function Settings(props: {
   fridgeId: string;
   language: Language;
   onFridgesChanged: () => void;
 }) {
-  const {
-    t,
-    settings,
-    loading,
-    busy,
-    notice,
-    error,
-    name,
-    setName,
-    geminiKeyInput,
-    setGeminiKeyInput,
-    showToken,
-    setShowToken,
-    copied,
-    inviteEmail,
-    setInviteEmail,
-    inviteRole,
-    setInviteRole,
-    saveGeneral,
-    clearGeminiKey,
-    copyToken,
-    rotateToken,
-    removeMember,
-    inviteMember,
-    removeFridge,
-  } = useSettings(props);
-  const { language, fridgeId } = props;
+  const controller = useSettings(props);
+  const { t, settings, loading, notice, error } = controller;
   if (loading) return <p role="status">{t.loading}</p>;
-  if (!settings) {
-    return <StatusAlert>{error ?? t.failed}</StatusAlert>;
-  }
-
-  const ownerCount = settings.members.filter((m) => m.role === "owner").length;
-  const maskedToken =
-    settings.gatewayToken.slice(0, 10) +
-    "••••••••••••••••" +
-    settings.gatewayToken.slice(-4);
-
+  if (!settings) return <StatusAlert>{error ?? t.failed}</StatusAlert>;
+  const view = {
+    ...controller,
+    settings,
+    language: props.language,
+    fridgeId: props.fridgeId,
+  };
   return (
     <div className="settings-stack">
       <h1>{t.settings}</h1>
@@ -312,222 +557,12 @@ export function Settings(props: {
         </p>
       )}
       {error && <StatusAlert>{error}</StatusAlert>}
-
-      <LineConnection language={language} fridgeId={fridgeId} />
-      <section className="surface setup-flow">
-        <h2>
-          {language === "th"
-            ? "เตรียมตู้เย็นให้ครอบครัวใช้งาน"
-            : "Set up your family fridge"}
-        </h2>
-        <ol>
-          <li>
-            {language === "th"
-              ? "เชื่อม LINE ของครอบครัวด้านบน"
-              : "Connect your family LINE above"}
-          </li>
-          <li>
-            {language === "th"
-              ? "นำโทเคนกล้องด้านล่างไปตั้งค่า Gateway"
-              : "Configure your gateway with its camera token below"}
-          </li>
-          <li>
-            {language === "th"
-              ? "เพิ่มอีเมล Google ของสมาชิก ทุกคนใช้บัญชีของตัวเอง"
-              : "Add each family member’s Google email; everyone signs in with their own account"}
-          </li>
-          <li>
-            {language === "th"
-              ? "เปิดหน้าอุปกรณ์เพื่อดูว่ามีข้อมูลเข้าจริง และให้แต่ละคนตั้ง LINE ส่วนตัวในหน้าของฉัน"
-              : "Verify real device reports and let each person connect LINE under Me"}
-          </li>
-        </ol>
-      </section>
-      <section className="surface add-form" aria-labelledby="general-title">
-        <h2 id="general-title">{t.generalSettings}</h2>
-        <form onSubmit={(event) => void saveGeneral(event)}>
-          <fieldset disabled={busy}>
-            <label>
-              {t.fridgeName}
-              <input
-                value={name}
-                onChange={(event) => setName(event.target.value)}
-                required
-                maxLength={80}
-              />
-            </label>
-            <label>
-              {t.geminiKey}
-              <input
-                type="password"
-                value={geminiKeyInput}
-                onChange={(event) => setGeminiKeyInput(event.target.value)}
-                maxLength={256}
-                placeholder={t.geminiKeyPlaceholder}
-                autoComplete="off"
-              />
-            </label>
-            {settings.hasGeminiApiKey && (
-              <div className="inline-note">
-                <span className="small">{t.geminiKeySaved}</span>
-                <button
-                  type="button"
-                  className="secondary"
-                  disabled={busy}
-                  onClick={() => void clearGeminiKey()}
-                >
-                  {t.clearGeminiKey}
-                </button>
-              </div>
-            )}
-          </fieldset>
-          <div className="form-actions">
-            <button className="primary" disabled={busy} type="submit">
-              {busy ? t.saving : t.save}
-            </button>
-          </div>
-        </form>
-      </section>
-
-      <section className="surface settings-card" aria-labelledby="token-title">
-        <h2 id="token-title">{t.gatewayToken}</h2>
-        <p className="small">{t.gatewayTokenHelp}</p>
-        <code className="token-box">
-          {showToken ? settings.gatewayToken : maskedToken}
-        </code>
-        <div className="form-actions">
-          <button
-            type="button"
-            className="secondary"
-            onClick={() => setShowToken((prev) => !prev)}
-          >
-            {showToken ? t.hideToken : t.showToken}
-          </button>
-          <button
-            type="button"
-            className="secondary"
-            onClick={() => void copyToken()}
-          >
-            {copied ? t.copied : t.copyToken}
-          </button>
-          <button
-            type="button"
-            className="danger"
-            disabled={busy}
-            onClick={() => void rotateToken()}
-          >
-            {t.rotateToken}
-          </button>
-        </div>
-      </section>
-
-      <section
-        className="surface settings-card"
-        aria-labelledby="members-title"
-      >
-        <h2 id="members-title">{t.members}</h2>
-        <p className="small">
-          {language === "th"
-            ? "เพิ่มอีเมลเพื่อให้สิทธิ์ จากนั้นส่งลิงก์เว็บให้สมาชิกเข้าด้วย Google อีเมลเดียวกัน ระบบไม่ได้ส่งอีเมลเชิญให้อัตโนมัติ"
-            : "Add an email to grant access, then share this link. Sign in with the same Google email. Invitation emails are not sent automatically."}
-        </p>
-        <button
-          type="button"
-          className="secondary"
-          onClick={() =>
-            void navigator.clipboard
-              .writeText(
-                new URL(
-                  "/fridges/" + encodeURIComponent(fridgeId),
-                  window.location.origin,
-                ).href,
-              )
-              .then(() =>
-                toast.success(
-                  language === "th" ? "คัดลอกลิงก์แล้ว" : "Link copied",
-                ),
-              )
-              .catch(() =>
-                toast.error(
-                  language === "th"
-                    ? "คัดลอกไม่ได้ กรุณาคัดลอกจากแถบที่อยู่"
-                    : "Copy the link from your address bar",
-                ),
-              )
-          }
-        >
-          {language === "th" ? "คัดลอกลิงก์ให้ครอบครัว" : "Copy family link"}
-        </button>
-        <ul className="member-list">
-          {settings.members.map((member) => {
-            const isLastOwner = member.role === "owner" && ownerCount <= 1;
-            return (
-              <li key={member.email} className="member-row">
-                <div>
-                  <strong>{member.email}</strong>
-                  <span className="badge">
-                    {member.role === "owner" ? t.ownerBadge : t.memberBadge}
-                  </span>
-                </div>
-                <button
-                  type="button"
-                  className="secondary"
-                  disabled={busy || isLastOwner}
-                  onClick={() => void removeMember(member.email)}
-                >
-                  {t.removeMember}
-                </button>
-              </li>
-            );
-          })}
-        </ul>
-        <form
-          className="invite-form"
-          onSubmit={(event) => void inviteMember(event)}
-        >
-          <input
-            type="email"
-            value={inviteEmail}
-            onChange={(event) => setInviteEmail(event.target.value)}
-            aria-label={t.inviteEmail}
-            placeholder={t.inviteEmail}
-            required
-          />
-          <Select
-            value={inviteRole}
-            onValueChange={(value) =>
-              setInviteRole(value === "owner" ? "owner" : "member")
-            }
-          >
-            <SelectTrigger aria-label={t.inviteRole}>
-              <SelectValue>
-                {inviteRole === "owner" ? t.ownerBadge : t.memberBadge}
-              </SelectValue>
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value="member">{t.memberBadge}</SelectItem>
-              <SelectItem value="owner">{t.ownerBadge}</SelectItem>
-            </SelectContent>
-          </Select>
-          <button className="primary" disabled={busy} type="submit">
-            {t.inviteMember}
-          </button>
-        </form>
-      </section>
-
-      <section className="surface danger-zone" aria-labelledby="danger-title">
-        <h2 id="danger-title">{t.dangerZone}</h2>
-        <div className="form-actions">
-          <button
-            type="button"
-            className="danger"
-            disabled={busy}
-            onClick={() => void removeFridge()}
-          >
-            {t.deleteFridge}
-          </button>
-        </div>
-      </section>
+      <LineConnection language={props.language} fridgeId={props.fridgeId} />
+      <FamilySetupGuide view={view} />
+      <GeneralSettings view={view} />
+      <GatewaySettings view={view} />
+      <MemberSettings view={view} />
+      <DangerZone view={view} />
     </div>
   );
 }

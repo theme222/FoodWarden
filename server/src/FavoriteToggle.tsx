@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { toast } from "sonner";
 import { Star } from "lucide-react";
-import { useFavorites, lineAction } from "./line-data";
+import { useFavorites, lineAction, favoriteMatches } from "./line-data";
 import type { Food, Language } from "./model";
 export function FavoriteToggle({
   food,
@@ -15,14 +15,8 @@ export function FavoriteToggle({
   const state = useFavorites(fridgeId);
   const [busy, setBusy] = useState(false);
   const th = language === "th";
-  const favorite = state.data?.items.find(
-    (item) =>
-      [item.name_th, item.name_en, item.category]
-        .map((v) => v.trim().normalize("NFKC").toLowerCase())
-        .join("|") ===
-      [food.nameTh, food.nameEn, food.category]
-        .map((v) => v.trim().normalize("NFKC").toLowerCase())
-        .join("|"),
+  const favorite = state.data?.items.find((item) =>
+    favoriteMatches(item, food),
   );
   async function toggle() {
     if (busy || !state.data) return;

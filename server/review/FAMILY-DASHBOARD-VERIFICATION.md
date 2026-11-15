@@ -1,5 +1,7 @@
 # Family dashboard verification — 2026-11-15
 
+This is the initial feature baseline. The subsequent [React Doctor refactor review](REACT-DOCTOR-REFACTOR.md) records the current 78/100 score, eight remaining reviewed warnings and 68 passing tests.
+
 ## Implemented behavior
 
 - React routes for inventory, charts, devices, private account preferences and owner settings use real scoped API data. Charts, account and settings pages load lazily.

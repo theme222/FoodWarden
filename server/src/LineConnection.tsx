@@ -7,7 +7,7 @@ import { StatusAlert } from "./components/status-alert";
 import { useLineStatus, lineAction, parsePairing } from "./line-data";
 import type { Language } from "./model";
 import { MessageCircle, Check, Copy, Unplug, Send } from "lucide-react";
-export function LineConnection({
+function useLineConnection({
   language,
   fridgeId,
   manage = true,
@@ -87,29 +87,56 @@ export function LineConnection({
       setBusy(false);
     }
   }
-  return (
-    <section
-      className="surface line-connection"
-      aria-label={
-        th
-          ? fridgeId
-            ? "LINE ของตู้เย็น"
-            : "LINE ส่วนตัวของฉัน"
-          : fridgeId
-            ? "Fridge LINE"
-            : "My LINE"
+  return {
+    th,
+    fridgeId,
+    manage,
+    code,
+    seconds,
+    busy,
+    error,
+    status,
+    data,
+    action,
+  };
+}
+type LineView = ReturnType<typeof useLineConnection>;
+function lineConnectionText(th: boolean, fridgeId?: string) {
+  if (fridgeId)
+    return th
+      ? {
+          title: "LINE ของครอบครัว",
+          label: "LINE ของตู้เย็น",
+          description: "แจ้งเรื่องประตู อุณหภูมิ และสรุปอาหารไปยังแชทที่ครอบครัวเลือก",
+        }
+      : {
+          title: "Family LINE",
+          label: "Fridge LINE",
+          description: "Send fridge alerts to your chosen family chat.",
+        };
+  return th
+    ? {
+        title: "LINE ส่วนตัวของฉัน",
+        label: "LINE ส่วนตัวของฉัน",
+        description:
+          "การเชื่อมต่อนี้เป็นของคุณเท่านั้น สมาชิกคนอื่นมี LINE และการตั้งค่าของตัวเอง",
       }
-    >
+    : {
+        title: "My LINE",
+        label: "My LINE",
+        description:
+          "Only your account uses this connection. Everyone has their own settings.",
+      };
+}
+function LineConnectionHeading({ view }: { view: LineView }) {
+  const { th, fridgeId, data } = view;
+  const text = lineConnectionText(th, fridgeId);
+  return (
+    <>
       <div className="section-head">
         <h2>
           <MessageCircle aria-hidden="true" />
-          {th
-            ? fridgeId
-              ? "LINE ของครอบครัว"
-              : "LINE ส่วนตัวของฉัน"
-            : fridgeId
-              ? "Family LINE"
-              : "My LINE"}
+          {text.title}
         </h2>
         <span className={`connection-badge ${data?.linked ? "connected" : ""}`}>
           {data?.linked ? (
@@ -124,169 +151,207 @@ export function LineConnection({
           )}
         </span>
       </div>
+      <p className="small">{text.description}</p>
+    </>
+  );
+}
+function LinkedLineActions({ view }: { view: LineView }) {
+  const { th, manage, busy, action } = view;
+  return (
+    <>
+      <div className="form-actions">
+        {manage && (
+          <>
+            <button
+              type="button"
+              className="primary"
+              disabled={busy}
+              onClick={() => void action("test")}
+            >
+              <Send size={17} aria-hidden="true" />
+              {th ? "ส่งข้อความทดสอบ" : "Send test"}
+            </button>
+            <button
+              type="button"
+              className="secondary"
+              disabled={busy}
+              onClick={() => void action("disconnect")}
+            >
+              <Unplug size={17} aria-hidden="true" />
+              {th ? "ตัดการเชื่อมต่อ" : "Disconnect"}
+            </button>
+          </>
+        )}
+      </div>
+    </>
+  );
+}
+function AddLineFriend({ view }: { view: LineView }) {
+  const { th, fridgeId, data } = view;
+  if (!data) return null;
+  return (
+    <>
+      <div>
+        <h3>
+          {th ? "1. เพิ่ม FoodWarden ใน LINE" : "1. Add FoodWarden in LINE"}
+        </h3>
+        <p>
+          {th
+            ? fridgeId
+              ? "เพิ่มเพื่อนบอท แล้วเชิญบอทเข้ากลุ่มครอบครัวที่ต้องการแจ้งเตือน"
+              : "เพิ่มเพื่อนบอท FoodWarden เพื่อรับการแจ้งเตือนส่วนตัว"
+            : fridgeId
+              ? "Add the bot, then invite it to your family group."
+              : "Add the FoodWarden bot for private notifications."}
+        </p>
+        {data.friend_url ? (
+          <>
+            <a
+              className="primary"
+              href={data.friend_url}
+              target="_blank"
+              rel="noreferrer"
+            >
+              {th ? "เพิ่มเพื่อนใน LINE" : "Add friend in LINE"}
+            </a>
+            <QRCodeSVG
+              value={data.friend_url}
+              size={128}
+              marginSize={4}
+              title={
+                th ? "สแกนเพื่อเพิ่มเพื่อน FoodWarden" : "Scan to add FoodWarden"
+              }
+            />
+          </>
+        ) : (
+          <p className="small">
+            {th
+              ? "ผู้ดูแลต้องเพิ่มลิงก์บอทก่อนแสดง QR code หากเพิ่มเพื่อนแล้ว สามารถใช้รหัสด้านล่างได้เลย"
+              : "The administrator must set the bot link to show a QR code. If already added, continue below."}
+          </p>
+        )}
+      </div>
+    </>
+  );
+}
+function CreatePairingCode({ view }: { view: LineView }) {
+  const { th, busy, action } = view;
+  return (
+    <>
+      <button
+        type="button"
+        className="primary"
+        disabled={busy}
+        onClick={() => void action("pair")}
+      >
+        {busy
+          ? th
+            ? "กำลังสร้าง…"
+            : "Creating…"
+          : th
+            ? "สร้างรหัสเชื่อมต่อ"
+            : "Create connection code"}
+      </button>
+    </>
+  );
+}
+function PairingCode({ view }: { view: LineView }) {
+  const { th, code, seconds } = view;
+  if (!code || seconds <= 0) return <CreatePairingCode view={view} />;
+  return (
+    <>
+      <div className="pairing-code">
+        <code>{code.code}</code>
+        <button
+          type="button"
+          className="secondary"
+          onClick={() =>
+            void navigator.clipboard
+              .writeText(code.code)
+              .then(() => toast.success(th ? "คัดลอกรหัสแล้ว" : "Code copied"))
+              .catch(() =>
+                toast.error(
+                  th
+                    ? "คัดลอกไม่ได้ กรุณาเลือกรหัสเพื่อคัดลอกเอง"
+                    : "Select the code to copy it manually",
+                ),
+              )
+          }
+        >
+          <Copy size={17} aria-hidden="true" />
+          {th ? "คัดลอก" : "Copy"}
+        </button>
+      </div>
       <p className="small">
+        {th ? "หมดอายุใน" : "Expires in"} {Math.floor(seconds / 60)}:
+        {String(seconds % 60).padStart(2, "0")} ·{" "}
         {th
-          ? fridgeId
-            ? "แจ้งเรื่องประตู อุณหภูมิ และสรุปอาหารไปยังแชทที่ครอบครัวเลือก"
-            : "การเชื่อมต่อนี้เป็นของคุณเท่านั้น สมาชิกคนอื่นมี LINE และการตั้งค่าของตัวเอง"
-          : fridgeId
-            ? "Send fridge alerts to your chosen family chat."
-            : "Only your account uses this connection. Everyone has their own settings."}
+          ? "รหัสใช้ได้ครั้งเดียว อย่าส่งให้คนที่ไม่รู้จัก"
+          : "One use only. Keep it private."}
       </p>
+      <output className="small">
+        {th
+          ? "ส่งรหัสแล้วรอสักครู่ หน้านี้จะอัปเดตเอง"
+          : "After sending, this page updates automatically."}
+      </output>
+    </>
+  );
+}
+function LinePairingSteps({ view }: { view: LineView }) {
+  const { th, fridgeId } = view;
+  return (
+    <>
+      <div className="line-steps">
+        <AddLineFriend view={view} />
+        <div>
+          {" "}
+          <h3>{th ? "2. ส่งรหัสในแชทกับบอท" : "2. Send a code to the bot"}</h3>
+          <p>
+            {th
+              ? fridgeId
+                ? "ส่งในกลุ่มที่เชิญบอทแล้ว หรือแชทกับบอทโดยตรง"
+                : "ส่งในแชทส่วนตัวกับบอทเท่านั้น ไม่ส่งรหัสส่วนตัวในกลุ่ม"
+              : fridgeId
+                ? "Send it in the group or directly to the bot."
+                : "Send personal codes in a direct chat, never in a group."}
+          </p>
+          <PairingCode view={view} />
+        </div>
+      </div>
+    </>
+  );
+}
+function LineConnectionBody({ view }: { view: LineView }) {
+  const { th, data, manage } = view;
+  if (!data) return <output>{th ? "กำลังโหลด…" : "Loading…"}</output>;
+  if (!data.ready)
+    return (
+      <p className="setup-note">
+        {th
+          ? "ผู้ดูแลยังไม่ได้เปิดใช้งาน LINE สำหรับระบบนี้ คุณสามารถตั้งค่าการแจ้งเตือนรอไว้ได้"
+          : "LINE has not been enabled by the administrator yet. You can still save your preferences."}
+      </p>
+    );
+  if (data.linked) return <LinkedLineActions view={view} />;
+  if (!manage) return null;
+  return <LinePairingSteps view={view} />;
+}
+export function LineConnection(props: Parameters<typeof useLineConnection>[0]) {
+  const view = useLineConnection(props);
+  const { th, fridgeId, error, status } = view;
+  return (
+    <section
+      className="surface line-connection"
+      aria-label={lineConnectionText(th, fridgeId).label}
+    >
+      <LineConnectionHeading view={view} />
       {error && <StatusAlert>{error}</StatusAlert>}
       {status.error && (
         <StatusAlert>
           {th ? "โหลดสถานะไม่สำเร็จ" : "Could not load connection status"}
         </StatusAlert>
       )}
-      {!data ? (
-        <output>{th ? "กำลังโหลด…" : "Loading…"}</output>
-      ) : !data.ready ? (
-        <p className="setup-note">
-          {th
-            ? "ผู้ดูแลยังไม่ได้เปิดใช้งาน LINE สำหรับระบบนี้ คุณสามารถตั้งค่าการแจ้งเตือนรอไว้ได้"
-            : "LINE has not been enabled by the administrator yet. You can still save your preferences."}
-        </p>
-      ) : data.linked ? (
-        <div className="form-actions">
-          {manage && (
-            <>
-              <button
-                type="button"
-                className="primary"
-                disabled={busy}
-                onClick={() => void action("test")}
-              >
-                <Send size={17} aria-hidden="true" />
-                {th ? "ส่งข้อความทดสอบ" : "Send test"}
-              </button>
-              <button
-                type="button"
-                className="secondary"
-                disabled={busy}
-                onClick={() => void action("disconnect")}
-              >
-                <Unplug size={17} aria-hidden="true" />
-                {th ? "ตัดการเชื่อมต่อ" : "Disconnect"}
-              </button>
-            </>
-          )}
-        </div>
-      ) : manage ? (
-        <>
-          <div className="line-steps">
-            <div>
-              <h3>
-                {th ? "1. เพิ่ม FoodWarden ใน LINE" : "1. Add FoodWarden in LINE"}
-              </h3>
-              <p>
-                {th
-                  ? fridgeId
-                    ? "เพิ่มเพื่อนบอท แล้วเชิญบอทเข้ากลุ่มครอบครัวที่ต้องการแจ้งเตือน"
-                    : "เพิ่มเพื่อนบอท FoodWarden เพื่อรับการแจ้งเตือนส่วนตัว"
-                  : fridgeId
-                    ? "Add the bot, then invite it to your family group."
-                    : "Add the FoodWarden bot for private notifications."}
-              </p>
-              {data.friend_url ? (
-                <>
-                  <a
-                    className="primary"
-                    href={data.friend_url}
-                    target="_blank"
-                    rel="noreferrer"
-                  >
-                    {th ? "เพิ่มเพื่อนใน LINE" : "Add friend in LINE"}
-                  </a>
-                  <QRCodeSVG
-                    value={data.friend_url}
-                    size={128}
-                    marginSize={4}
-                    title={
-                      th
-                        ? "สแกนเพื่อเพิ่มเพื่อน FoodWarden"
-                        : "Scan to add FoodWarden"
-                    }
-                  />
-                </>
-              ) : (
-                <p className="small">
-                  {th
-                    ? "ผู้ดูแลต้องเพิ่มลิงก์บอทก่อนแสดง QR code หากเพิ่มเพื่อนแล้ว สามารถใช้รหัสด้านล่างได้เลย"
-                    : "The administrator must set the bot link to show a QR code. If already added, continue below."}
-                </p>
-              )}
-            </div>
-            <div>
-              <h3>{th ? "2. ส่งรหัสในแชทกับบอท" : "2. Send a code to the bot"}</h3>
-              <p>
-                {th
-                  ? fridgeId
-                    ? "ส่งในกลุ่มที่เชิญบอทแล้ว หรือแชทกับบอทโดยตรง"
-                    : "ส่งในแชทส่วนตัวกับบอทเท่านั้น ไม่ส่งรหัสส่วนตัวในกลุ่ม"
-                  : fridgeId
-                    ? "Send it in the group or directly to the bot."
-                    : "Send personal codes in a direct chat, never in a group."}
-              </p>
-              {code && seconds > 0 ? (
-                <>
-                  <div className="pairing-code">
-                    <code>{code.code}</code>
-                    <button
-                      type="button"
-                      className="secondary"
-                      onClick={() =>
-                        void navigator.clipboard
-                          .writeText(code.code)
-                          .then(() =>
-                            toast.success(th ? "คัดลอกรหัสแล้ว" : "Code copied"),
-                          )
-                          .catch(() =>
-                            toast.error(
-                              th
-                                ? "คัดลอกไม่ได้ กรุณาเลือกรหัสเพื่อคัดลอกเอง"
-                                : "Select the code to copy it manually",
-                            ),
-                          )
-                      }
-                    >
-                      <Copy size={17} aria-hidden="true" />
-                      {th ? "คัดลอก" : "Copy"}
-                    </button>
-                  </div>
-                  <p className="small">
-                    {th ? "หมดอายุใน" : "Expires in"} {Math.floor(seconds / 60)}:
-                    {String(seconds % 60).padStart(2, "0")} ·{" "}
-                    {th
-                      ? "รหัสใช้ได้ครั้งเดียว อย่าส่งให้คนที่ไม่รู้จัก"
-                      : "One use only. Keep it private."}
-                  </p>
-                  <output className="small">
-                    {th
-                      ? "ส่งรหัสแล้วรอสักครู่ หน้านี้จะอัปเดตเอง"
-                      : "After sending, this page updates automatically."}
-                  </output>
-                </>
-              ) : (
-                <button
-                  type="button"
-                  className="primary"
-                  disabled={busy}
-                  onClick={() => void action("pair")}
-                >
-                  {busy
-                    ? th
-                      ? "กำลังสร้าง…"
-                      : "Creating…"
-                    : th
-                      ? "สร้างรหัสเชื่อมต่อ"
-                      : "Create connection code"}
-                </button>
-              )}
-            </div>
-          </div>
-        </>
-      ) : null}
+      <LineConnectionBody view={view} />
     </section>
   );
 }
