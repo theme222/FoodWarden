@@ -25,6 +25,7 @@ The repository is split into decoupled subprojects and shared interface definiti
 * **[`fridge/`](fridge/README.md) (Node `'F'` — Fridge Sensor):** Runs on KidBright32 (ESP32) in **C++/FreeRTOS**. Battery-powered internal sensor using deep sleep, sampling LM73 (temp), SGP40 (VOC), and LDR (door light), communicating via AES-128-GCM encrypted BLE GATT (calibrating RTC time directly over BLE with zero Wi-Fi required).
 * **[`door/`](door/README.md) (Node `'D'` — Door Closer):** Runs on KidBright32 (ESP32) in **C++/FreeRTOS**. 12V mains-powered actuator driving worm gear motor via TB6612FNG driver, with INA219 current obstruction detection, limit switch ISR, optical IR closed sensor, and MQTT over TLS.
 * **[`server/`](server/README.md) (Server `'S'` — Cloud Backend):** Runs on **Firebase** using **TypeScript**. Cloud Functions orchestrate Gemini 3.5 Flash Lite (`'G'`) with inventory context, manage Firestore database, enforce security rules, and send LINE (`'L'`) alerts.
+* **[`resources/`](resources/README.md):** External non-text resource files.
 
 *(Each directory will contain its own localized README, build configuration, and pinout/hardware diagrams.)*
 
