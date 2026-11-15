@@ -1,0 +1,5 @@
+{
+  "ignore": {
+    "files": [".reports/**", ".deepsec/**", "dist/**", "**/FoodWarden*.html"]
+  }
+}

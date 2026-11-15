@@ -93,3 +93,7 @@ AI SDK, json-render, Turborepo, skills and fx are optional for concrete new requ
 - [deepsec](https://github.com/vercel-labs/deepsec)
 
 The native Windows child sandbox also blocked source reads. A subsequent static-review run supplied a complete first-party source snapshot to Deepsec as context, without disabling the sandbox. Refresh it from `server/` with `bun .deepsec/prepare-snapshot.cjs` before processing; its manifest in `.reports/deepsec-snapshot-manifest.json` records the Git head and source hashes. This helper and workspace are local audit artifacts, not production dependencies. Snapshot review does not exercise live routes or dependencies outside the supplied files.
+
+## React Doctor source scope
+
+[doctor.config.json](doctor.config.json) excludes ignored local diagnostic workspaces (`.reports/`, `.deepsec/`), generated `dist/` output and the original user-supplied HTML design reference. These are not application source entries; `.reports/deploy-preview` is a Wrangler Worker dry-run bundle, not a browser asset. No React Doctor rules are disabled for `src/` or `workers/`. The unchanged photo preprocessing helper revokes its object URL in `finally`; treat a missing-revoke diagnostic there as a false positive rather than removing the cleanup. Sequential database leases and ordered webhook processing also require individual review before parallelizing loops.

@@ -10,3 +10,6 @@ diagrams/*.svg
 bun.lock
 
 .deepsec/
+
+# Original design reference supplied by the user
+FoodWarden Dashboard (Copy).html

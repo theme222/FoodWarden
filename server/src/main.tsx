@@ -1,3 +1,10 @@
+import {
+  Utensils,
+  ChartNoAxesCombined,
+  Network,
+  UserRound,
+  Settings2,
+} from "lucide-react";
 import useSWR from "swr";
 import { SessionCache } from "./components/session-cache";
 import { ConfirmationProvider } from "./components/confirmation";
@@ -34,14 +41,24 @@ import type { AuthConfig, SessionUser } from "./auth";
 import { useFridgeRoom, useFridges, useNow } from "./data";
 import type { FridgeRoomState, SocketConnectionState } from "./data";
 import { Devices } from "./Devices";
-import { AddFood, FoodDetail, Inventory } from "./Food";
+import { AddFood, FoodDetail } from "./Food";
+import { Inventory } from "./Inventory";
+import { FridgeLogo } from "./icons";
 import { Metrics } from "./Metrics";
 import type { Fridge, Language } from "./model";
 
 import { words } from "./words";
 import "./style.css";
+import "./dashboard-theme.css";
 const Settings = lazy(() =>
   import("./Settings").then((module) => ({ default: module.Settings })),
+);
+
+const MyAccount = lazy(() =>
+  import("./MyAccount").then((module) => ({ default: module.MyAccount })),
+);
+const Charts = lazy(() =>
+  import("./Charts").then((module) => ({ default: module.Charts })),
 );
 
 function Dashboard({
@@ -84,6 +101,7 @@ function Dashboard({
         <Inventory
           fridgeId={fridge.id}
           items={room.inventory}
+          onChanged={room.reloadInventory}
           language={language}
         />
       ) : (
@@ -190,11 +208,26 @@ function FridgeWorkspace({
       <div className="fridge-bar">
         <nav className="tabs" aria-label={fridge.name}>
           <NavLink to={base} end>
+            <Utensils size={18} aria-hidden="true" />
             {t.food}
           </NavLink>
-          <NavLink to={base + "/devices"}>{t.devices}</NavLink>
+          <NavLink to={base + "/charts"}>
+            <ChartNoAxesCombined size={18} aria-hidden="true" />
+            {language === "th" ? "กราฟ" : "Charts"}
+          </NavLink>
+          <NavLink to={base + "/devices"}>
+            <Network size={18} aria-hidden="true" />
+            {t.devices}
+          </NavLink>
+          <NavLink to={base + "/me"}>
+            <UserRound size={18} aria-hidden="true" />
+            {language === "th" ? "ของฉัน" : "Me"}
+          </NavLink>
           {fridge.role === "owner" && (
-            <NavLink to={base + "/settings"}>{t.settings}</NavLink>
+            <NavLink to={base + "/settings"}>
+              <Settings2 size={18} aria-hidden="true" />
+              {t.settings}
+            </NavLink>
           )}
         </nav>
         <span
@@ -210,6 +243,27 @@ function FridgeWorkspace({
           index
           element={
             <Dashboard fridge={fridge} room={room} language={language} />
+          }
+        />
+        <Route
+          path="me"
+          element={
+            <Suspense fallback={<output>{t.loading}</output>}>
+              <MyAccount language={language} fridgeId={fridge.id} />
+            </Suspense>
+          }
+        />
+        <Route
+          path="charts"
+          element={
+            <Suspense fallback={<output>{t.loading}</output>}>
+              <Charts
+                language={language}
+                fridgeId={fridge.id}
+                latest={room.latest}
+                doorEvents={room.doorEvents ?? []}
+              />
+            </Suspense>
           }
         />
         <Route
@@ -382,6 +436,14 @@ function SignedIn({
           />
         }
       />
+      <Route
+        path="/me"
+        element={
+          <Suspense fallback={<output>{t.loading}</output>}>
+            <MyAccount language={language} />
+          </Suspense>
+        }
+      />
       <Route path="*" element={<Navigate to="/fridges" replace />} />
     </Routes>
   );
@@ -503,10 +565,22 @@ function App() {
       <header className="header">
         <div className="header-inner">
           <Link to="/fridges" className="brand">
-            FoodWarden
+            <FridgeLogo /> FoodWarden
           </Link>
           <div className="header-actions">
-            {user && <span className="small user-email">{user.email}</span>}
+            {user && (
+              <Link
+                className="user-link"
+                to="/me"
+                aria-label={
+                  language === "th"
+                    ? "บัญชีและการแจ้งเตือนของฉัน"
+                    : "My account and notifications"
+                }
+              >
+                {user.name || user.email}
+              </Link>
+            )}
             {user && (
               <a href="/api/reference" className="small">
                 {language === "th" ? "เอกสาร API" : "API reference"}

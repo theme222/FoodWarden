@@ -1,3 +1,4 @@
+import { LineConnection } from "./LineConnection";
 import {
   Select,
   SelectTrigger,
@@ -51,8 +52,6 @@ function useSettings({
 
   const [nameInput, setName] = useState<string | null>(null);
   const name = nameInput ?? settings?.name ?? "";
-  const [lineInput, setLineTargetId] = useState<string | null>(null);
-  const lineTargetId = lineInput ?? settings?.lineTargetId ?? "";
   const [geminiKeyInput, setGeminiKeyInput] = useState("");
   const [showToken, setShowToken] = useState(false);
   const [copied, setCopied] = useState(false);
@@ -70,7 +69,6 @@ function useSettings({
     try {
       const payload: Record<string, string | null> = {
         name: name.trim(),
-        line_target_id: lineTargetId.trim() || null,
       };
       if (geminiKeyInput.trim()) {
         payload.gemini_api_key = geminiKeyInput.trim();
@@ -85,7 +83,6 @@ function useSettings({
       const updated = readFridgeSettings(await res.json());
       setSettings(updated);
       setName(updated.name);
-      setLineTargetId(updated.lineTargetId ?? "");
       setGeminiKeyInput("");
       setNotice(t.settingsSaved);
       toast.success(t.settingsSaved);
@@ -244,8 +241,6 @@ function useSettings({
     error,
     name,
     setName,
-    lineTargetId,
-    setLineTargetId,
     geminiKeyInput,
     setGeminiKeyInput,
     showToken,
@@ -279,8 +274,6 @@ export function Settings(props: {
     error,
     name,
     setName,
-    lineTargetId,
-    setLineTargetId,
     geminiKeyInput,
     setGeminiKeyInput,
     showToken,
@@ -298,6 +291,7 @@ export function Settings(props: {
     inviteMember,
     removeFridge,
   } = useSettings(props);
+  const { language, fridgeId } = props;
   if (loading) return <p role="status">{t.loading}</p>;
   if (!settings) {
     return <StatusAlert>{error ?? t.failed}</StatusAlert>;
@@ -319,6 +313,36 @@ export function Settings(props: {
       )}
       {error && <StatusAlert>{error}</StatusAlert>}
 
+      <LineConnection language={language} fridgeId={fridgeId} />
+      <section className="surface setup-flow">
+        <h2>
+          {language === "th"
+            ? "เตรียมตู้เย็นให้ครอบครัวใช้งาน"
+            : "Set up your family fridge"}
+        </h2>
+        <ol>
+          <li>
+            {language === "th"
+              ? "เชื่อม LINE ของครอบครัวด้านบน"
+              : "Connect your family LINE above"}
+          </li>
+          <li>
+            {language === "th"
+              ? "นำโทเคนกล้องด้านล่างไปตั้งค่า Gateway"
+              : "Configure your gateway with its camera token below"}
+          </li>
+          <li>
+            {language === "th"
+              ? "เพิ่มอีเมล Google ของสมาชิก ทุกคนใช้บัญชีของตัวเอง"
+              : "Add each family member’s Google email; everyone signs in with their own account"}
+          </li>
+          <li>
+            {language === "th"
+              ? "เปิดหน้าอุปกรณ์เพื่อดูว่ามีข้อมูลเข้าจริง และให้แต่ละคนตั้ง LINE ส่วนตัวในหน้าของฉัน"
+              : "Verify real device reports and let each person connect LINE under Me"}
+          </li>
+        </ol>
+      </section>
       <section className="surface add-form" aria-labelledby="general-title">
         <h2 id="general-title">{t.generalSettings}</h2>
         <form onSubmit={(event) => void saveGeneral(event)}>
@@ -332,16 +356,6 @@ export function Settings(props: {
                 maxLength={80}
               />
             </label>
-            <label>
-              {t.lineTargetId}
-              <input
-                value={lineTargetId}
-                onChange={(event) => setLineTargetId(event.target.value)}
-                maxLength={128}
-                placeholder="U... / C..."
-              />
-            </label>
-            <p className="small">{t.lineTargetHelp}</p>
             <label>
               {t.geminiKey}
               <input
@@ -412,6 +426,38 @@ export function Settings(props: {
         aria-labelledby="members-title"
       >
         <h2 id="members-title">{t.members}</h2>
+        <p className="small">
+          {language === "th"
+            ? "เพิ่มอีเมลเพื่อให้สิทธิ์ จากนั้นส่งลิงก์เว็บให้สมาชิกเข้าด้วย Google อีเมลเดียวกัน ระบบไม่ได้ส่งอีเมลเชิญให้อัตโนมัติ"
+            : "Add an email to grant access, then share this link. Sign in with the same Google email. Invitation emails are not sent automatically."}
+        </p>
+        <button
+          type="button"
+          className="secondary"
+          onClick={() =>
+            void navigator.clipboard
+              .writeText(
+                new URL(
+                  "/fridges/" + encodeURIComponent(fridgeId),
+                  window.location.origin,
+                ).href,
+              )
+              .then(() =>
+                toast.success(
+                  language === "th" ? "คัดลอกลิงก์แล้ว" : "Link copied",
+                ),
+              )
+              .catch(() =>
+                toast.error(
+                  language === "th"
+                    ? "คัดลอกไม่ได้ กรุณาคัดลอกจากแถบที่อยู่"
+                    : "Copy the link from your address bar",
+                ),
+              )
+          }
+        >
+          {language === "th" ? "คัดลอกลิงก์ให้ครอบครัว" : "Copy family link"}
+        </button>
         <ul className="member-list">
           {settings.members.map((member) => {
             const isLastOwner = member.role === "owner" && ownerCount <= 1;
@@ -443,6 +489,7 @@ export function Settings(props: {
             type="email"
             value={inviteEmail}
             onChange={(event) => setInviteEmail(event.target.value)}
+            aria-label={t.inviteEmail}
             placeholder={t.inviteEmail}
             required
           />

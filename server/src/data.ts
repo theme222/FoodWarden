@@ -1,5 +1,5 @@
 import { useEffect, useEffectEvent, useState, useCallback } from "react";
-import useSWR from "swr";
+import useSWR, { useSWRConfig } from "swr";
 import {
   mergeDoorEvents,
   mergeTelemetrySamples,
@@ -46,6 +46,7 @@ export function useFridgeRoom(
   onAccessLost?: (reason: "revoked" | "deleted") => void,
 ): FridgeRoomState {
   const base = `/api/fridges/${encodeURIComponent(fridgeId)}`;
+  const { mutate: mutateCache } = useSWRConfig();
   const inventory = useSWR(
     `${base}/inventory`,
     (url) => getJson(url, readInventoryList),
@@ -83,6 +84,10 @@ export function useFridgeRoom(
     (event: ReturnType<typeof parseFridgeRoomEvent>) => {
       if (!event) return;
       switch (event.type) {
+        case "line_settings_changed":
+          void mutateCache(`${base}/line`);
+          void mutateCache(`${base}/settings`);
+          break;
         case "telemetry":
           // Revalidate while the first snapshot is loading so a streamed sample cannot discard history.
           if (history.data === undefined) {
@@ -113,6 +118,7 @@ export function useFridgeRoom(
           );
           break;
         case "inventory_changed":
+          void mutateCache(`${base}/favorites`);
           void inventory.mutate().catch(() => {});
           break;
         case "member_revoked":
@@ -206,7 +212,8 @@ export function useFridgeRoom(
   const mutateInventory = inventory.mutate;
   const reloadInventory = useCallback(() => {
     void mutateInventory().catch(() => {});
-  }, [mutateInventory]);
+    void mutateCache(`${base}/favorites`).catch(() => {});
+  }, [mutateInventory, mutateCache, base]);
   const latest = (history.data ?? []).reduce<Sample | null>(
     (best, sample) => (!best || sample.timeS > best.timeS ? sample : best),
     initialLatest,

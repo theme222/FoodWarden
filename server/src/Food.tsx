@@ -21,54 +21,6 @@ function inventoryEndpoint(fridgeId: string) {
   return "/api/fridges/" + encodeURIComponent(fridgeId) + "/inventory";
 }
 
-export function Inventory({
-  fridgeId,
-  items,
-  language,
-}: {
-  fridgeId: string;
-  items: Food[];
-  language: Language;
-}) {
-  const t = words[language];
-  const groups = foodGroups(items);
-  return (
-    <section aria-labelledby="food-title">
-      <div className="section-head">
-        <h2 id="food-title">{t.food}</h2>
-        <Link className="primary" to={route(fridgeId, "add")}>
-          ＋ {t.addFood}
-        </Link>
-      </div>
-      {groups.length === 0 ? (
-        <p className="surface">{t.emptyFood}</p>
-      ) : (
-        <ul className="food-list">
-          {groups.map(
-            ([food, ...duplicates]) =>
-              food && (
-                <li key={food.id}>
-                  <Link to={route(fridgeId, food.id)}>
-                    <div>
-                      <strong>{foodName(food, language)}</strong>
-                      <span className="small">
-                        {t.expiry} {expiryLabel(food.expiry, language)}
-                      </span>
-                    </div>
-                    <span className="count">× {duplicates.length + 1}</span>
-                    <span className="chevron" aria-hidden="true">
-                      ›
-                    </span>
-                  </Link>
-                </li>
-              ),
-          )}
-        </ul>
-      )}
-    </section>
-  );
-}
-
 function FoodPhoto({
   fridgeId,
   food,

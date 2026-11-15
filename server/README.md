@@ -6,6 +6,7 @@
 
 ## 1. Documentation & File Index
 
+- **[`FAMILY-WORKFLOW.md`](FAMILY-WORKFLOW.md):** Thai family setup guide, private favorites, personal/group LINE pairing and rollout requirements.
 - **[`API-REFERENCE.md`](API-REFERENCE.md):** authenticated Scalar UI, OpenAPI coverage, test requests, and CDN/runtime costs.
 - **[`DEV-TOOLS.md`](DEV-TOOLS.md):** shadcn/ui components, SWR status, local agent-browser commands, deepsec setup boundaries, and Vercel OSS fit.
 - **[`ARCHITECTURE.md`](ARCHITECTURE.md):** Cloudflare topology, D1 schema, R2 private photo flow, `FridgeRoom` Durable Object WebSockets, React routes, Gemini/LINE pipelines, and security model.
@@ -41,7 +42,7 @@ Set `APP_ENV="development"` locally. The committed Wrangler configuration defaul
 - `BETTER_AUTH_SECRET`: random 32+ character string
 - `BETTER_AUTH_URL`: `http://127.0.0.1:8787`
 - `DEV_AUTH_BYPASS_EMAIL`: local test email (active when `APP_ENV="development"`)
-- Optional: `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET`, `GEMINI_API_KEY`, `LINE_CHANNEL_ACCESS_TOKEN`
+- Optional: `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET`, `GEMINI_API_KEY`, `LINE_CHANNEL_ACCESS_TOKEN`, `LINE_CHANNEL_SECRET`, `LINE_BOT_BASIC_ID`
 
 ### Apply Local D1 Migrations & Start Stack
 

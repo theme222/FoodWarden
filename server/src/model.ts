@@ -72,6 +72,7 @@ export interface FridgeSettings {
 }
 
 export type FridgeRoomEvent =
+  | { type: "line_settings_changed" }
   | { type: "connected"; fridgeId: string }
   | { type: "telemetry"; samples: Sample[]; lastSeenS: number }
   | { type: "status"; status: Heartbeat }
@@ -320,6 +321,8 @@ export function parseFridgeRoomEvent(raw: string): FridgeRoomEvent | null {
   }
   const data = record(parsed);
   switch (data.type) {
+    case "line_settings_changed":
+      return { type: "line_settings_changed" };
     case "connected": {
       const fridgeId = text(data.fridgeId);
       return fridgeId ? { type: "connected", fridgeId } : null;
