@@ -8,3 +8,5 @@ diagram/Fridge.drawio
 diagram/Fridge.svg
 diagrams/*.svg
 bun.lock
+
+.deepsec/

@@ -12,6 +12,10 @@ Account: Newisnooby. No unrelated databases or buckets were changed.
 
 The production Worker has not been deployed. A deployment dry run succeeded with real resource bindings. Resource provisioning alone does not make the app live or guarantee zero future cost; usage remains subject to each service's limits and billing.
 
+## Open review findings
+
+The subsequent [Deepsec review](review/DEEPSEC-REVIEW.md) identified unresolved authorization, concurrency and reliability issues. Resolve and verify those findings before production launch; the successful dry run does not establish application security.
+
 ## Required before usable deployment
 
 Create a Google OAuth Web Application client with these authorized settings:

@@ -62,7 +62,21 @@ Agent-browser is a local dev dependency. Before an agent uses it, read `bun run 
 
 ## Security tooling
 
-See [repository secret protection](../SECURITY-TOOLS.md) for Gitleaks and Lefthook installation. Run `bun run security:help` for Deepsec CLI help. Deepsec initialization can configure a provider and start paid AI processing; choose scope and cost limits first. No Deepsec AI scan is part of the default quality commands.
+See [repository secret protection](../SECURITY-TOOLS.md) for Gitleaks and Lefthook installation. Run `bun run security:help` for Deepsec CLI help. Deepsec is separate from the default quality commands: `scan` finds pattern candidates; `process` performs AI investigation. Neither a pattern hit nor an unvalidated AI finding is proof of an exploitable vulnerability.
+
+Deepsec supports `--model-auth local` with an existing Codex/Claude subscription login, as well as direct API keys or Vercel AI Gateway. API-key billing is not mandatory. A local-subscription run still consumes the provider's subscription allowance. Set scope and concurrency deliberately; do not scan private environment files or generated reports.
+
+On this Windows host, Deepsec 2.3.12's initializer failed to detect the available pnpm/npm command shims. The documented manual scaffold flow was used instead, with a separate ignored `.deepsec/` workspace. Its local dependency override selects `@openai/codex` 0.169.0, matching the working machine CLI; the bundled 0.156.1 CLI rejected the selected model. The server application's dependencies and lockfile are unaffected by this workspace override.
+
+From the prepared `server/.deepsec/` workspace, resume the user-approved model with:
+
+```bash
+node node_modules/deepsec/dist/cli.mjs scan --project-id server
+node node_modules/deepsec/dist/cli.mjs process --project-id server --agent codex --model gpt-6.1-sol --concurrency 1 --batch-size 5 --max-turns 60
+node node_modules/deepsec/dist/cli.mjs report --project-id server
+```
+
+The local workspace contains its auth route (`local`), concise server context in `data/server/INFO.md`, and explicit exclusions for private configuration, generated output and scan state. Reviewed results belong in `review/`; raw state remains ignored. The manual flow does not run the initializer's automatic ingress inventory or matcher-generation phases, so it must not be described as exhaustive coverage.
 
 ## Other packages
 
@@ -77,3 +91,5 @@ AI SDK, json-render, Turborepo, skills and fx are optional for concrete new requ
 - [Prettier Tailwind plugin](https://github.com/tailwindlabs/prettier-plugin-tailwindcss)
 - [agent-browser](https://agent-browser.dev/installation)
 - [deepsec](https://github.com/vercel-labs/deepsec)
+
+The native Windows child sandbox also blocked source reads. A subsequent static-review run supplied a complete first-party source snapshot to Deepsec as context, without disabling the sandbox. Refresh it from `server/` with `bun .deepsec/prepare-snapshot.cjs` before processing; its manifest in `.reports/deepsec-snapshot-manifest.json` records the Git head and source hashes. This helper and workspace are local audit artifacts, not production dependencies. Snapshot review does not exercise live routes or dependencies outside the supplied files.

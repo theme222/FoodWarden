@@ -53,3 +53,6 @@ skills-lock.json
 
 # Generated local diagnostics
 .reports/
+
+# Local Deepsec workspace
+.deepsec/

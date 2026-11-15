@@ -12,7 +12,7 @@ The latest complete scan reports **81/100**, no errors, and three warnings. The 
 | Passing data to a parent in [data.ts](../src/data.ts)            | The callback reports access loss so the parent leaves a revoked/deleted fridge. It does not copy REST data into parent state; SWR owns that cache. |
 | Sequential awaits in [telemetry.ts](../workers/lib/telemetry.ts) | Ingestion deliberately processes bounded D1 chunks sequentially, limiting database pressure for batches up to 10,000 samples.                      |
 
-React Doctor is a static diagnostic tool, not a comprehensive backend security audit. No Deepsec AI scan ran. Linting, typechecking, formatting, Knip, build and tests are separate gates.
+React Doctor is a static diagnostic tool, not a comprehensive backend security audit. A subsequent Deepsec AI scan found nine source-supported issues; see [DEEPSEC-REVIEW.md](DEEPSEC-REVIEW.md) for classifications, prerequisites and limitations. Linting, typechecking, formatting, Knip, build and tests are separate gates.
 
 ## Implemented changes and validation
 
