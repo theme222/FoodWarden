@@ -52,6 +52,7 @@ class DoorMQTTClient:
         on_door_event: Callable[[DoorEventEnvelope], None] | None = None,
         on_door_telemetry: Callable[[DoorTelemetryPayload], None] | None = None,
         on_connection_change: Callable[[bool], None] | None = None,
+        on_node_seen: Callable[[str, int], None] | None = None,
     ) -> None:
         self.broker_host = broker_host
         self.broker_port = broker_port
@@ -64,6 +65,7 @@ class DoorMQTTClient:
         self.on_door_event = on_door_event
         self.on_door_telemetry = on_door_telemetry
         self.on_connection_change = on_connection_change
+        self.on_node_seen = on_node_seen
 
         self._connected: bool = False
         self._door_opened_at: float | None = None
@@ -208,6 +210,8 @@ class DoorMQTTClient:
             req = TimeSyncRequest.model_validate(data)
             now_s = int(time.time())
             self.last_seen_by_node[req.node_id] = now_s
+            if self.on_node_seen:
+                self.on_node_seen(req.node_id, now_s)
             res = TimeSyncResponse(node_id=req.node_id, timestamp=now_s)
             self._client.publish(
                 TIME_RES_TOPIC,
@@ -258,7 +262,10 @@ class DoorMQTTClient:
         state = str(data.get("state") or data.get("status", "unknown"))
         node_id = str(data.get("node_id", "D0"))
         if state.upper() == "ONLINE":
-            self.last_seen_by_node[node_id] = int(time.time())
+            now_s = int(time.time())
+            self.last_seen_by_node[node_id] = now_s
+            if self.on_node_seen:
+                self.on_node_seen(node_id, now_s)
         logger.info("Node '%s' status update: %s", node_id, state)
 
     def set_door_state(self, is_open: bool) -> None:

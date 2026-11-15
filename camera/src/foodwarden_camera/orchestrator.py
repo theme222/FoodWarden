@@ -90,6 +90,7 @@ class GatewayOrchestrator:
             on_door_event=self._on_door_event,
             on_door_telemetry=self._on_door_telemetry,
             on_connection_change=self._on_mqtt_connection_change,
+            on_node_seen=self.sync_manager.record_node_seen,
         )
 
         # 5. UI Integration

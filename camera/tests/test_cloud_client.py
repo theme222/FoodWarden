@@ -1,6 +1,7 @@
 """Unit tests for CloudClient and CloudSyncManager (Rubric E4 Store-and-Forward)."""
 
 import json
+import time
 from pathlib import Path
 
 import httpx
@@ -322,3 +323,46 @@ def test_sync_manager_batch_telemetry_and_status_heartbeat(
     manager.record_node_seen("F0", 1729930030)
     manager.record_node_seen("D0", 1729930040)
     assert manager.send_status_heartbeat() is True
+
+
+def test_sync_manager_clamps_node_seen_timestamps_and_heartbeat_cadence(
+    tmp_path: Path, mock_cloud_client: CloudClient
+) -> None:
+    queue = OfflineQueue(db_path=str(tmp_path / "clamp_cadence.db"))
+    manager = CloudSyncManager(
+        mock_cloud_client,
+        queue,
+        captures_dir=str(tmp_path / "captures"),
+        status_interval_s=0.15,
+    )
+
+    before_s = int(time.time())
+    # Unsynced 1970 RTC timestamp (< 1_600_000_000) -> mapped to Gateway wall-clock
+    manager.record_node_seen("F0", 42)
+    f0_seen = manager._node_last_seen["F0"]
+    assert f0_seen is not None and f0_seen >= before_s
+
+    # Future skewed device clock (> now + 300) -> clamped to Gateway wall-clock
+    manager.record_node_seen("D0", before_s + 900)
+    after_s = int(time.time())
+    d0_seen = manager._node_last_seen["D0"]
+    assert d0_seen is not None and before_s <= d0_seen <= after_s
+
+    # Verify _sync_loop dispatches heartbeat repeatedly using status_interval_s
+    # even when offline queue flush interval_s is larger
+    heartbeat_count = 0
+    original_send = manager.send_status_heartbeat
+
+    def tracked_heartbeat() -> bool:
+        nonlocal heartbeat_count
+        heartbeat_count += 1
+        return original_send()
+
+    manager.send_status_heartbeat = tracked_heartbeat  # type: ignore[method-assign]
+    manager.start_background_sync(interval_s=5.0)
+    try:
+        time.sleep(0.4)
+    finally:
+        manager.stop_background_sync()
+
+    assert heartbeat_count >= 2

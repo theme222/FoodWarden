@@ -37,11 +37,13 @@ class CloudSyncManager:
         cloud_client: CloudClient,
         offline_queue: OfflineQueue,
         captures_dir: str = "captures",
+        status_interval_s: float = 60.0,
     ) -> None:
         self.client = cloud_client
         self.queue = offline_queue
         self.captures_dir = Path(captures_dir)
         self.captures_dir.mkdir(parents=True, exist_ok=True)
+        self.status_interval_s = status_interval_s
 
         self._running: bool = False
         self._thread: threading.Thread | None = None
@@ -60,7 +62,11 @@ class CloudSyncManager:
 
     def record_node_seen(self, node_id: str, timestamp_s: int | None = None) -> None:
         """Records latest contact timestamp for a hardware component."""
-        ts = int(time.time()) if timestamp_s is None else int(timestamp_s)
+        now_s = int(time.time())
+        if timestamp_s is None or timestamp_s < 1_600_000_000:
+            ts = now_s
+        else:
+            ts = min(int(timestamp_s), now_s)
         with self._lock:
             prev = self._node_last_seen.get(node_id)
             if prev is None or ts > prev:
@@ -309,12 +315,15 @@ class CloudSyncManager:
 
     def _sync_loop(self, interval_s: float) -> None:
         backoff_s = interval_s
+        next_status_at = time.monotonic()
         while self._running:
             try:
                 now_mono = time.monotonic()
-                if now_mono - self._last_status_sent_at >= 60.0 or self._last_status_sent_at == 0.0:
+                if now_mono >= next_status_at:
                     self.send_status_heartbeat()
                     self._last_status_sent_at = now_mono
+                    while next_status_at <= now_mono:
+                        next_status_at += self.status_interval_s
 
                 self.flush_offline_queue()
                 if self._is_online:
@@ -325,7 +334,8 @@ class CloudSyncManager:
                 logger.warning("Error in background sync loop: %s", exc)
                 backoff_s = min(backoff_s * 1.5, 60.0)
 
-            time.sleep(backoff_s)
+            remaining_status_s = max(0.05, next_status_at - time.monotonic())
+            time.sleep(min(backoff_s, remaining_status_s))
 
     def stop_background_sync(self) -> None:
         """Stops background flusher."""

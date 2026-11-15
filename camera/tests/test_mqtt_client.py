@@ -158,3 +158,17 @@ def test_mqtt_canonical_cbd_telemetry_and_status_last_seen() -> None:
     assert telems[0].limit_switch_homed is True
     assert client.is_door_open is True
     assert client.last_seen_by_node["D0"] >= now_s
+
+
+def test_mqtt_on_node_seen_callback_fires_on_online_and_time_req_only() -> None:
+    seen_calls: list[tuple[str, int]] = []
+    client = DoorMQTTClient(on_node_seen=lambda node_id, ts: seen_calls.append((node_id, ts)))
+    client._client = MagicMock()
+
+    client._handle_door_status({"node_id": "D0", "state": "ONLINE"})
+    client._handle_time_req({"node_id": "D0"})
+    client._handle_door_status({"node_id": "D0", "state": "OFFLINE"})
+
+    assert len(seen_calls) == 2
+    assert seen_calls[0][0] == "D0"
+    assert seen_calls[1][0] == "D0"

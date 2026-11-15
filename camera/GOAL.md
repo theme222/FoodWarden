@@ -17,6 +17,7 @@
 - [x] **PIR Motion Sensor & Screen Sleep Controller (Rubric M1):** Wire Digital PIR sensor (HC-SR501 / AM312) to Pi-top GPIO 22 to detect approaching users; automatically wake the 5-inch LCD and camera stream upon motion detection, and blank the display / sleep the camera after 10 minutes of continuous inactivity.
 - [x] **Door Safety Controller ([`CBD.md`](../interface/CBD.md)):** Trigger `CLOSE_DOOR` over MQTTS when the fridge door has remained open for > 60 seconds with no human present, and immediately send `ABORT` if a human enters the camera frame.
 - [x] **Firebase HTTPS Client ([`CBS.md`](../interface/CBS.md)):** Sync sensor telemetry, door events, and compressed JPEG check-in/check-out images with Server `'S'`.
+- [x] **Component Status Heartbeat ([`CBS.md`](../interface/CBS.md)):** Dispatch `POST /api/status` every 60 seconds reporting latest contact timestamps (`last_seen_s`) for `"C0"`, `"F0"`, and `"D0"` (sending explicit `null` for any peripheral unseen since boot, while preserving last contact timestamp on MQTT `"OFFLINE"` disconnect).
 
 ---
 
