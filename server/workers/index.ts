@@ -1,3 +1,5 @@
+import { dispatchLineOutbox } from "./lib/line";
+import { InferenceQuotaError, withInferenceQuota } from "./lib/ai-quota";
 import { SCALAR_ASSET_PATH } from "../scalar-assets";
 import { Scalar } from "@scalar/hono-api-reference";
 import { openApiDocument } from "./lib/openapi";
@@ -285,7 +287,7 @@ app.post("/api/fridges", async (c) => {
   }
 
   const nowS = Math.floor(Date.now() / 1000);
-  const created = await createFridge(c.env.DB, user.email, name, nowS);
+  const created = await createFridge(c.env.DB, user.email, name, nowS, user.id);
   return c.json(created, 201);
 });
 
@@ -304,6 +306,8 @@ app.get("/api/fridges/:fridgeId/ws", async (c) => {
   const stub = c.env.FRIDGE_ROOM.get(id);
   const headers = new Headers(c.req.raw.headers);
   headers.set("x-fw-user-email", auth.user.email);
+  headers.set("x-fw-user-id", auth.user.id);
+  headers.set("x-fw-session-id", auth.user.sessionId);
   headers.set("x-fw-fridge-id", auth.fridgeId);
 
   return stub.fetch(new Request(c.req.raw, { headers }));
@@ -530,7 +534,13 @@ app.post("/api/fridges/:fridgeId/members", async (c) => {
     email,
     role,
     nowS,
+    auth.user.email,
   );
+  if (status === "forbidden")
+    return c.json(
+      { error: "FORBIDDEN", message: "Owner permission was revoked." },
+      403,
+    );
   if (status === "last_owner") {
     return c.json<ApiErrorEnvelope>(
       { error: "CONFLICT", message: "Cannot demote the last fridge owner." },
@@ -552,7 +562,17 @@ app.delete("/api/fridges/:fridgeId/members/:email", async (c) => {
     );
   }
 
-  const outcome = await removeFridgeMember(c.env.DB, auth.fridgeId, email);
+  const outcome = await removeFridgeMember(
+    c.env.DB,
+    auth.fridgeId,
+    email,
+    auth.user.email,
+  );
+  if (outcome === "forbidden")
+    return c.json(
+      { error: "FORBIDDEN", message: "Owner permission was revoked." },
+      403,
+    );
   if (outcome === "not_found") {
     return c.json<ApiErrorEnvelope>(
       { error: "NOT_FOUND", message: "Member not found." },
@@ -806,8 +826,14 @@ app.all("/api/inventory/checkin/draft", async (c) => {
   const nowS = Math.floor(Date.now() / 1000);
   let result;
   try {
-    result = await classifyCheckInImage(c.env, apiKey, parsed.bytes, nowS);
+    result = await withInferenceQuota(c.env, auth, () =>
+      classifyCheckInImage(c.env, apiKey, parsed.bytes, nowS),
+    );
   } catch (error) {
+    if (error instanceof InferenceQuotaError) {
+      c.header("Retry-After", "60");
+      return c.json({ error: "RATE_LIMITED", message: error.message }, 429);
+    }
     if (error instanceof GeminiUnavailableError) {
       return c.json<ApiErrorEnvelope>(
         { error: "SERVICE_UNAVAILABLE", message: error.message },
@@ -922,13 +948,14 @@ app.all("/api/inventory/checkout/draft", async (c) => {
   const rows = await listCheckOutCandidateRows(c.env.DB, auth);
   let result;
   try {
-    result = await matchCheckOutImage(
-      c.env,
-      apiKey,
-      parsed.bytes,
-      toPromptCandidates(rows),
+    result = await withInferenceQuota(c.env, auth, () =>
+      matchCheckOutImage(c.env, apiKey, parsed.bytes, toPromptCandidates(rows)),
     );
   } catch (error) {
+    if (error instanceof InferenceQuotaError) {
+      c.header("Retry-After", "60");
+      return c.json({ error: "RATE_LIMITED", message: error.message }, 429);
+    }
     if (error instanceof GeminiUnavailableError) {
       return c.json<ApiErrorEnvelope>(
         { error: "SERVICE_UNAVAILABLE", message: error.message },
@@ -1020,9 +1047,9 @@ app.all("/api/telemetry", async (c) => {
         samples,
         last_seen_s: nowS,
       }),
-      maybeSendTelemetryAlerts(c.env, auth, samples, nowS),
     ]);
   }
+  await maybeSendTelemetryAlerts(c.env, auth, samples, nowS);
   return c.json({ success: true, ingested_count: ingestedCount });
 });
 
@@ -1082,9 +1109,9 @@ app.all("/api/door_events", async (c) => {
         type: "door_events",
         events,
       }),
-      maybeSendDoorSafetyAlerts(c.env, auth, events, nowS),
     ]);
   }
+  await maybeSendDoorSafetyAlerts(c.env, auth, events, nowS);
   return c.json({ success: true, ingested_count: ingestedCount });
 });
 
@@ -1096,6 +1123,14 @@ app.all("/api/*", (c) => {
 });
 
 app.onError((_err, c) => {
+  if (_err.message.includes("PHOTO_RETIRED"))
+    return c.json(
+      {
+        error: "CONFLICT",
+        message: "This photo has expired. Upload a new image.",
+      },
+      409,
+    );
   return c.json<ApiErrorEnvelope>(
     { error: "INTERNAL_ERROR", message: "The request could not be completed." },
     500,
@@ -1106,7 +1141,9 @@ export default {
   fetch: app.fetch,
   scheduled(controller, env, ctx) {
     ctx.waitUntil(
-      runDailyCronTasks(env, Math.floor(controller.scheduledTime / 1000)),
+      controller.cron === "* * * * *"
+        ? dispatchLineOutbox(env, Math.floor(controller.scheduledTime / 1000))
+        : runDailyCronTasks(env, Math.floor(controller.scheduledTime / 1000)),
     );
   },
 } satisfies ExportedHandler<AppBindings>;

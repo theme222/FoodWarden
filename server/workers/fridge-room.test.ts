@@ -1,3 +1,5 @@
+import { notifyFridgeRoom } from "./lib/room";
+import { getAuthenticatedUser } from "./lib/auth";
 import {
   applyD1Migrations,
   evictDurableObject,
@@ -455,5 +457,118 @@ describe("FridgeRoom Durable Object WebSocket", () => {
       memberSocket.close();
       ownerSocket.close();
     }
+  });
+
+  for (const mode of ["logout", "expiry", "membership"] as const) {
+    it(
+      "stops private delivery after " +
+        mode +
+        " even without a revocation broadcast",
+      async () => {
+        const testEnv = getTestEnv();
+        const email = "lifecycle-" + crypto.randomUUID() + "@example.com";
+        const cookie = await loginCookie(email);
+        const create = await exports.default.fetch(
+          "http://localhost/api/fridges",
+          {
+            method: "POST",
+            headers: { Cookie: cookie, "Content-Type": "application/json" },
+            body: JSON.stringify({ name: "Lifecycle" }),
+          },
+        );
+        const { id } = (await create.json()) as { id: string };
+        const socket = await connectFridgeSocket(id, cookie);
+        await socket.nextJson();
+        if (mode === "logout")
+          await testEnv.DB.prepare(
+            "DELETE FROM session WHERE userId IN (SELECT id FROM user WHERE email = ?)",
+          )
+            .bind(email)
+            .run();
+        if (mode === "expiry")
+          await testEnv.DB.prepare(
+            "UPDATE session SET expiresAt = ? WHERE userId IN (SELECT id FROM user WHERE email = ?)",
+          )
+            .bind(new Date(Date.now() - 1000).toISOString(), email)
+            .run();
+        if (mode === "membership")
+          await testEnv.DB.prepare(
+            "DELETE FROM fridge_members WHERE fridge_id = ? AND email = ?",
+          )
+            .bind(id, email)
+            .run();
+        await notifyFridgeRoom(testEnv, id, {
+          type: "inventory_changed",
+          action: "created",
+          itemId: "private",
+        });
+        expect((await socket.closed).code).toBe(4003);
+        socket.close();
+      },
+    );
+  }
+  it("rejects a delayed authorized handshake after membership removal", async () => {
+    const testEnv = getTestEnv();
+    const email = "delayed-" + crypto.randomUUID() + "@example.com";
+    const cookie = await loginCookie(email);
+    const request = new Request("http://localhost/", {
+      headers: { Cookie: cookie },
+    });
+    const user = await getAuthenticatedUser(testEnv, request);
+    expect(user).toBeTruthy();
+    const create = await exports.default.fetch("http://localhost/api/fridges", {
+      method: "POST",
+      headers: { Cookie: cookie, "Content-Type": "application/json" },
+      body: JSON.stringify({ name: "Delayed" }),
+    });
+    const { id } = (await create.json()) as { id: string };
+    await testEnv.DB.prepare(
+      "DELETE FROM fridge_members WHERE fridge_id = ? AND email = ?",
+    )
+      .bind(id, email)
+      .run();
+    const stub = testEnv.FRIDGE_ROOM.get(testEnv.FRIDGE_ROOM.idFromName(id));
+    const result = await stub.fetch("http://fridge-room/ws", {
+      headers: {
+        Upgrade: "websocket",
+        "x-fw-user-email": email,
+        "x-fw-user-id": user!.id,
+        "x-fw-session-id": user!.sessionId,
+        "x-fw-fridge-id": id,
+      },
+    });
+    expect(result.status).toBe(401);
+  });
+
+  it("normalizes verified email case and revalidates numeric expiry attachments", async () => {
+    const testEnv = getTestEnv();
+    const email = "mixed-" + crypto.randomUUID() + "@example.com";
+    const cookie = await loginCookie(email);
+    const create = await exports.default.fetch("http://localhost/api/fridges", {
+      method: "POST",
+      headers: { Cookie: cookie, "Content-Type": "application/json" },
+      body: JSON.stringify({ name: "Email case" }),
+    });
+    const { id } = (await create.json()) as { id: string };
+    await testEnv.DB.prepare("UPDATE user SET email = ? WHERE email = ?")
+      .bind(email.toUpperCase(), email)
+      .run();
+    const socket = await connectFridgeSocket(id, cookie);
+    await socket.nextJson();
+    await testEnv.DB.prepare(
+      "UPDATE session SET expiresAt = ? WHERE userId IN (SELECT id FROM user WHERE email = ?)",
+    )
+      .bind(Date.now() + 60_000, email.toUpperCase())
+      .run();
+    socket.ws.send("ping");
+    expect(await socket.nextMessage()).toBe("pong");
+    await testEnv.DB.prepare(
+      "UPDATE session SET expiresAt = ? WHERE userId IN (SELECT id FROM user WHERE email = ?)",
+    )
+      .bind(Math.floor(Date.now() / 1000) - 1, email.toUpperCase())
+      .run();
+    socket.ws.send("ping");
+    expect((await socket.closed).code).toBe(4003);
+    socket.close();
   });
 });

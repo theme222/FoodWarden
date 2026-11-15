@@ -19,6 +19,8 @@ export type FridgeRoomEvent =
 
 interface SocketAttachment {
   email: string;
+  userId: string;
+  sessionId: string;
   fridgeId: string;
   connectedAtS: number;
 }
@@ -30,9 +32,6 @@ function memberTag(email: string): string {
 export class FridgeRoom extends DurableObject<AppBindings> {
   constructor(ctx: DurableObjectState, env: AppBindings) {
     super(ctx, env);
-    this.ctx.setWebSocketAutoResponse(
-      new WebSocketRequestResponsePair("ping", "pong"),
-    );
   }
 
   override async fetch(request: Request): Promise<Response> {
@@ -40,7 +39,7 @@ export class FridgeRoom extends DurableObject<AppBindings> {
 
     if (request.method === "POST" && url.pathname === "/broadcast") {
       const event = (await request.json()) as FridgeRoomEvent;
-      this.handleRoomEvent(event);
+      await this.handleRoomEvent(event);
       return Response.json({
         ok: true,
         clients: this.ctx.getWebSockets().length,
@@ -53,16 +52,30 @@ export class FridgeRoom extends DurableObject<AppBindings> {
         ?.trim()
         .toLowerCase();
       const fridgeId = request.headers.get("x-fw-fridge-id")?.trim();
-      if (!email || !fridgeId) {
+      const userId = request.headers.get("x-fw-user-id");
+      const sessionId = request.headers.get("x-fw-session-id");
+      if (!email || !fridgeId || !userId || !sessionId) {
         return new Response("Unauthorized", { status: 401 });
       }
 
+      const identity: SocketAttachment = {
+        email,
+        fridgeId,
+        userId,
+        sessionId,
+        connectedAtS: Math.floor(Date.now() / 1000),
+      };
+      await this.ctx.storage.setAlarm(Date.now() + 30_000);
+      if (!(await this.isAuthorized(identity)))
+        return new Response("Unauthorized", { status: 401 });
       const pair = new WebSocketPair();
       const client = pair[0];
       const server = pair[1];
       const attachment: SocketAttachment = {
         email,
         fridgeId,
+        userId,
+        sessionId,
         connectedAtS: Math.floor(Date.now() / 1000),
       };
 
@@ -81,7 +94,7 @@ export class FridgeRoom extends DurableObject<AppBindings> {
     return new Response("Not found", { status: 404 });
   }
 
-  private handleRoomEvent(event: FridgeRoomEvent): void {
+  private async handleRoomEvent(event: FridgeRoomEvent): Promise<void> {
     if (event.type === "member_revoked") {
       const payload = JSON.stringify(event);
       for (const ws of this.ctx.getWebSockets(memberTag(event.email))) {
@@ -110,6 +123,7 @@ export class FridgeRoom extends DurableObject<AppBindings> {
 
     const payload = JSON.stringify(event);
     for (const ws of this.ctx.getWebSockets()) {
+      if (!(await this.checkSocket(ws))) continue;
       try {
         ws.send(payload);
       } catch {
@@ -126,10 +140,80 @@ export class FridgeRoom extends DurableObject<AppBindings> {
     ws: WebSocket,
     message: string | ArrayBuffer,
   ): Promise<void> {
+    if (!(await this.checkSocket(ws))) return;
     if (typeof message !== "string") return;
     if (message === "ping") {
       ws.send("pong");
     }
+  }
+
+  private async isAuthorized(
+    identity: SocketAttachment | null,
+  ): Promise<boolean> {
+    if (
+      !identity?.sessionId ||
+      !identity.userId ||
+      !identity.email ||
+      !identity.fridgeId
+    )
+      return false;
+    try {
+      const row = await this.env.DB.prepare(
+        `SELECT s.expiresAt FROM session s
+        JOIN user u ON u.id = s.userId
+        JOIN fridge_members fm ON fm.email = lower(trim(u.email)) AND fm.fridge_id = ?
+        JOIN fridges f ON f.id = fm.fridge_id
+        WHERE s.id = ? AND s.userId = ? AND lower(trim(u.email)) = ? AND u.emailVerified = 1`,
+      )
+        .bind(
+          identity.fridgeId,
+          identity.sessionId,
+          identity.userId,
+          identity.email,
+        )
+        .first<{ expiresAt: string | number }>();
+      if (!row) return false;
+      const value = row.expiresAt;
+      const numeric =
+        typeof value === "number"
+          ? value
+          : /^\d+$/.test(value)
+            ? Number(value)
+            : NaN;
+      const expires = Number.isFinite(numeric)
+        ? numeric < 1e12
+          ? numeric * 1000
+          : numeric
+        : Date.parse(String(value));
+      return Number.isFinite(expires) && expires > Date.now();
+    } catch {
+      return false;
+    }
+  }
+
+  private async checkSocket(ws: WebSocket): Promise<boolean> {
+    try {
+      if (
+        await this.isAuthorized(
+          ws.deserializeAttachment() as SocketAttachment | null,
+        )
+      )
+        return true;
+    } catch {
+      /* Malformed/legacy attachments fail closed. */
+    }
+    try {
+      ws.close(4003, "Access revoked");
+    } catch {
+      /* Already closed. */
+    }
+    return false;
+  }
+
+  override async alarm(): Promise<void> {
+    for (const ws of this.ctx.getWebSockets()) await this.checkSocket(ws);
+    if (this.ctx.getWebSockets().length)
+      await this.ctx.storage.setAlarm(Date.now() + 30_000);
   }
 
   override async webSocketClose(

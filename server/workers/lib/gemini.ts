@@ -169,6 +169,7 @@ async function callModelWithRetries(
           "x-goog-api-key": apiKey,
         },
         body: JSON.stringify(body),
+        signal: AbortSignal.timeout(15_000),
       });
 
       if (response.ok) {
@@ -231,6 +232,7 @@ async function generateStructuredJson(
       },
     ],
     generationConfig: {
+      maxOutputTokens: 4096,
       temperature: 0.1,
       topP: 0.95,
       responseMimeType: "application/json",

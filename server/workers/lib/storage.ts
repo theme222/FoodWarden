@@ -71,3 +71,22 @@ export async function deletePrivatePhoto(
 ): Promise<void> {
   await bucket.delete(key);
 }
+// Atomically prevent new references before deleting the last unreferenced R2 object.
+export async function retireUnreferencedPhoto(
+  db: D1Database,
+  photos: R2Bucket,
+  key: string,
+): Promise<boolean> {
+  const path = toStoragePath(key);
+  const claim = await db
+    .prepare(
+      `INSERT INTO photo_gc_claims (key)
+    SELECT ? WHERE NOT EXISTS (SELECT 1 FROM inventory WHERE image_storage_path = ? OR image_storage_path = ?)
+    ON CONFLICT(key) DO UPDATE SET key = excluded.key RETURNING key`,
+    )
+    .bind(path, path, key)
+    .first();
+  if (!claim) return false;
+  await deletePrivatePhoto(photos, key);
+  return true;
+}

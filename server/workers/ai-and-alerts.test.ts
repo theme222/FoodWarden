@@ -78,13 +78,14 @@ async function seedFridge(
   const stmts: D1PreparedStatement[] = [
     db
       .prepare(
-        "INSERT INTO fridges (id, name, created_at_s, line_target_id) VALUES (?, ?, ?, ?)",
+        "INSERT INTO fridges (id, name, created_at_s, line_target_id, ai_budget_owner) VALUES (?, ?, ?, ?, ?)",
       )
       .bind(
         options.fridgeId,
         `Fridge ${options.fridgeId}`,
         nowS,
         options.lineTargetId ?? null,
+        options.ownerEmail ?? options.fridgeId + "@fixture.example",
       ),
     db
       .prepare(

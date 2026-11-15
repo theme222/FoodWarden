@@ -9,12 +9,16 @@ interface TestEnv {
 
 const EXPECTED_TABLES = [
   "account",
+  "ai_reservations",
   "alert_cooldowns",
   "door_events",
   "fridge_members",
   "fridge_secrets",
   "fridges",
   "inventory",
+  "line_alert_events",
+  "line_outbox",
+  "photo_gc_claims",
   "session",
   "system_status",
   "telemetry_samples",

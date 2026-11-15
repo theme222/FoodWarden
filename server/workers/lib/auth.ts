@@ -7,6 +7,7 @@ const DEV_FALLBACK_SECRET =
   "foodwarden-local-dev-secret-change-in-production-32";
 
 export interface AuthenticatedUser {
+  sessionId: string;
   id: string;
   email: string;
   name: string;
@@ -87,6 +88,7 @@ export async function getAuthenticatedUser(
   if (!normalizedEmail) return null;
 
   return {
+    sessionId: session.session.id,
     id: session.user.id,
     email: normalizedEmail,
     name: session.user.name,

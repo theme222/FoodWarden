@@ -1,8 +1,8 @@
 import { sha256Hex } from "./gateway";
 import {
   buildFoodPhotoKey,
-  deletePrivatePhoto,
   inventoryPhotoKey,
+  retireUnreferencedPhoto,
   isValidJpegBytes,
   MAX_MANUAL_JPEG_BYTES,
   putImmutablePhoto,
@@ -300,43 +300,39 @@ export async function updateInventoryItem(
   itemId: string,
   patch: InventoryItemPatch,
 ): Promise<boolean> {
-  const existing = await db
+  const fields: string[] = [];
+  const values: string[] = [];
+  for (const key of [
+    "name_th",
+    "name_en",
+    "estimated_expiry_date",
+    "category",
+  ] as const) {
+    if (patch[key] !== undefined) {
+      fields.push(key + " = ?");
+      values.push(patch[key]);
+    }
+  }
+  if (patch.category !== undefined) {
+    fields.push("category_th = ?");
+    values.push(CATEGORY_TH_MAP[patch.category]);
+  }
+  if (!fields.length)
+    return Boolean(
+      await db
+        .prepare("SELECT 1 FROM inventory WHERE id = ? AND fridge_id = ?")
+        .bind(itemId, fridgeId)
+        .first(),
+    );
+  const result = await db
     .prepare(
-      "SELECT name_th, name_en, estimated_expiry_date, category, category_th FROM inventory WHERE id = ? AND fridge_id = ?",
+      "UPDATE inventory SET " +
+        fields.join(", ") +
+        " WHERE id = ? AND fridge_id = ?",
     )
-    .bind(itemId, fridgeId)
-    .first<{
-      name_th: string;
-      name_en: string;
-      estimated_expiry_date: string;
-      category: Category;
-      category_th: string;
-    }>();
-
-  if (!existing) return false;
-
-  const nextCategory = patch.category ?? existing.category;
-  const nextCategoryTh = patch.category
-    ? CATEGORY_TH_MAP[patch.category]
-    : existing.category_th;
-
-  await db
-    .prepare(
-      `UPDATE inventory
-       SET name_th = ?, name_en = ?, estimated_expiry_date = ?, category = ?, category_th = ?
-       WHERE id = ? AND fridge_id = ?`,
-    )
-    .bind(
-      patch.name_th ?? existing.name_th,
-      patch.name_en ?? existing.name_en,
-      patch.estimated_expiry_date ?? existing.estimated_expiry_date,
-      nextCategory,
-      nextCategoryTh,
-      itemId,
-      fridgeId,
-    )
+    .bind(...values, itemId, fridgeId)
     .run();
-  return true;
+  return (result.meta.changes ?? 0) > 0;
 }
 
 export async function deleteInventoryItem(
@@ -355,9 +351,7 @@ export async function deleteInventoryItem(
   if (!row) return false;
 
   const key = inventoryPhotoKey(row.image_storage_path, fridgeId);
-  if (key) {
-    await deletePrivatePhoto(photos, key);
-  }
+  if (key) await retireUnreferencedPhoto(db, photos, key);
   return true;
 }
 

@@ -121,6 +121,7 @@ export async function createFridge(
   ownerEmail: string,
   name: string,
   nowS: number,
+  budgetOwnerId?: string,
 ): Promise<{ id: string; name: string; role: MemberRole }> {
   const id = generateFridgeId(name);
   const gatewayToken = generateGatewayToken();
@@ -128,8 +129,10 @@ export async function createFridge(
 
   await db.batch([
     db
-      .prepare("INSERT INTO fridges (id, name, created_at_s) VALUES (?, ?, ?)")
-      .bind(id, name, nowS),
+      .prepare(
+        "INSERT INTO fridges (id, name, created_at_s, ai_budget_owner) VALUES (?, ?, ?, ?)",
+      )
+      .bind(id, name, nowS, budgetOwnerId ?? ownerEmail),
     db
       .prepare(
         "INSERT INTO fridge_members (fridge_id, email, role, added_at_s) VALUES (?, ?, 'owner', ?)",
@@ -260,56 +263,56 @@ export async function upsertFridgeMember(
   email: string,
   role: MemberRole,
   nowS: number,
-): Promise<"ok" | "last_owner"> {
-  if (role === "member") {
-    const owners = await db
-      .prepare(
-        "SELECT email FROM fridge_members WHERE fridge_id = ? AND role = 'owner'",
-      )
-      .bind(fridgeId)
-      .all<{ email: string }>();
-    if (owners.results.length === 1 && owners.results[0]?.email === email) {
-      return "last_owner";
-    }
-  }
-
-  await db
+  actorEmail: string,
+): Promise<"ok" | "last_owner" | "forbidden"> {
+  const result = await db
     .prepare(
       `INSERT INTO fridge_members (fridge_id, email, role, added_at_s)
-       VALUES (?, ?, ?, ?)
-       ON CONFLICT(fridge_id, email) DO UPDATE SET role = excluded.role`,
+    SELECT ?, ?, ?, ? WHERE EXISTS (SELECT 1 FROM fridge_members WHERE fridge_id = ? AND email = ? AND role = 'owner')
+    AND (? = 'owner' OR NOT EXISTS (SELECT 1 FROM fridge_members WHERE fridge_id = ? AND email = ? AND role = 'owner')
+      OR EXISTS (SELECT 1 FROM fridge_members WHERE fridge_id = ? AND email != ? AND role = 'owner'))
+    ON CONFLICT(fridge_id, email) DO UPDATE SET role = excluded.role`,
     )
-    .bind(fridgeId, email, role, nowS)
+    .bind(
+      fridgeId,
+      email,
+      role,
+      nowS,
+      fridgeId,
+      actorEmail,
+      role,
+      fridgeId,
+      email,
+      fridgeId,
+      email,
+    )
     .run();
-
-  return "ok";
+  if (result.meta.changes) return "ok";
+  return (await getMemberRole(db, fridgeId, actorEmail)) === "owner"
+    ? "last_owner"
+    : "forbidden";
 }
 
 export async function removeFridgeMember(
   db: D1Database,
   fridgeId: string,
   email: string,
-): Promise<"deleted" | "not_found" | "last_owner"> {
-  const target = await getMemberRole(db, fridgeId, email);
-  if (!target) return "not_found";
-
-  if (target === "owner") {
-    const owners = await db
-      .prepare(
-        "SELECT COUNT(*) AS count FROM fridge_members WHERE fridge_id = ? AND role = 'owner'",
-      )
-      .bind(fridgeId)
-      .first<{ count: number }>();
-    if ((owners?.count ?? 0) <= 1) {
-      return "last_owner";
-    }
-  }
-
-  await db
-    .prepare("DELETE FROM fridge_members WHERE fridge_id = ? AND email = ?")
-    .bind(fridgeId, email)
+  actorEmail: string,
+): Promise<"deleted" | "not_found" | "last_owner" | "forbidden"> {
+  const result = await db
+    .prepare(
+      `DELETE FROM fridge_members WHERE fridge_id = ? AND email = ?
+    AND EXISTS (SELECT 1 FROM fridge_members WHERE fridge_id = ? AND email = ? AND role = 'owner')
+    AND (role != 'owner' OR EXISTS (SELECT 1 FROM fridge_members WHERE fridge_id = ? AND email != ? AND role = 'owner'))`,
+    )
+    .bind(fridgeId, email, fridgeId, actorEmail, fridgeId, email)
     .run();
-  return "deleted";
+  if (result.meta.changes) return "deleted";
+  if ((await getMemberRole(db, fridgeId, actorEmail)) !== "owner")
+    return "forbidden";
+  return (await getMemberRole(db, fridgeId, email))
+    ? "last_owner"
+    : "not_found";
 }
 
 export async function deleteFridge(

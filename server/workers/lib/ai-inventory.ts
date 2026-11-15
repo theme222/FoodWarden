@@ -70,7 +70,34 @@ export async function parseMultipartJpeg(
 > {
   let formData: FormData;
   try {
-    formData = await request.formData();
+    const maxBodyBytes = MAX_CHECKIN_JPEG_BYTES + 64 * 1024;
+    const reader = request.body?.getReader();
+    if (!reader) return { kind: "invalid" };
+    const chunks: Uint8Array[] = [];
+    let size = 0;
+    try {
+      while (true) {
+        const part = await reader.read();
+        if (part.done) break;
+        size += part.value.byteLength;
+        if (size > maxBodyBytes) {
+          await reader.cancel();
+          return { kind: "too_large" };
+        }
+        chunks.push(part.value);
+      }
+    } finally {
+      reader.releaseLock();
+    }
+    const bytes = new Uint8Array(size);
+    let offset = 0;
+    for (const chunk of chunks) {
+      bytes.set(chunk, offset);
+      offset += chunk.byteLength;
+    }
+    formData = await new Response(bytes, {
+      headers: { "Content-Type": request.headers.get("Content-Type") ?? "" },
+    }).formData();
   } catch {
     return { kind: "invalid" };
   }

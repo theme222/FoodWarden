@@ -95,60 +95,69 @@ export async function ingestStatus(
   report: StatusReport,
   receivedS: number,
 ): Promise<IngestStatusResult> {
-  const existing = await db
-    .prepare(
-      "SELECT gateway_seen_s, nodes_json FROM system_status WHERE fridge_id = ?",
-    )
-    .bind(fridgeId)
-    .first<{ gateway_seen_s: number; nodes_json: string }>();
-
-  if (existing && existing.gateway_seen_s >= report.gatewaySeenS) {
-    return { updatedCount: 0, status: null };
-  }
-
-  const previous = readLastKnown(existing?.nodes_json);
-  const storedNodes: StoredNodeStatus[] = report.nodes.map((node) => {
-    const lastKnown = previous.get(node.node_id);
-    return {
-      ...node,
-      last_known_seen_s:
-        node.last_seen_s === null
-          ? (lastKnown ?? null)
-          : Math.max(node.last_seen_s, lastKnown ?? node.last_seen_s),
-    };
-  });
-
-  const nodesJson = JSON.stringify(storedNodes);
-  const [upsertResult] = await db.batch([
-    db
+  for (let attempt = 0; attempt < 8; attempt++) {
+    const existing = await db
       .prepare(
-        `INSERT INTO system_status (fridge_id, gateway_seen_s, received_s, nodes_json)
+        "SELECT gateway_seen_s, nodes_json FROM system_status WHERE fridge_id = ?",
+      )
+      .bind(fridgeId)
+      .first<{ gateway_seen_s: number; nodes_json: string }>();
+
+    if (existing && existing.gateway_seen_s >= report.gatewaySeenS) {
+      return { updatedCount: 0, status: null };
+    }
+
+    const previous = readLastKnown(existing?.nodes_json);
+    const storedNodes: StoredNodeStatus[] = report.nodes.map((node) => {
+      const lastKnown = previous.get(node.node_id);
+      return {
+        ...node,
+        last_known_seen_s:
+          node.last_seen_s === null
+            ? (lastKnown ?? null)
+            : Math.max(node.last_seen_s, lastKnown ?? node.last_seen_s),
+      };
+    });
+
+    const nodesJson = JSON.stringify(storedNodes);
+    const [upsertResult] = await db.batch([
+      db
+        .prepare(
+          `INSERT INTO system_status (fridge_id, gateway_seen_s, received_s, nodes_json)
          VALUES (?, ?, ?, ?)
          ON CONFLICT(fridge_id) DO UPDATE SET
            gateway_seen_s = excluded.gateway_seen_s,
            received_s = excluded.received_s,
            nodes_json = excluded.nodes_json
-         WHERE excluded.gateway_seen_s > system_status.gateway_seen_s`,
-      )
-      .bind(fridgeId, report.gatewaySeenS, receivedS, nodesJson),
-    db
-      .prepare(
-        "UPDATE fridges SET last_seen_s = MAX(last_seen_s, ?) WHERE id = ?",
-      )
-      .bind(receivedS, fridgeId),
-  ]);
+         WHERE excluded.gateway_seen_s > system_status.gateway_seen_s
+           AND system_status.gateway_seen_s IS ? AND system_status.nodes_json IS ?`,
+        )
+        .bind(
+          fridgeId,
+          report.gatewaySeenS,
+          receivedS,
+          nodesJson,
+          existing?.gateway_seen_s ?? null,
+          existing?.nodes_json ?? null,
+        ),
+      db
+        .prepare(
+          "UPDATE fridges SET last_seen_s = MAX(last_seen_s, ?) WHERE id = ?",
+        )
+        .bind(receivedS, fridgeId),
+    ]);
 
-  const changes = upsertResult?.meta.changes ?? 0;
-  if (changes <= 0) {
-    return { updatedCount: 0, status: null };
+    const changes = upsertResult?.meta.changes ?? 0;
+    if (changes <= 0) continue;
+
+    return {
+      updatedCount: storedNodes.length,
+      status: {
+        gateway_seen_s: report.gatewaySeenS,
+        received_s: receivedS,
+        nodes: storedNodes,
+      },
+    };
   }
-
-  return {
-    updatedCount: storedNodes.length,
-    status: {
-      gateway_seen_s: report.gatewaySeenS,
-      received_s: receivedS,
-      nodes: storedNodes,
-    },
-  };
+  throw new Error("Concurrent status update; retry the report.");
 }

@@ -1,3 +1,4 @@
+import { retireUnreferencedPhoto } from "./storage";
 import type { AppBindings } from "../types";
 import type { DoorEvent, DoorEventStatus } from "./door-events";
 import { addDaysToIsoDate, bangkokIsoDate } from "./gemini";
@@ -75,10 +76,11 @@ async function sendLinePush(
   env: AppBindings,
   targetId: string,
   messages: LineTextMessage[],
-): Promise<boolean> {
+  retryKey: string,
+): Promise<"accepted" | "retry" | "rejected"> {
   const token = env.LINE_CHANNEL_ACCESS_TOKEN?.trim();
   const to = targetId.trim();
-  if (!token || !to || messages.length === 0) return false;
+  if (!token || !to || messages.length === 0) return "retry";
 
   const baseUrl = (
     env.LINE_API_BASE_URL?.trim() || DEFAULT_LINE_BASE_URL
@@ -89,7 +91,9 @@ async function sendLinePush(
       headers: {
         "Content-Type": "application/json",
         Authorization: `Bearer ${token}`,
+        "X-Line-Retry-Key": retryKey,
       },
+      signal: AbortSignal.timeout(10_000),
       body: JSON.stringify({
         to,
         messages: messages.slice(0, 5).map((msg) => ({
@@ -98,11 +102,18 @@ async function sendLinePush(
         })),
       }),
     });
-    const ok = response.ok;
+    const ok =
+      response.ok ||
+      (response.status === 409 &&
+        response.headers.has("x-line-accepted-request-id"));
     await response.body?.cancel();
-    return ok;
+    return ok
+      ? "accepted"
+      : response.status >= 500 || response.status === 429
+        ? "retry"
+        : "rejected";
   } catch {
-    return false;
+    return "retry";
   }
 }
 
@@ -142,18 +153,18 @@ export async function maybeSendDoorSafetyAlerts(
     const meta = DOOR_ALERT_META[event.status];
     if (!meta) continue;
 
-    const acquired = await tryAcquireAlertCooldown(
-      env.DB,
+    const sent = await queueLineAlert(
+      env,
       fridgeId,
       meta.alertType,
+      config.line_target_id,
+      [{ type: "text", text: meta.message(config.name, event.node_id) }],
       nowS,
       DOOR_ALERT_COOLDOWN_S,
+      criticalEvents
+        .filter((e) => e.status === event.status)
+        .map((e) => JSON.stringify([e.node_id, e.timestamp_s, e.status])),
     );
-    if (!acquired) continue;
-
-    const sent = await sendLinePush(env, config.line_target_id, [
-      { type: "text", text: meta.message(config.name, event.node_id) },
-    ]);
     if (sent) sentCount += 1;
   }
 
@@ -205,23 +216,27 @@ export async function maybeSendTelemetryAlerts(
 
   let sentCount = 0;
   for (const alert of pending) {
-    const acquired = await tryAcquireAlertCooldown(
-      env.DB,
-      fridgeId,
-      alert.alertType,
-      nowS,
-      TELEMETRY_ALERT_COOLDOWN_S,
-    );
-    if (!acquired) continue;
-
     const text =
       alert.alertType === "voc_high"
         ? `🚨 [${config.name}] High VOC spoilage index detected (${maxVoc}). Please inspect fridge contents.\nตรวจพบค่าก๊าซ VOC สูงผิดปกติ (${maxVoc}) อาจมีอาหารเริ่มเน่าเสีย กรุณาตรวจสอบภายในตู้เย็น`
         : `🌡️ [${config.name}] High fridge temperature detected (${maxTemp!.toFixed(1)}°C > 8.0°C). Check door seal & cooling.\nอุณหภูมิในตู้เย็นสูงเกินเกณฑ์ปลอดภัย (${maxTemp!.toFixed(1)}°C) กรุณาตรวจสอบการปิดประตูและระบบทำความเย็น`;
 
-    const sent = await sendLinePush(env, config.line_target_id, [
-      { type: "text", text },
-    ]);
+    const sent = await queueLineAlert(
+      env,
+      fridgeId,
+      alert.alertType,
+      config.line_target_id,
+      [{ type: "text", text }],
+      nowS,
+      TELEMETRY_ALERT_COOLDOWN_S,
+      samples
+        .filter((sample) =>
+          alert.alertType === "voc_high"
+            ? sample.voc_index !== null && sample.voc_index >= 250
+            : sample.temp_celsius !== null && sample.temp_celsius > 8,
+        )
+        .map((sample) => JSON.stringify([sample.node_id, sample.timestamp_s])),
+    );
     if (sent) sentCount += 1;
   }
 
@@ -268,8 +283,9 @@ async function cleanupOrphanedFoodCrops(
   let deletedCount = 0;
   for (let i = 0; i < staleKeys.length; i += 1000) {
     const batch = staleKeys.slice(i, i + 1000);
-    await photos.delete(batch);
-    deletedCount += batch.length;
+    for (const key of batch) {
+      if (await retireUnreferencedPhoto(db, photos, key)) deletedCount++;
+    }
   }
   return deletedCount;
 }
@@ -308,15 +324,6 @@ async function dispatchDailyExpiryDigests(
 
     if (items.length === 0) continue;
 
-    const acquired = await tryAcquireAlertCooldown(
-      env.DB,
-      fridge.id,
-      "daily_expiry_digest",
-      nowS,
-      DAILY_DIGEST_COOLDOWN_S,
-    );
-    if (!acquired) continue;
-
     const lines = items.slice(0, 10).map((item) => {
       const status =
         item.estimated_expiry_date < today
@@ -343,9 +350,16 @@ async function dispatchDailyExpiryDigests(
       ...lines,
     ].join("\n");
 
-    const sent = await sendLinePush(env, fridge.line_target_id, [
-      { type: "text", text: message },
-    ]);
+    const sent = await queueLineAlert(
+      env,
+      fridge.id,
+      "daily_expiry_digest",
+      fridge.line_target_id,
+      [{ type: "text", text: message }],
+      nowS,
+      DAILY_DIGEST_COOLDOWN_S,
+      [today],
+    );
     if (sent) sentFridges += 1;
   }
 
@@ -365,4 +379,132 @@ export async function runDailyCronTasks(
     deletedCrops: cropOutcome.status === "fulfilled" ? cropOutcome.value : 0,
     digestsSent: digestOutcome.status === "fulfilled" ? digestOutcome.value : 0,
   };
+}
+
+async function queueLineAlert(
+  env: AppBindings,
+  fridgeId: string,
+  alertType: string,
+  targetId: string,
+  messages: LineTextMessage[],
+  nowS: number,
+  cooldownS: number,
+  eventKeys: string[],
+): Promise<boolean> {
+  const id = crypto.randomUUID();
+  const [insert] = await env.DB.batch([
+    env.DB.prepare(
+      `INSERT INTO line_outbox (id, fridge_id, alert_type, target_id, messages_json, created_s, next_attempt_s)
+      SELECT ?, ?, ?, ?, ?, ?, ? WHERE NOT EXISTS
+      (SELECT 1 FROM alert_cooldowns WHERE fridge_id = ? AND alert_type = ? AND ? - last_sent_s < ?)
+      AND NOT EXISTS (SELECT 1 FROM line_outbox WHERE fridge_id = ? AND alert_type = ? AND failed = 0)
+      AND EXISTS (SELECT 1 FROM json_each(?) e WHERE NOT EXISTS (SELECT 1 FROM line_alert_events WHERE fridge_id = ? AND alert_type = ? AND event_key = e.value))`,
+    ).bind(
+      id,
+      fridgeId,
+      alertType,
+      targetId,
+      JSON.stringify(messages),
+      nowS,
+      nowS,
+      fridgeId,
+      alertType,
+      nowS,
+      cooldownS,
+      fridgeId,
+      alertType,
+      JSON.stringify(eventKeys),
+      fridgeId,
+      alertType,
+    ),
+    env.DB.prepare(
+      `INSERT INTO alert_cooldowns(fridge_id, alert_type, last_sent_s)
+      SELECT ?, ?, ? WHERE EXISTS (SELECT 1 FROM line_outbox WHERE id = ?)
+      ON CONFLICT(fridge_id, alert_type) DO UPDATE SET last_sent_s = excluded.last_sent_s`,
+    ).bind(fridgeId, alertType, nowS, id),
+    env.DB.prepare(
+      "INSERT INTO line_alert_events (fridge_id, alert_type, event_key) SELECT ?, ?, value FROM json_each(?) WHERE true ON CONFLICT DO NOTHING",
+    ).bind(fridgeId, alertType, JSON.stringify(eventKeys)),
+  ]);
+  if (!insert?.meta.changes) return false;
+  return (await dispatchLineOutbox(env, nowS, id)) > 0;
+}
+
+export async function dispatchLineOutbox(
+  env: AppBindings,
+  nowS: number,
+  onlyId?: string,
+): Promise<number> {
+  if (!env.LINE_CHANNEL_ACCESS_TOKEN?.trim()) return 0;
+  const { results: pending } = await env.DB.prepare(
+    "SELECT id FROM line_outbox WHERE failed = 0 AND next_attempt_s <= ? AND lease_until_s <= ? AND (? IS NULL OR id = ?) ORDER BY next_attempt_s LIMIT 50",
+  )
+    .bind(nowS, nowS, onlyId ?? null, onlyId ?? null)
+    .all<{ id: string }>();
+  let sent = 0;
+  for (const { id } of pending) {
+    const lease = crypto.randomUUID();
+    const row = await env.DB.prepare(
+      "UPDATE line_outbox SET lease_until_s = ?, lease_token = ?, attempts = attempts + 1 WHERE id = ? AND failed = 0 AND lease_until_s <= ? AND next_attempt_s <= ? RETURNING target_id, messages_json, attempts, created_s",
+    )
+      .bind(nowS + 30, lease, id, nowS, nowS)
+      .first<{
+        target_id: string;
+        messages_json: string;
+        attempts: number;
+        created_s: number;
+      }>();
+    if (!row) continue;
+    // LINE retry keys expire at 24h. Retain expired attempts for inspection, never resend ambiguously accepted messages after expiry.
+    if (nowS - row.created_s >= 23 * 3600) {
+      await env.DB.prepare(
+        "UPDATE line_outbox SET failed = 1, lease_until_s = 0 WHERE id = ? AND lease_token = ?",
+      )
+        .bind(id, lease)
+        .run();
+      continue;
+    }
+    const current = await env.DB.prepare(
+      "SELECT line_target_id FROM fridges WHERE id = (SELECT fridge_id FROM line_outbox WHERE id = ?)",
+    )
+      .bind(id)
+      .first<{ line_target_id: string | null }>();
+    if (current?.line_target_id?.trim() !== row.target_id.trim()) {
+      await env.DB.prepare(
+        "UPDATE line_outbox SET failed = 1, lease_until_s = 0 WHERE id = ? AND lease_token = ?",
+      )
+        .bind(id, lease)
+        .run();
+      continue;
+    }
+    const ok = await sendLinePush(
+      env,
+      row.target_id,
+      JSON.parse(row.messages_json) as LineTextMessage[],
+      id,
+    );
+    if (ok === "accepted") {
+      await env.DB.prepare(
+        "DELETE FROM line_outbox WHERE id = ? AND lease_token = ?",
+      )
+        .bind(id, lease)
+        .run();
+      sent++;
+    } else if (ok === "rejected") {
+      await env.DB.prepare(
+        "UPDATE line_outbox SET failed = 1, lease_until_s = 0 WHERE id = ? AND lease_token = ?",
+      )
+        .bind(id, lease)
+        .run();
+    } else {
+      const next =
+        nowS + Math.min(3600, 30 * 2 ** Math.min(row.attempts - 1, 7));
+      await env.DB.prepare(
+        "UPDATE line_outbox SET lease_until_s = 0, next_attempt_s = ? WHERE id = ? AND lease_token = ?",
+      )
+        .bind(next, id, lease)
+        .run();
+    }
+  }
+  return sent;
 }

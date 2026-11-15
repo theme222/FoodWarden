@@ -574,7 +574,11 @@ route(
       "Uses Gemini and stages a private R2 photo. Does not create an inventory row. Returns 422 for non-food or confidence below 0.60; 503 when AI is unavailable.",
     responses: {
       "200": response("Review this draft before committing", ref("CheckIn")),
-      "413": response("Image too large", ref("Error")),
+      "413": response("Image or multipart body too large", ref("Error")),
+      "429": response(
+        "AI request quota reached; Retry-After indicates a minimum delay, not a guarantee of available daily quota.",
+        ref("Error"),
+      ),
       "422": response("Unidentifiable food", ref("Error")),
       "503": response("AI unavailable", ref("Error")),
     },
@@ -628,7 +632,11 @@ route(
           reasoning: text,
         }),
       ),
-      "413": response("Image too large", ref("Error")),
+      "413": response("Image or multipart body too large", ref("Error")),
+      "429": response(
+        "AI request quota reached; Retry-After indicates a minimum delay, not a guarantee of available daily quota.",
+        ref("Error"),
+      ),
       "503": response("AI unavailable", ref("Error")),
     },
   },
