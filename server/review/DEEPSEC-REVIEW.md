@@ -1,5 +1,7 @@
 # Deepsec AI review — FoodWarden server
 
+Historical baseline only. For the current post-feature audit and rechecked remediation status, see [DEEPSEC-CURRENT-REVIEW.md](DEEPSEC-CURRENT-REVIEW.md).
+
 Date: 2026-11-15. Reviewed source commit: `4e81004bcd167fb79902bf6ce7a16b961c5f8b79`.
 
 ## Result and scope

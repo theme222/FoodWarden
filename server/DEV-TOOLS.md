@@ -97,3 +97,7 @@ The native Windows child sandbox also blocked source reads. A subsequent static-
 ## React Doctor source scope
 
 [doctor.config.json](doctor.config.json) excludes ignored local diagnostic workspaces (`.reports/`, `.deepsec/`), generated `dist/` output and the original user-supplied HTML design reference. These are not application source entries; `.reports/deploy-preview` is a Wrangler Worker dry-run bundle, not a browser asset. No React Doctor rules are disabled for `src/` or `workers/`. The unchanged photo preprocessing helper revokes its object URL in `finally`; treat a missing-revoke diagnostic there as a false positive rather than removing the cleanup. Sequential database leases and ordered webhook processing also require individual review before parallelizing loops.
+
+## Current Deepsec audit
+
+The [current Thai review](review/DEEPSEC-CURRENT-REVIEW.md) records the fresh `server-current-0d15b5c` audit: 59 completed direct AI file reviews, source hashes for 65 context files, and local validation evidence. Raw output remains in `.deepsec/data/server-current-0d15b5c/`; the earlier `server` project remains historical. `process` exits 1 when direct review produces findings even if all batches complete. Review coverage/errors/skips before treating an exit status as a tool failure. This audit did not remediate application findings or deploy code.
