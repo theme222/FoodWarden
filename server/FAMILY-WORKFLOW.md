@@ -62,9 +62,7 @@ Webhook ตรวจ HMAC-SHA256 บน request body เดิมก่อนอ
 
 ## Migration และสถานะ rollout
 
-เพิ่ม [0003_line_pairing_and_prefs.sql](migrations/0003_line_pairing_and_prefs.sql) ต่อจาก [0002_security_and_delivery.sql](migrations/0002_security_and_delivery.sql) ต้อง apply ทั้งสองก่อน deploy โค้ดชุดนี้ ฐานข้อมูลใหม่ต้องเริ่มจาก migration 0001 ตามลำดับ
-
-รอบนี้ยังไม่ได้ apply migration บน production, deploy Worker หรือส่ง LINE จริง ดูขั้นตอนใน [PRODUCTION.md](PRODUCTION.md) การทดสอบ Worker ใช้ D1 จำลองและ mock LINE API ส่วน UI ใช้ DOM tests จึงยังต้องตรวจ Google sign-in, webhook จริง และการแสดงผลในเบราว์เซอร์ก่อนประกาศใช้งานจริง
+เพิ่ม [0002_security_and_delivery.sql](migrations/0002_security_and_delivery.sql), [0003_line_pairing_and_prefs.sql](migrations/0003_line_pairing_and_prefs.sql) และ [0004_operation_receipts.sql](migrations/0004_operation_receipts.sql) โดย apply ครบทั้งหมดบน remote D1 (`foodwarden-db`) และ deploy Worker ขึ้น `https://foodwarden.newisnooby.workers.dev` เรียบร้อยแล้ว ดูรายละเอียดเพิ่มเติมใน [PRODUCTION.md](PRODUCTION.md) การทดสอบอัตโนมัติใช้ D1 จำลอง, mock LINE API และ DOM tests ส่วนบนระบบจริงผ่านการตรวจ Google sign-in, LINE pairing, และหน้าซ่อน Gateway Simulator (`/fridges/:fridgeId/sim` หรือ `?sim=1`) บนเบราว์เซอร์แล้ว เหลือเพียงทดสอบเชื่อมต่อกับบอร์ด Raspberry Pi และ ESP32 จริง
 
 ```bash
 bun install --frozen-lockfile

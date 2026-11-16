@@ -28,6 +28,4 @@ See the Thai [family workflow](../FAMILY-WORKFLOW.md) for user and operator inst
 
 DOM tests do not establish visual fidelity on physical phones. No browser screenshot comparison was performed in this pass. LINE HTTP calls were mocked; no real LINE messages were sent. Google OAuth was not exercised against the live provider. The historical Deepsec report was not rerun for this feature.
 
-Migrations [0002](../migrations/0002_security_and_delivery.sql) and [0003](../migrations/0003_line_pairing_and_prefs.sql) remain unapplied remotely. The production Worker remains undeployed. Before release, follow [PRODUCTION.md](../PRODUCTION.md), configure the LINE webhook and bot group permissions, and verify real Google login, family memberships, LINE pairing/reconnection, private notifications and mobile layouts.
-
-Embedded code and shared cross-device contracts were not changed. Hardware firmware, real sensor calibration and motor fail-safe validation remain separate work.
+Remote D1 migrations `0001` through `0004` are now applied and the production Worker (including Deepsec hardening, fridge/account-disambiguated LINE notifications, and the hidden `/fridges/:fridgeId/sim` Gateway Data Simulator) is deployed at `https://foodwarden.newisnooby.workers.dev`. Live browser verification confirmed Google login, owner Settings/LINE pairing, and the styled standalone Simulator UI. Embedded firmware, real sensor calibration, motor fail-safe validation, and end-to-end hardware field testing (`Node 'F' -> Gateway 'C' -> Server 'S'`) remain separate hardware work.

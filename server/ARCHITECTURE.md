@@ -1,6 +1,6 @@
 # Server 'S' (Cloud Backend & Web Dashboard) — Software Architecture
 
-This document specifies the cloud infrastructure, runtime environment, third-party API integrations, database schema, and frontend software stack for **Server `'S'`** (`server/`), running on a **$0 Free-Tier Cloudflare Workers** architecture alongside the **Vite + React** web application.
+This document specifies the cloud infrastructure, runtime environment, third-party API integrations, database schema, and frontend software stack for **Server `'S'`** (`server/`), running on a **0 USD Free-Tier Cloudflare Workers** architecture alongside the **Vite + React** web application.
 
 - **Related Documents:**
   - [`README.md`](README.md) — Setup, development, formatting, testing, and deployment commands
@@ -37,12 +37,14 @@ This document specifies the cloud infrastructure, runtime environment, third-par
          v                                                                           v
 +----------------------------------------------------------------------------------------------------------------------+
 |  Cloudflare Persistence & Realtime Edge State                                                                        |
-|  - D1 SQLite Database (`migrations/0001_init.sql`):                                                                  |
+|  - D1 SQLite Database (`migrations/0001_init.sql` .. `0004_operation_receipts.sql`):                                    |
 |      * user, session, account, verification       (Better Auth tables)                                               |
 |      * fridges, fridge_members, fridge_secrets    (Tenant registry, owner/member RBAC, gateway token hash, API keys) |
 |      * inventory                                  (FEFO bilingual grocery items; CAMERA or WEB_MANUAL)               |
-|      * telemetry_samples, door_events             (Deduplicated LM73/SGP40/LDR time series & actuator safety events)  |
+|      * inventory_operations, draft_operations     (Durable UUID v4 Idempotency-Key receipts & uncertain error state) |
+|      * telemetry_samples, door_events             (Deduplicated sensor time series & actuator safety events)          |
 |      * system_status, alert_cooldowns             (Node heartbeat state & atomic LINE cooldown deduplication)        |
+|      * line_pairing_codes, line_outbox, user_line_profiles, user_favorites, user_line_outbox                         |
 |  - Private R2 Bucket (`PHOTOS`):                                                                                     |
 |      * food_crops/{fridgeId}/{crop_or_hash}.jpg   (Served strictly to fridge members via cookie-authorized Worker)   |
 |  - SQLite-Backed Durable Object (`FridgeRoom`):                                                                      |
@@ -55,19 +57,19 @@ This document specifies the cloud infrastructure, runtime environment, third-par
 
 ## 2. Software & Tech Stack Architecture
 
-| Component / Layer                       | Specific Technology / Package                                 | Role in FoodWarden                                                                                                                                                                    |
-| --------------------------------------- | ------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| **Package Manager & Test Runner**       | **Bun (`bun`)** + **Vitest**                                  | Fast dependency management, frontend unit testing (`bun test src`), formatting, builds, and Miniflare Worker testing (`@cloudflare/vitest-plugin`).                                   |
-| **Language**                            | **TypeScript (`strict: true`)**                               | Strict static typing across [`workers/`](workers/index.ts), D1 query models, and [`src/`](src/main.tsx) with zero `any`.                                                              |
-| **Frontend Framework & Build Tool**     | **Vite 7 + React 19 + React Router 7**                        | Compiles the mobile-first SPA bundle to `dist/`, served directly by Cloudflare Workers Static Assets (`run_worker_first: ["/api/*"]`).                                                |
-| **Edge API Runtime & Router**           | **Cloudflare Workers + Hono (`hono`)**                        | Handles gateway ingestion, AI check-in/out orchestration, member-scoped REST APIs, photo streaming, WebSocket upgrades, and Cron triggers.                                            |
-| **Relational Database**                 | **Cloudflare D1 (SQLite)**                                    | Stores Better Auth sessions, fridge RBAC, FEFO inventory, deduplicated telemetry/door events, node heartbeats, and alert cooldowns (`migrations/0001_init.sql`).                      |
-| **Private Object Storage**              | **Cloudflare R2 (`PHOTOS`)**                                  | Stores cropped grocery JPEGs under `food_crops/{fridgeId}/...` with no public bucket access; Worker enforces membership before streaming bytes.                                       |
-| **Realtime Push**                       | **Durable Objects (`FridgeRoom` with WebSocket Hibernation)** | One SQLite-backed DO instance per fridge accepts hibernatable WebSockets, auto-responds `ping` → `pong`, and broadcasts updates immediately after D1 commits.                         |
-| **Authentication & Sessions**           | **Better Auth (`better-auth`) on D1 + Google OAuth 2.0**      | Authenticates users with Google OAuth (plus `APP_ENV=development` local dev bypass) using signed `HttpOnly` SameSite cookies (`session`).                                             |
-| **Multimodal AI (Entity `'G'`)**        | **Gemini 3.5 Flash Lite REST API**                            | Structured `application/json` vision classification and context-enriched check-out matching (`gemini-2.5-flash-lite` fallback + 429/503 retries per [`SBG.md`](../interface/SBG.md)). |
-| **Notification Service (Entity `'L'`)** | **LINE Messaging API v2 (`POST /v2/bot/message/push`)**       | Dispatches bilingual Thai/English door safety, high VOC/temp, and daily FEFO expiry digest push messages backed by atomic D1 cooldown deduplication.                                  |
-| **Scheduled Jobs**                      | **Cloudflare Workers Cron Triggers (`0 1 * * *`)**            | Runs daily at 08:00 Asia/Bangkok (`01:00 UTC`) to send FEFO expiry digests and clean up unreferenced R2 `food_crops/` objects older than 24 hours.                                    |
+| Component / Layer                       | Specific Technology / Package                                    | Role in FoodWarden                                                                                                                                                                                                 |
+| --------------------------------------- | ---------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| **Package Manager & Test Runner**       | **Bun (`bun`)** + **Vitest**                                     | Fast dependency management, frontend unit testing (`bun test src`), formatting, builds, and Miniflare Worker testing (`@cloudflare/vitest-plugin`).                                                                |
+| **Language**                            | **TypeScript (`strict: true`)**                                  | Strict static typing across [`workers/`](workers/index.ts), D1 query models, and [`src/`](src/main.tsx) with zero `any`.                                                                                           |
+| **Frontend Framework & Build Tool**     | **Vite 7 + React 19 + React Router 7**                           | Compiles the mobile-first SPA bundle to `dist/`, served directly by Cloudflare Workers Static Assets (`run_worker_first: ["/api/*"]`).                                                                             |
+| **Edge API Runtime & Router**           | **Cloudflare Workers + Hono (`hono`)**                           | Handles gateway ingestion, AI check-in/out orchestration, member-scoped REST APIs, photo streaming, WebSocket upgrades, and Cron triggers.                                                                         |
+| **Relational Database**                 | **Cloudflare D1 (SQLite)**                                       | Stores Better Auth sessions, fridge RBAC, FEFO inventory, UUID v4 idempotency receipts, AI quotas, LINE pairing/outboxes, personal preferences, and deduplicated telemetry/door events (`migrations/0001`–`0004`). |
+| **Private Object Storage**              | **Cloudflare R2 (`PHOTOS`)**                                     | Stores cropped grocery JPEGs under `food_crops/{fridgeId}/...` with no public bucket access; Worker enforces membership before streaming bytes.                                                                    |
+| **Realtime Push**                       | **Durable Objects (`FridgeRoom` with WebSocket Hibernation)**    | One SQLite-backed DO instance per fridge accepts hibernatable WebSockets, auto-responds `ping` → `pong`, and broadcasts updates immediately after D1 commits.                                                      |
+| **Authentication & Sessions**           | **Better Auth (`better-auth`) on D1 + Google OAuth 2.0**         | Authenticates users with Google OAuth (plus `APP_ENV=development` local dev bypass) using signed `HttpOnly` SameSite cookies (`session`).                                                                          |
+| **Multimodal AI (Entity `'G'`)**        | **Gemini 3.5 Flash Lite REST API**                               | Structured `application/json` vision classification and context-enriched check-out matching (`gemini-2.5-flash-lite` fallback + 429/503 retries per [`SBG.md`](../interface/SBG.md)).                              |
+| **Notification Service (Entity `'L'`)** | **LINE Messaging API v2 (`POST /v2/bot/message/push`)**          | Dispatches bilingual family and personalized LINE push alerts, signed webhook pairing, and scheduled FEFO digests backed by durable outboxes and D1 cooldowns ([`SUL.md`](../interface/SUL.md)).                   |
+| **Scheduled Jobs**                      | **Cloudflare Workers Cron Triggers (`0 1 * * *` & `* * * * *`)** | Runs daily at 08:00 Asia/Bangkok (`01:00 UTC`) for family expiry digests + >24h orphan R2 cleanup, and every minute (`* * * * *`) for durable LINE outbox retries and personal morning digests.                    |
 
 ---
 
@@ -86,12 +88,14 @@ The web dashboard is a responsive Single Page Application designed for mobile an
     │
     ├── /fridges .................. Multi-fridge hub: lists accessible fridges (owner/member), create new fridge form
     │
+    ├── /me ....................... Personal LINE pairing & notification preferences across memberships
+    │
     └── /fridges/:fridgeId (Fridge Workspace: contextual navigation bar + live WebSocket pill)
         │
-        ├── /fridges/:fridgeId ................ Food Dashboard & Live Metrics
-        │                                       - Live environmental readings (LM73 temp, SGP40 VOC, LDR light)
-        │                                       - 1h / 24h / 7d / 30d historical charts
-        │                                       - FEFO-sorted active grocery inventory list with status badges
+        ├── /fridges/:fridgeId ................ Food Dashboard & Live Metrics (optional `?sim=1` redirects owner to `/sim`)
+        │                                       - Live environmental readings & FEFO-sorted grocery inventory with favorites
+        │
+        ├── /fridges/:fridgeId/charts ......... 1h / 24h / 7d / 30d multi-sensor telemetry charts & door event scrubbing
         │
         ├── /fridges/:fridgeId/food/add ....... Manual food check-in with bilingual mapping & optional JPEG crop upload
         │
@@ -99,12 +103,17 @@ The web dashboard is a responsive Single Page Application designed for mobile an
         │
         ├── /fridges/:fridgeId/devices ........ Gateway heartbeat tree (node last_seen_s vs last_known_seen_s) & door safety event timeline
         │
-        └── /fridges/:fridgeId/settings ....... Owner-only fridge configuration:
-                                                - Fridge rename & LINE target ID (`line_target_id`)
-                                                - Per-fridge Gemini API key update
-                                                - Permanent `GATEWAY_TOKEN` view/copy/rotate
-                                                - Member invite/role management & revocation (closes revoked sockets with 4003)
-                                                - Delete fridge (cleans up D1, R2, and closes active sockets with 4004)
+        ├── /fridges/:fridgeId/me ............. Account personal LINE connection & per-fridge favorite alerts
+        │
+        ├── /fridges/:fridgeId/settings ....... Owner-only fridge configuration:
+        │                                       - Fridge rename & verified 1-use Family LINE pairing / disconnect
+        │                                       - Per-fridge Gemini API key update
+        │                                       - Permanent `GATEWAY_TOKEN` view/copy/rotate
+        │                                       - Member invite/role management & revocation (closes revoked sockets with 4003)
+        │                                       - Delete fridge (cleans up D1, R2, and closes active sockets with 4004)
+        │
+        └── /fridges/:fridgeId/sim ............ Owner-only hidden Gateway Data Simulator (`/simulator` alias & `?sim=1`)
+                                                - Sends real Bearer-authenticated test payloads with optional `?bypass_cooldown=1`
 ```
 
 ### 3.2 Internationalization (i18n) Architecture
@@ -123,12 +132,12 @@ Users switch cleanly between **Thai (`th`)** and **English (`en`)** without relo
 
 All gateway routes authenticate Node `'C'` by hashing the Bearer token with SHA-256 and matching `fridge_secrets.gateway_token_hash`:
 
-- **`POST /api/inventory/checkin/draft`**: Accepts `multipart/form-data` JPEG (`image`, max 5 MB), calls Gemini `CHECK_IN`, rejects `is_food === false` or `confidence < 0.60` with `422 UNIDENTIFIABLE` (zero R2/D1 writes), uploads valid crops to R2 `food_crops/{fridgeId}/crop_{uuid}.jpg`, and deterministically computes `estimated_expiry_date`.
-- **`POST /api/inventory/checkin`**: Validates `CheckInCommitPayload` + tenant-scoped `image_storage_path`, inserts into D1 `inventory` (`check_in_source = 'CAMERA'`), broadcasts `inventory_changed` (`created`), and returns `201 Created`.
-- **`POST /api/inventory/checkout/draft`**: Accepts `multipart/form-data` JPEG (`image`, max 5 MB), fetches active D1 inventory, invokes Gemini `CHECK_OUT`, filters returned IDs against real D1 rows (anti-hallucination guard), deterministically sorts matches by **FEFO** (`estimated_expiry_date ASC, check_in_timestamp_s ASC`), and returns `EXACT_MATCH` / `AMBIGUOUS_MULTIPLE` / `NO_MATCH` (or `422 UNIDENTIFIABLE` when `< 0.60`) with zero mutations.
-- **`POST /api/inventory/checkout`**: Hard-deletes the confirmed `item_id` from D1 `inventory` and its photo from R2 `PHOTOS`, broadcasts `inventory_changed` (`deleted`), and returns `200 OK`.
-- **`POST /api/telemetry`**: Deduplicates samples by `(fridge_id, node_id, timestamp_s)`, updates `fridges.last_seen_s` and `last_telemetry_json` monotonically, broadcasts `telemetry` over `FridgeRoom`, and dispatches `voc_high` (`>= 250`) / `temp_high` (`> 8.0°C`) LINE push alerts (1800s cooldown).
-- **`POST /api/door_events`**: Deduplicates door events by `(fridge_id, node_id, timestamp_s, status)`, broadcasts `door_events` over `FridgeRoom`, and dispatches LINE alerts for `OBSTRUCTION_ERROR`, `TIMEOUT_ERROR`, `FAULT_LOCKOUT`, and `CONTRADICTION_ERROR` (300s cooldown).
+- **`POST /api/inventory/checkin/draft`**: Requires `Idempotency-Key` UUID v4. Accepts `multipart/form-data` JPEG (`image`, max 5 MB), calls Gemini `CHECK_IN`, rejects `is_food === false` or `confidence < 0.60` with `422 UNIDENTIFIABLE` (zero inventory writes), uploads valid crops to R2 `food_crops/{fridgeId}/crop_{uuid}.jpg`, and caches `draft_operations` receipt so retries reuse the same result.
+- **`POST /api/inventory/checkin`**: Requires `Idempotency-Key` UUID v4. Validates `CheckInCommitPayload` + tenant-scoped `image_storage_path`, atomically inserts D1 `inventory` (`check_in_source = 'CAMERA'`) + `inventory_operations` receipt, broadcasts `inventory_changed` (`created`), and returns `201 Created`.
+- **`POST /api/inventory/checkout/draft`**: Requires `Idempotency-Key` UUID v4. Accepts `multipart/form-data` JPEG (`image`, max 5 MB), fetches active D1 inventory, invokes Gemini `CHECK_OUT`, filters returned IDs against real D1 rows (anti-hallucination guard), deterministically sorts matches by **FEFO** (`estimated_expiry_date ASC, check_in_timestamp_s ASC`), and caches the `draft_operations` receipt with zero inventory mutations.
+- **`POST /api/inventory/checkout`**: Hard-deletes the confirmed `item_id` from D1 `inventory` and retires its photo from R2 `PHOTOS`, broadcasts `inventory_changed` (`deleted`), and returns `200 OK`.
+- **`POST /api/telemetry`**: Deduplicates samples by `(fridge_id, node_id, timestamp_s)`, enforces bounded event times, updates `fridges.last_seen_s` and `last_telemetry_json` monotonically, broadcasts `telemetry` over `FridgeRoom`, and dispatches `voc_high` (`>= 250`) / `temp_high` (`> 8.0°C`) LINE push alerts (1800s cooldown; optional `?bypass_cooldown=1` for simulator testing).
+- **`POST /api/door_events`**: Deduplicates door events by `(fridge_id, node_id, timestamp_s, status)`, broadcasts `door_events` over `FridgeRoom`, and dispatches LINE alerts for `OBSTRUCTION_ERROR`, `TIMEOUT_ERROR`, `FAULT_LOCKOUT`, and `CONTRADICTION_ERROR` (300s cooldown; optional `?bypass_cooldown=1` for simulator testing).
 - **`POST /api/status`**: Stores gateway/subnode heartbeats in `system_status`, retains `last_known_seen_s` when a node reports `null`, ignores stale out-of-order reports, and broadcasts `status` over `FridgeRoom`.
 
 ### 4.2 Dashboard Member & Owner Endpoints (Better Auth Cookie)

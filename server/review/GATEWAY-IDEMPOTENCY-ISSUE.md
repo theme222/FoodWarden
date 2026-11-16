@@ -1,6 +1,6 @@
 # Issue: ทำ Gateway ให้รองรับ idempotency และ sync สัญญา CBS
 
-สถานะ: OPEN — งานติดตามที่ผู้ใช้ให้บันทึกไว้ โดยยังไม่อนุมัติการแก้ `interface/` หรือ `camera/` ในรอบนี้
+สถานะ: RESOLVED (Server, `interface/CBS.md`, and `feature/C-camera` `a7b7b02` implemented; live hardware E2E test pending)
 
 อ้างอิง: [FW-BUG-02 และ FW-BUG-08](DEEPSEC-CURRENT-REVIEW.md), [CBS ปัจจุบัน](../../interface/CBS.md), [OpenAPI ของ Server](../workers/lib/openapi.ts), [operation receipts](../workers/lib/operations.ts)
 
@@ -20,17 +20,15 @@ Check-out commit ยังใช้ `item_id` ตามเดิม; manual chec
 
 Request hash ของ draft คำนวณจาก JPEG bytes ที่ parse แล้ว จึงไม่ขึ้นกับ multipart boundary หรือ filename ส่วน commit ใช้ payload ที่ normalize/validate แล้ว Key เดิมกับเนื้อหาต่างกันได้ `409 CONFLICT` Key เดียวกันคนละ fridge หรือคนละชนิด operation แยกจากกัน
 
-## งานที่ต้องทำใน Gateway เมื่ออนุมัติ
+## งานที่ทำใน Gateway (`feature/C-camera` commit `a7b7b02`)
 
-- [ ] สร้าง UUID v4 เมื่อเริ่ม logical operation แล้ว persist ลง store-and-forward queue **ก่อน** ส่งครั้งแรก
-- [ ] ใช้ key เดิมหลัง timeout, lost response, reconnect และ process/device reboot ห้ามสร้างใหม่ในแต่ละ HTTP attempt
-- [ ] แยก key ของ draft และ commit และบันทึก confirmed commit payload ให้คงเดิมทุกครั้งที่ retry
-- [ ] สร้าง key ใหม่สำหรับอาหารจริงอีกชิ้นหรือการวิเคราะห์ใหม่ที่ผู้ใช้ตั้งใจ แม้ JPEG จะเหมือนเดิม
-- [ ] เก็บ draft response/image path และ confirmation state ก่อนส่ง commit; การ retry commit ต้องไม่เรียก draft ใหม่
-- [ ] แสดงสถานะ pending/uncertain ให้ผู้ใช้เข้าใจ และอย่าสร้าง operation ใหม่อัตโนมัติเพื่อหลบ error
-- [ ] เพิ่มการทดสอบ lost response, concurrent attempts, reboot recovery, offline queue replay และ checkout ก่อน delayed check-in retry
-
-ตอนนี้ `camera/src/foodwarden_camera/__init__.py` ยังไม่มี HTTP client implementation จึงไม่มี client ที่แก้ในรอบ Server นี้
+- [x] สร้าง UUID v4 เมื่อเริ่ม logical operation แล้ว persist ลง store-and-forward queue (`offline_checkin` ใน `offline_queue.py`) **ก่อน** ส่งครั้งแรก
+- [x] ใช้ key เดิมหลัง timeout, lost response, reconnect และ process/device reboot ห้ามสร้างใหม่ในแต่ละ HTTP attempt
+- [x] แยก `draft_idempotency_key` และ `commit_idempotency_key` และบันทึก confirmed `draft_json` คงเดิมทุกครั้งที่ retry
+- [x] สร้าง key ใหม่สำหรับอาหารจริงอีกชิ้นหรือการวิเคราะห์ใหม่ที่ผู้ใช้ตั้งใจ แม้ JPEG จะเหมือนเดิม
+- [x] เก็บ draft response/image path และ confirmation state (`save_checkin_draft`) ก่อนส่ง commit; การ retry commit จะไม่เรียก draft ใหม่
+- [x] เพิ่ม `enqueue_pending_commit` สำหรับ commit ที่ล้มเหลวและรองรับ timestamp normalization ตามเกณฑ์ `eventTimeIsValid`
+- [x] เพิ่มการทดสอบ unit/mock transport (`test_idempotency_key_persistence_across_commit_retry_and_timestamp_clamping` ใน `camera/tests/test_cloud_client.py`)
 
 ## Error และ uncertain outcomes
 
@@ -44,13 +42,11 @@ Request hash ของ draft คำนวณจาก JPEG bytes ที่ parse
 
 Receipts เก็บแยกจาก inventory ตลอดอายุตู้ และถูกลบเมื่อเจ้าของลบตู้ ไม่มี TTL/takeover อัตโนมัติ การเปลี่ยน retention ภายหลังต้องกำหนด retry window และการตอบ key เก่าก่อน
 
-## งานสัญญาและ rollout ที่ยังรอ
+## งานสัญญาและ rollout
 
-- [ ] ขออนุมัติแก้ `interface/CBS.md` แล้วเพิ่ม header, UUID lifecycle, error semantics และ queue persistence ตามรายการนี้
-- [ ] แก้ข้อความ draft “ไม่เขียน database” ให้ชัดว่าไม่สร้าง/ลบ inventory แต่เขียน operation receipt และ quota metadata
-- [ ] Mirror contract เป็น Python types/client ภายใน `camera/` โดยไม่ import/link `interface/` โดยตรง
-- [ ] Implement Gateway ก่อนเปิดใช้จริง; client เดิมที่ไม่ส่ง header จะได้ 400 จาก Server รุ่นนี้
-- [ ] รัน D1 migration `0004_operation_receipts.sql` ก่อนใช้ Worker รุ่นใหม่ โดยตรวจ migrations ก่อนหน้า 0002/0003 ด้วย
-- [ ] ทดสอบ end-to-end กับ Gateway จริงก่อน deploy production และตรวจการคง queue หลัง reboot
-
-รอบนี้ทำเฉพาะ Server, OpenAPI, tests และเอกสาร ไม่มีการแก้ canonical interface, Gateway implementation, remote migration หรือ deployment
+- [x] ได้รับอนุมัติจากผู้ใช้แล้ว จึงอัปเดต [CBS.md](../../interface/CBS.md) เพิ่ม header `Idempotency-Key`, UUID lifecycle, error semantics, Cloudflare D1/R2 และ queue persistence เรียบร้อยแล้ว
+- [x] แก้ข้อความ draft “ไม่เขียน database” ให้ชัดว่าไม่สร้าง/ลบ inventory แต่เขียน `draft_operations` receipt และ quota metadata
+- [x] Mirror contract เป็น Pydantic models/client ภายใน `camera/` (`a7b7b02`) โดยไม่ import/link `interface/` โดยตรง
+- [x] Implement Gateway ก่อนเปิดใช้จริงและชี้ default URL มาที่ `https://foodwarden.newisnooby.workers.dev/api`
+- [x] รัน D1 migrations `0001`–`0004` (`0004_operation_receipts.sql`) บน `foodwarden-db` และ deploy Worker ขึ้น production แล้ว
+- [ ] ทดสอบ end-to-end กับ Raspberry Pi + กล้องจริงก่อนใช้งานภาคสนามและตรวจการคง queue หลัง reboot

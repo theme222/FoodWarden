@@ -6,11 +6,11 @@ Account: Newisnooby. No unrelated databases or buckets were changed.
 
 - D1: `foodwarden-db`, APAC, ID `5331bc4a-8ed9-4017-a7ae-f493e05434e6`.
 - R2: `foodwarden-photos`, Standard, private (no public access configured).
-- Migration: [0001_init.sql](migrations/0001_init.sql) applied remotely successfully.
-- Planned Worker origin: `https://foodwarden.newisnooby.workers.dev`.
+- Migrations: [0001_init.sql](migrations/0001_init.sql), [0002_security_and_delivery.sql](migrations/0002_security_and_delivery.sql), [0003_line_pairing_and_prefs.sql](migrations/0003_line_pairing_and_prefs.sql), and [0004_operation_receipts.sql](migrations/0004_operation_receipts.sql) are applied remotely on `foodwarden-db`.
+- Live Worker origin: `https://foodwarden.newisnooby.workers.dev` (deployed with `/api/health` returning `{"ok":true,"database":"ok"}`).
 - [wrangler.jsonc](wrangler.jsonc) uses production defaults and this canonical Better Auth URL. Local `.dev.vars` overrides remain development-only.
 
-The production Worker has not been deployed. A deployment dry run succeeded with real resource bindings. Resource provisioning alone does not make the app live or guarantee zero future cost; usage remains subject to each service's limits and billing.
+Resource provisioning and software deployment remain subject to each Cloudflare service's free-tier limits; end-to-end physical hardware testing (`Node 'F' -> Gateway 'C' -> Server 'S'`) remains field validation.
 
 ## Open review findings
 
@@ -52,7 +52,7 @@ The standard persisted Wrangler dev server encountered native SQLite file creati
 
 ## Remediation rollout requirements
 
-[0002_security_and_delivery.sql](migrations/0002_security_and_delivery.sql) is prepared locally and has not been applied remotely. Apply it before deploying this Worker revision. It backfills legacy fridge budget ownership and previously ingested LINE event identities, and adds AI reservations, LINE outbox/event records and photo-retirement guards. New app-created fridges charge the stable authenticated creator ID; changing members or deleting/recreating a fridge does not reset that creator's retained budget. Legacy fridges without any attributable owner fail AI admission until repaired.
+[0002_security_and_delivery.sql](migrations/0002_security_and_delivery.sql) and [0004_operation_receipts.sql](migrations/0004_operation_receipts.sql) are applied on remote `foodwarden-db`. They backfill legacy fridge budget ownership and previously ingested LINE event identities, and add AI reservations, LINE outbox/event records, photo-retirement guards, and UUID v4 `Idempotency-Key` operation receipts. New app-created fridges charge the stable authenticated creator ID; changing members or deleting/recreating a fridge does not reset that creator's retained budget. Legacy fridges without any attributable owner fail AI admission until repaired.
 
 AI admission defaults are rolling 24-hour budgets of 200 inference jobs globally and 50 per creator, 20 per fridge per minute, at most four concurrent global jobs and one per creator. Each job can make at most eight upstream attempts, each with a 15-second timeout; concurrency leases expire after five minutes if a Worker dies. Model output is bounded to 4,096 tokens. These are request/token bounds, not an exact currency spending guarantee. Quota failures return HTTP 429 with Retry-After; daily exhaustion can last longer than that minimum delay. All keys, including per-fridge keys, use these limits.
 
@@ -64,4 +64,4 @@ Photo deletion now retires an object atomically only after its last inventory re
 
 ## Family dashboard and LINE pairing rollout
 
-[0003_line_pairing_and_prefs.sql](migrations/0003_line_pairing_and_prefs.sql) adds per-account LINE profiles, one-use pairing codes, ordered webhook lifecycle records, private favorites and a separate personal notification outbox. It has not been applied remotely. Apply migrations 0002 and 0003 before deploying this revision. See [FAMILY-WORKFLOW.md](FAMILY-WORKFLOW.md) for owner/member setup, LINE console configuration, private versus family messages and remaining live verification. The minute cron now also queues personal morning summaries using Asia/Bangkok time. LINE integration tests use mocked upstream requests; no real LINE delivery is established by those tests.
+[0003_line_pairing_and_prefs.sql](migrations/0003_line_pairing_and_prefs.sql) adds per-account LINE profiles, one-use pairing codes, ordered webhook lifecycle records, private favorites and a separate personal notification outbox, and is applied on remote `foodwarden-db`. See [FAMILY-WORKFLOW.md](FAMILY-WORKFLOW.md) for owner/member setup, LINE console configuration, private versus family messages and remaining live hardware verification. The minute cron now also queues personal morning summaries using Asia/Bangkok time. Automated Worker tests mock upstream LINE calls; production LINE pairing and test pushes require verified LINE credentials on the live Worker.
