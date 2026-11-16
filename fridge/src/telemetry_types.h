@@ -29,7 +29,7 @@ struct __attribute__((packed)) SensorSample {
   uint64_t timestamp_s; // Second-accurate Unix timestamp (Little-Endian)
   int16_t temp_cdeg;    // Centi-degrees Celsius; 0x8000 = Error
   uint16_t voc_index;   // Gas Index 1-500; 0 = warming up; 0xFFFF = Error / withheld
-  uint16_t light_ldr;   // Raw ADC 0-4095; 0xFFFF = Error
+  uint16_t light_ldr;   // Light level 0 (dark) - 1000 (bright), see ldr_scale.h; 0xFFFF = Error
 };
 
 // Encrypted Payload Structure (1 + N * 14 bytes)

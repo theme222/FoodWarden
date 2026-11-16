@@ -23,7 +23,7 @@
 static const uint32_t BLE_ADVERTISING_TIMEOUT_MS = 5000; // GOAL.md: 5 s then give up
 static const uint32_t BLE_STARTUP_MARGIN_MS = 2000;      // NimBLE init + encryption, generous
 static const uint32_t DISPLAY_IDLE_WINDOW_MS = 300;      // time to catch a button press
-// Max wait for the S1 readout to finish. Worst case "T-30.0C", "V500", "L4095"
+// Max wait for the S1 readout to finish. Worst case "T-30.0C", "V500", "L1000"
 // at 100 ms/column is about 147 steps = 14.7 s, plus two 0.4 s gaps.
 static const uint32_t DISPLAY_SLEEP_GATE_MS = 18000;
 

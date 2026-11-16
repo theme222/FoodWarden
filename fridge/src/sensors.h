@@ -22,7 +22,7 @@
 struct SensorReading {
   int16_t temp_cdeg;  // SENSOR_TEMP_ERROR on failure
   uint16_t voc_index; // Raw algorithm output: 0 = warming up, SENSOR_VOC_ERROR on failure
-  uint16_t light_ldr; // SENSOR_LIGHT_ERROR on failure
+  uint16_t light_ldr; // 0 = dark .. 1000 = bright (ldr_scale.h); SENSOR_LIGHT_ERROR on failure
   float humidity_rh;  // %RH, or negative if unavailable (diagnostic only, not transmitted)
   uint16_t voc_sraw;  // SGP40 raw signal fed to the algorithm, 0 if not read (diagnostic only)
   int16_t sgp40_err;  // SGP40 driver error code, 0 = OK, -1 = not found (diagnostic only)

@@ -5,6 +5,7 @@
 #include <SensirionI2cSht3x.h>
 #include <Wire.h>
 
+#include "ldr_scale.h"
 #include "telemetry_types.h"
 #include "voc_algorithm.h"
 
@@ -104,8 +105,8 @@ SensorReading sensorsRead() {
   reading.voc_sraw = 0;
   reading.sgp40_err = -1;
 
-  // 1. LDR
-  reading.light_ldr = (uint16_t)analogRead(PIN_LDR);
+  // 1. LDR: inverted and scaled to 0 (dark) .. 1000 (bright), see ldr_scale.h
+  reading.light_ldr = ldrScale((uint16_t)analogRead(PIN_LDR));
 
   // 2. SHT31 temperature + humidity (single shot, high repeatability)
   uint16_t rh_ticks = SGP40_DEFAULT_RH_TICKS;

@@ -13,18 +13,19 @@
 //
 // Pure logic with no Arduino dependencies so it can be unit tested on a host.
 
-// Door-open threshold on the raw LDR ADC reading (0-4095). Placeholder:
-// calibrate against the real fridge light level (the serial log prints
-// `light=` every wake) and override without editing code, e.g.
-//   build_flags = -DFRIDGE_LDR_THRESHOLD=900
+// Door-open threshold on the LDR light level (0 = dark .. 1000 = bright, see
+// ldr_scale.h). Placeholder: halfway between pitch black (0) and room light
+// (~705) on the bench. Calibrate against the real fridge lamp (the serial log
+// prints `light=` every wake) and override without editing code, e.g.
+//   build_flags = -DFRIDGE_LDR_THRESHOLD=200
 #ifndef FRIDGE_LDR_THRESHOLD
-#define FRIDGE_LDR_THRESHOLD 1500
+#define FRIDGE_LDR_THRESHOLD 350
 #endif
 static const uint16_t LDR_DOOR_OPEN_THRESHOLD = FRIDGE_LDR_THRESHOLD;
 
-// Polarity: by default "open" means reading > threshold (brighter = higher, as
-// in the issue spec). If the board's LDR reads LOWER in light, build with
-// -DFRIDGE_LDR_OPEN_IS_LOW=1 so "open" means reading < threshold.
+// Polarity: by default "open" means reading > threshold (brighter = higher,
+// which ldrScale() guarantees). -DFRIDGE_LDR_OPEN_IS_LOW=1
+// flips it so "open" means reading < threshold.
 #ifndef FRIDGE_LDR_OPEN_IS_LOW
 #define FRIDGE_LDR_OPEN_IS_LOW 0
 #endif

@@ -7,6 +7,8 @@
 #include "door_voc_filter.h"
 #include "voc_algorithm.h"
 static int fails=0;
+static const uint16_t LIGHT_CLOSED = 0;                               // dark fridge
+static const uint16_t LIGHT_OPEN = LDR_DOOR_OPEN_THRESHOLD + 100;    // lamp on
 #define CHECK(c,msg) do{ if(!(c)){printf("FAIL: %s\n",msg);fails++;} else printf("ok:   %s\n",msg);}while(0)
 int main(){
   const float dt=5.0f;
@@ -15,13 +17,13 @@ int main(){
   int32_t sraw_clean=30000;
   int steps=0; int32_t voc=0;
   // 1. 10 minutes of stable closed-door air (120 samples)
-  for(int i=0;i<120;i++){ voc=algo.process(sraw_clean+(rand()%20-10)); uint16_t tx=doorVocFilter(cd,500,(uint16_t)voc); steps++; (void)tx; }
+  for(int i=0;i<120;i++){ voc=algo.process(sraw_clean+(rand()%20-10)); uint16_t tx=doorVocFilter(cd,LIGHT_CLOSED,(uint16_t)voc); steps++; (void)tx; }
   printf("settled voc=%d\n",(int)voc);
   CHECK(voc>=50 && voc<=150,"baseline settles near 100 for clean air");
   // 2. door opens: sraw drops (humid air -> VOC spike), light high for 3 samples
   int masked=0, leaked=0;
   int32_t peak=0;
-  for(int i=0;i<3;i++){ voc=algo.process(sraw_clean-3000); if(voc>peak)peak=voc; uint16_t tx=doorVocFilter(cd,3000,(uint16_t)voc); if(tx==VOC_NULL_SENTINEL)masked++; else leaked++; }
+  for(int i=0;i<3;i++){ voc=algo.process(sraw_clean-3000); if(voc>peak)peak=voc; uint16_t tx=doorVocFilter(cd,LIGHT_OPEN,(uint16_t)voc); if(tx==VOC_NULL_SENTINEL)masked++; else leaked++; }
   printf("door open: peak voc=%d masked=%d leaked=%d\n",(int)peak,masked,leaked);
   CHECK(peak>150,"spike is real in the algorithm output");
   CHECK(masked==3 && leaked==0,"all door-open packets are masked");
@@ -30,7 +32,7 @@ int main(){
   for(int i=0;i<20;i++){
     int32_t s = i<5 ? sraw_clean-2000 : sraw_clean;
     voc=algo.process(s);
-    uint16_t tx=doorVocFilter(cd,500,(uint16_t)voc);
+    uint16_t tx=doorVocFilter(cd,LIGHT_CLOSED,(uint16_t)voc);
     if(tx==VOC_NULL_SENTINEL) mc++; else if(firstReal<0) firstReal=i;
   }
   printf("closed: masked=%d firstReal at packet %d\n",mc,firstReal);
