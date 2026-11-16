@@ -4,16 +4,24 @@ import { toast } from "sonner";
 import { ApiRequestError } from "./lib/api";
 import { useConfirm } from "./components/confirmation";
 import { StatusAlert } from "./components/status-alert";
-import { useLineStatus, lineAction, parsePairing } from "./line-data";
+import {
+  useLineStatus,
+  lineAction,
+  parsePairing,
+  readStoredPairing,
+  writeStoredPairing,
+} from "./line-data";
 import type { Language } from "./model";
 import { MessageCircle, Check, Copy, Unplug, Send } from "lucide-react";
 function useLineConnection({
   language,
   fridgeId,
+  fridgeName,
   manage = true,
 }: {
   language: Language;
   fridgeId?: string;
+  fridgeName?: string;
   manage?: boolean;
 }) {
   const th = language === "th";
@@ -23,7 +31,7 @@ function useLineConnection({
   const [code, setCode] = useState<{
     code: string;
     expires_at_s: number;
-  } | null>(null);
+  } | null>(() => readStoredPairing(url));
   const [clock, setClock] = useState(() => Date.now());
   const status = useLineStatus(
     url,
@@ -37,10 +45,14 @@ function useLineConnection({
     ? Math.max(0, code.expires_at_s - Math.floor(clock / 1000))
     : 0;
   useEffect(() => {
-    if (!code || data?.linked) return;
+    if (data?.linked) {
+      writeStoredPairing(url, null);
+      return;
+    }
+    if (!code) return;
     const timer = setInterval(() => setClock(Date.now()), 1000);
     return () => clearInterval(timer);
-  }, [code, data?.linked]);
+  }, [code, data?.linked, url]);
   async function action(kind: "pair" | "test" | "disconnect") {
     if (busy) return;
     if (
@@ -61,9 +73,12 @@ function useLineConnection({
         kind === "disconnect" ? "DELETE" : "POST",
       );
       if (kind === "pair") {
-        setCode(parsePairing(response));
+        const next = parsePairing(response);
+        writeStoredPairing(url, next);
+        setCode(next);
         setClock(Date.now());
       } else if (kind === "disconnect") {
+        writeStoredPairing(url, null);
         setCode(null);
         toast.success(th ? "ตัดการเชื่อมต่อแล้ว" : "LINE disconnected");
       } else
@@ -90,6 +105,7 @@ function useLineConnection({
   return {
     th,
     fridgeId,
+    fridgeName,
     manage,
     code,
     seconds,
@@ -101,18 +117,26 @@ function useLineConnection({
   };
 }
 type LineView = ReturnType<typeof useLineConnection>;
-function lineConnectionText(th: boolean, fridgeId?: string) {
+function lineConnectionText(
+  th: boolean,
+  fridgeId?: string,
+  fridgeName?: string,
+) {
   if (fridgeId)
     return th
       ? {
           title: "LINE ของครอบครัว",
           label: "LINE ของตู้เย็น",
-          description: "แจ้งเรื่องประตู อุณหภูมิ และสรุปอาหารไปยังแชทที่ครอบครัวเลือก",
+          description: fridgeName
+            ? `แจ้งเรื่องประตู อุณหภูมิ และสรุปอาหารของตู้ "${fridgeName}" ไปยังแชทที่ครอบครัวเลือก`
+            : "แจ้งเรื่องประตู อุณหภูมิ และสรุปอาหารไปยังแชทที่ครอบครัวเลือก",
         }
       : {
           title: "Family LINE",
           label: "Fridge LINE",
-          description: "Send fridge alerts to your chosen family chat.",
+          description: fridgeName
+            ? `Send fridge alerts for "${fridgeName}" to your chosen family chat.`
+            : "Send fridge alerts to your chosen family chat.",
         };
   return th
     ? {
@@ -129,8 +153,8 @@ function lineConnectionText(th: boolean, fridgeId?: string) {
       };
 }
 function LineConnectionHeading({ view }: { view: LineView }) {
-  const { th, fridgeId, data } = view;
-  const text = lineConnectionText(th, fridgeId);
+  const { th, fridgeId, fridgeName, data } = view;
+  const text = lineConnectionText(th, fridgeId, fridgeName);
   return (
     <>
       <div className="section-head">
@@ -336,13 +360,13 @@ function LineConnectionBody({ view }: { view: LineView }) {
   if (!manage) return null;
   return <LinePairingSteps view={view} />;
 }
-export function LineConnection(props: Parameters<typeof useLineConnection>[0]) {
+function LineConnectionSection(props: Parameters<typeof useLineConnection>[0]) {
   const view = useLineConnection(props);
-  const { th, fridgeId, error, status } = view;
+  const { th, fridgeId, fridgeName, error, status } = view;
   return (
     <section
       className="surface line-connection"
-      aria-label={lineConnectionText(th, fridgeId).label}
+      aria-label={lineConnectionText(th, fridgeId, fridgeName).label}
     >
       <LineConnectionHeading view={view} />
       {error && <StatusAlert>{error}</StatusAlert>}
@@ -354,4 +378,7 @@ export function LineConnection(props: Parameters<typeof useLineConnection>[0]) {
       <LineConnectionBody view={view} />
     </section>
   );
+}
+export function LineConnection(props: Parameters<typeof useLineConnection>[0]) {
+  return <LineConnectionSection key={props.fridgeId ?? "me"} {...props} />;
 }

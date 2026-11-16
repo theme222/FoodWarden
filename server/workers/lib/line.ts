@@ -27,29 +27,29 @@ const DOOR_ALERT_META: Partial<
     DoorEventStatus,
     {
       alertType: string;
-      message: (fridgeName: string, nodeId: string) => string;
+      message: (fridgeName: string, fridgeId: string, nodeId: string) => string;
     }
   >
 > = {
   OBSTRUCTION_ERROR: {
     alertType: "door_obstruction",
-    message: (fridgeName, nodeId) =>
-      `⚠️ [${fridgeName}] Door obstruction detected (${nodeId}). Motor stopped and retracted safely.\nตรวจพบสิ่งกีดขวางขณะปิดประตูตู้เย็น (${nodeId}) ระบบหยุดและถอยแขนกลเพื่อความปลอดภัยแล้ว`,
+    message: (fridgeName, fridgeId, nodeId) =>
+      `⚠️ 🏠 [${fridgeName} · รหัสตู้: ${fridgeId}] Door obstruction detected (${nodeId}). Motor stopped and retracted safely.\nตรวจพบสิ่งกีดขวางขณะปิดประตูตู้เย็น (${nodeId}) ระบบหยุดและถอยแขนกลเพื่อความปลอดภัยแล้ว`,
   },
   TIMEOUT_ERROR: {
     alertType: "door_timeout",
-    message: (fridgeName, nodeId) =>
-      `⏱️ [${fridgeName}] Door closer timed out (${nodeId}). Please check that the door can shut cleanly.\nแขนกลปิดประตูใช้เวลาเกินกำหนด (${nodeId}) กรุณาตรวจสอบว่าประตูไม่มีสิ่งกีดขวาง`,
+    message: (fridgeName, fridgeId, nodeId) =>
+      `⏱️ 🏠 [${fridgeName} · รหัสตู้: ${fridgeId}] Door closer timed out (${nodeId}). Please check that the door can shut cleanly.\nแขนกลปิดประตูใช้เวลาเกินกำหนด (${nodeId}) กรุณาตรวจสอบว่าประตูไม่มีสิ่งกีดขวาง`,
   },
   FAULT_LOCKOUT: {
     alertType: "door_fault_lockout",
-    message: (fridgeName, nodeId) =>
-      `🛑 [${fridgeName}] Door actuator entered safety fault lockout (${nodeId}). Manual inspection required.\nระบบปิดประตูเข้าสู่โหมดนิรภัย (${nodeId}) กรุณาตรวจสอบอุปกรณ์`,
+    message: (fridgeName, fridgeId, nodeId) =>
+      `🛑 🏠 [${fridgeName} · รหัสตู้: ${fridgeId}] Door actuator entered safety fault lockout (${nodeId}). Manual inspection required.\nระบบปิดประตูเข้าสู่โหมดนิรภัย (${nodeId}) กรุณาตรวจสอบอุปกรณ์`,
   },
   CONTRADICTION_ERROR: {
     alertType: "door_contradiction",
-    message: (fridgeName, nodeId) =>
-      `💡 [${fridgeName}] Door closed sensor disagrees with interior light sensor (${nodeId}). Seal may still be ajar.\nเซนเซอร์ประตูปิดขัดแย้งกับไฟภายในตู้ (${nodeId}) กรุณาตรวจสอบว่าประตูปิดสนิท`,
+    message: (fridgeName, fridgeId, nodeId) =>
+      `💡 🏠 [${fridgeName} · รหัสตู้: ${fridgeId}] Door closed sensor disagrees with interior light sensor (${nodeId}). Seal may still be ajar.\nเซนเซอร์ประตูปิดขัดแย้งกับไฟภายในตู้ (${nodeId}) กรุณาตรวจสอบว่าประตูปิดสนิท`,
   },
 };
 
@@ -159,7 +159,12 @@ export async function maybeSendDoorSafetyAlerts(
       fridgeId,
       meta.alertType,
       config.line_target_id,
-      [{ type: "text", text: meta.message(config.name, event.node_id) }],
+      [
+        {
+          type: "text",
+          text: meta.message(config.name, config.id, event.node_id),
+        },
+      ],
       nowS,
       DOOR_ALERT_COOLDOWN_S,
       criticalEvents
@@ -219,8 +224,8 @@ export async function maybeSendTelemetryAlerts(
   for (const alert of pending) {
     const text =
       alert.alertType === "voc_high"
-        ? `🚨 [${config.name}] High VOC spoilage index detected (${maxVoc}). Please inspect fridge contents.\nตรวจพบค่าก๊าซ VOC สูงผิดปกติ (${maxVoc}) อาจมีอาหารเริ่มเน่าเสีย กรุณาตรวจสอบภายในตู้เย็น`
-        : `🌡️ [${config.name}] High fridge temperature detected (${maxTemp!.toFixed(1)}°C > 8.0°C). Check door seal & cooling.\nอุณหภูมิในตู้เย็นสูงเกินเกณฑ์ปลอดภัย (${maxTemp!.toFixed(1)}°C) กรุณาตรวจสอบการปิดประตูและระบบทำความเย็น`;
+        ? `🚨 🏠 [${config.name} · รหัสตู้: ${config.id}] High VOC spoilage index detected (${maxVoc}). Please inspect fridge contents.\nตรวจพบค่าก๊าซ VOC สูงผิดปกติ (${maxVoc}) อาจมีอาหารเริ่มเน่าเสีย กรุณาตรวจสอบภายในตู้เย็น`
+        : `🌡️ 🏠 [${config.name} · รหัสตู้: ${config.id}] High fridge temperature detected (${maxTemp!.toFixed(1)}°C > 8.0°C). Check door seal & cooling.\nอุณหภูมิในตู้เย็นสูงเกินเกณฑ์ปลอดภัย (${maxTemp!.toFixed(1)}°C) กรุณาตรวจสอบการปิดประตูและระบบทำความเย็น`;
 
     const sent = await queueLineAlert(
       env,
@@ -346,7 +351,7 @@ async function dispatchDailyExpiryDigests(
     }
 
     const message = [
-      `🥬 [${fridge.name}] Daily FEFO Expiry Digest (${today})`,
+      `🥬 🏠 [${fridge.name} · รหัสตู้: ${fridge.id}] Daily FEFO Expiry Digest (${today})`,
       `สรุปรายการอาหารใกล้หมดอายุ / หมดอายุแล้ว (${items.length} รายการ):`,
       ...lines,
     ].join("\n");
@@ -538,7 +543,9 @@ export async function enqueueFridgeLineTest(
     [
       {
         type: "text",
-        text: `[${config.name}] เชื่อมต่อ FoodWarden แล้ว ✅ การแจ้งเตือนของตู้เย็นจะส่งมาที่แชทนี้`,
+        text:
+          `🏠 [LINE ของตู้เย็น · ${config.name} (รหัสตู้: ${config.id})]\n` +
+          `เชื่อมต่อ FoodWarden แล้ว ✅ การแจ้งเตือนส่วนกลางของตู้เย็น "${config.name}" จะส่งมาที่แชทนี้`,
       },
     ],
     nowS,

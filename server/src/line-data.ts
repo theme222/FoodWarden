@@ -127,6 +127,48 @@ export function parsePairing(value: unknown): {
     throw new Error("Invalid pairing response");
   return { code: r.code, expires_at_s: r.expires_at_s };
 }
+function pairingKey(url: string): string {
+  return `foodwarden_line_pair:${url}`;
+}
+export function readStoredPairing(
+  url: string,
+  nowS = Math.floor(Date.now() / 1000),
+): { code: string; expires_at_s: number } | null {
+  try {
+    const raw = sessionStorage.getItem(pairingKey(url));
+    if (!raw) return null;
+    const parsed = parsePairing(JSON.parse(raw));
+    if (parsed.expires_at_s <= nowS) {
+      sessionStorage.removeItem(pairingKey(url));
+      return null;
+    }
+    return parsed;
+  } catch {
+    return null;
+  }
+}
+export function writeStoredPairing(
+  url: string,
+  value: { code: string; expires_at_s: number } | null,
+): void {
+  try {
+    if (value) sessionStorage.setItem(pairingKey(url), JSON.stringify(value));
+    else sessionStorage.removeItem(pairingKey(url));
+  } catch {
+    /* Ignore storage errors in restricted browsing modes. */
+  }
+}
+export function clearStoredPairings(): void {
+  try {
+    for (let i = sessionStorage.length - 1; i >= 0; i--) {
+      const key = sessionStorage.key(i);
+      if (key?.startsWith("foodwarden_line_pair:"))
+        sessionStorage.removeItem(key);
+    }
+  } catch {
+    /* Ignore storage errors. */
+  }
+}
 export function favoriteMatches(
   favorite: Favorite,
   food: { nameTh: string; nameEn: string; category: string },

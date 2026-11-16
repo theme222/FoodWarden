@@ -1,3 +1,5 @@
+import { clearStoredPairings } from "./line-data";
+
 export interface SessionUser {
   id: string;
   email: string;
@@ -103,4 +105,5 @@ export async function signOutSession(): Promise<void> {
   if (!res.ok) {
     throw new Error("Sign-out failed");
   }
+  clearStoredPairings();
 }

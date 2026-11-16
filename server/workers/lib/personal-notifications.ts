@@ -54,6 +54,32 @@ export async function enqueuePersonalTest(
     .first<{ line_user_id: string | null }>();
   if (!profile?.line_user_id)
     throw new LinePairingError("Connect your LINE account first.", 409);
+  const [userRow, fridges] = await Promise.all([
+    env.DB.prepare("SELECT name, email FROM user WHERE id=?")
+      .bind(userId)
+      .first<{ name: string | null; email: string }>(),
+    env.DB.prepare(
+      `SELECT f.id, f.name
+       FROM fridges f
+       JOIN fridge_members fm ON fm.fridge_id=f.id
+       JOIN user u ON lower(trim(u.email))=fm.email
+       WHERE u.id=?
+       ORDER BY f.created_at_s ASC, f.id ASC`,
+    )
+      .bind(userId)
+      .all<{ id: string; name: string }>(),
+  ]);
+  const accountLabel = userRow?.name
+    ? `${userRow.name} (${userRow.email})`
+    : (userRow?.email ?? userId);
+  const fridgeSummary =
+    fridges.results.length > 0
+      ? fridges.results.map((f) => `${f.name} (${f.id})`).join(", ")
+      : "ยังไม่ได้เป็นสมาชิกตู้เย็นใด";
+  const text =
+    `👤 [LINE ส่วนตัว · บัญชี ${accountLabel}]\n` +
+    `FoodWarden เชื่อมต่อแล้ว ✅ คุณจะได้รับการแจ้งเตือนส่วนตัวที่แชทนี้\n` +
+    `ตู้เย็นในบัญชีของคุณ (${fridges.results.length} ตู้): ${fridgeSummary}`;
   const insert = await env.DB.prepare(
     `INSERT INTO user_line_outbox(id,user_id,alert_type,event_key,fridge_ids_json,target_id,messages_json,created_s,next_attempt_s)
     SELECT ?,?,'test',?,'[]',?,?,?,? WHERE NOT EXISTS(SELECT 1 FROM user_line_outbox WHERE user_id=? AND alert_type='test' AND created_s>?)`,
@@ -63,12 +89,7 @@ export async function enqueuePersonalTest(
       userId,
       crypto.randomUUID(),
       profile.line_user_id,
-      JSON.stringify([
-        {
-          type: "text",
-          text: "FoodWarden เชื่อมต่อแล้ว ✅ คุณจะได้รับการแจ้งเตือนส่วนตัวที่แชทนี้",
-        },
-      ]),
+      JSON.stringify([{ type: "text", text }]),
       nowS,
       nowS,
       userId,
@@ -196,6 +217,7 @@ async function queueInstant(
   text: string,
   eventKeys: string[],
   nowS: number,
+  detail?: string,
 ): Promise<void> {
   const field =
     kind === "obstruct"
@@ -204,14 +226,27 @@ async function queueInstant(
         ? "inst_warm"
         : "inst_spoil";
   const profiles = await env.DB.prepare(
-    `SELECT p.user_id,p.line_user_id,f.name FROM user_line_profiles p JOIN user u ON u.id=p.user_id JOIN fridge_members fm ON fm.email=lower(trim(u.email)) JOIN fridges f ON f.id=fm.fridge_id WHERE fm.fridge_id=? AND u.emailVerified=1 AND p.line_user_id IS NOT NULL AND p.${field}=1`,
+    `SELECT p.user_id,p.line_user_id,f.name,u.name AS user_name,u.email AS user_email FROM user_line_profiles p JOIN user u ON u.id=p.user_id JOIN fridge_members fm ON fm.email=lower(trim(u.email)) JOIN fridges f ON f.id=fm.fridge_id WHERE fm.fridge_id=? AND u.emailVerified=1 AND p.line_user_id IS NOT NULL AND p.${field}=1`,
   )
     .bind(fridgeId)
-    .all<{ user_id: string; line_user_id: string; name: string }>();
+    .all<{
+      user_id: string;
+      line_user_id: string;
+      name: string;
+      user_name: string | null;
+      user_email: string;
+    }>();
+  const statements: D1PreparedStatement[] = [];
   for (const profile of profiles.results) {
     const id = crypto.randomUUID();
     const cooldown = kind === "obstruct" ? 300 : 1800;
-    await env.DB.batch([
+    const userLabel = profile.user_name
+      ? `${profile.user_name} (${profile.user_email})`
+      : profile.user_email;
+    const messageText =
+      `👤 [แจ้งเตือนส่วนตัว · ${userLabel}]\n` +
+      `[${profile.name}] ${text} (รหัสตู้: ${fridgeId}${detail ? ` · ${detail}` : ""})`;
+    statements.push(
       env.DB.prepare(
         `INSERT INTO user_line_outbox(id,user_id,alert_type,event_key,fridge_ids_json,target_id,messages_json,created_s,next_attempt_s)
         SELECT ?,?,?,?,?,?,?,?,? WHERE NOT EXISTS(SELECT 1 FROM user_alert_cooldowns WHERE user_id=? AND fridge_id=? AND alert_type=? AND ?-last_sent_s<?)
@@ -223,7 +258,7 @@ async function queueInstant(
         id,
         JSON.stringify([fridgeId]),
         profile.line_user_id,
-        JSON.stringify([{ type: "text", text: `[${profile.name}] ${text}` }]),
+        JSON.stringify([{ type: "text", text: messageText }]),
         nowS,
         nowS,
         profile.user_id,
@@ -242,8 +277,9 @@ async function queueInstant(
       env.DB.prepare(
         "INSERT INTO user_line_events(user_id,fridge_id,alert_type,event_key) SELECT ?,?,?,value FROM json_each(?) WHERE true ON CONFLICT DO NOTHING",
       ).bind(profile.user_id, fridgeId, kind, JSON.stringify(eventKeys)),
-    ]);
+    );
   }
+  if (statements.length) await env.DB.batch(statements);
 }
 export async function personalDoorAlerts(
   env: AppBindings,
@@ -261,6 +297,7 @@ export async function personalDoorAlerts(
     ].includes(event.status),
   );
   if (!relevant.length) return;
+  const nodeIds = [...new Set(relevant.map((e) => e.node_id))].join(", ");
   await queueInstant(
     env,
     fridgeId,
@@ -268,6 +305,7 @@ export async function personalDoorAlerts(
     "ประตูต้องการการตรวจสอบ กรุณาดูว่ามีสิ่งกีดขวางหรืออุปกรณ์ขัดข้องหรือไม่",
     relevant.map((e) => JSON.stringify([e.node_id, e.timestamp_s, e.status])),
     nowS,
+    `โหนด ${nodeIds}`,
   );
   await dispatchPersonalOutbox(env, nowS);
 }
@@ -284,7 +322,12 @@ export async function personalTelemetryAlerts(
   const spoil = samples.filter(
     (s) => s.voc_index !== null && s.voc_index >= 250,
   );
-  if (warm.length)
+  if (warm.length) {
+    const hottest = warm.reduce((best, s) =>
+      (s.temp_celsius ?? -Infinity) > (best.temp_celsius ?? -Infinity)
+        ? s
+        : best,
+    );
     await queueInstant(
       env,
       fridgeId,
@@ -292,8 +335,13 @@ export async function personalTelemetryAlerts(
       "อุณหภูมิสูงกว่า 8°C กรุณาตรวจสอบการปิดประตูและระบบทำความเย็น",
       warm.map((e) => JSON.stringify([e.node_id, e.timestamp_s])),
       nowS,
+      `วัดได้ ${hottest.temp_celsius!.toFixed(1)}°C จากโหนด ${hottest.node_id}`,
     );
-  if (spoil.length)
+  }
+  if (spoil.length) {
+    const highestVoc = spoil.reduce((best, s) =>
+      (s.voc_index ?? -Infinity) > (best.voc_index ?? -Infinity) ? s : best,
+    );
     await queueInstant(
       env,
       fridgeId,
@@ -301,7 +349,9 @@ export async function personalTelemetryAlerts(
       "พบค่า VOC สูงผิดปกติ กรุณาตรวจสอบอาหารภายในตู้",
       spoil.map((e) => JSON.stringify([e.node_id, e.timestamp_s])),
       nowS,
+      `ดัชนี VOC ${highestVoc.voc_index!.toFixed(0)} จากโหนด ${highestVoc.node_id}`,
     );
+  }
   if (warm.length || spoil.length) await dispatchPersonalOutbox(env, nowS);
 }
 export async function queueMorningDigests(
@@ -314,8 +364,8 @@ export async function queueMorningDigests(
   const today = bangkokIsoDate(nowS);
   const soon = addDaysToIsoDate(today, 2);
   const profiles = await env.DB.prepare(
-    "SELECT p.* FROM user_line_profiles p JOIN user u ON u.id=p.user_id WHERE p.line_user_id IS NOT NULL AND p.morning_enabled=1 AND u.emailVerified=1",
-  ).all<LineProfile>();
+    "SELECT p.*,u.name AS user_name,u.email AS user_email FROM user_line_profiles p JOIN user u ON u.id=p.user_id WHERE p.line_user_id IS NOT NULL AND p.morning_enabled=1 AND u.emailVerified=1",
+  ).all<LineProfile & { user_name: string | null; user_email: string }>();
   for (const profile of profiles.results) {
     const [h, m] = profile.morning_time.split(":").map(Number);
     const due = h! * 60 + m!;
@@ -348,9 +398,9 @@ export async function queueMorningDigests(
           }>(),
         readFavorites(env.DB, profile.user_id, fridge.id),
         env.DB.prepare(
-          "SELECT COUNT(*) AS n FROM door_events WHERE fridge_id=? AND status='SUCCESS' AND timestamp_s>=?",
+          "SELECT COUNT(*) AS n FROM door_events WHERE fridge_id=? AND status='SUCCESS' AND timestamp_s>=? AND timestamp_s<=?",
         )
-          .bind(fridge.id, nowS - 86400)
+          .bind(fridge.id, nowS - 86400, nowS)
           .first<{ n: number }>(),
       ]);
       const lines = foods.results.map(
@@ -369,13 +419,19 @@ export async function queueMorningDigests(
       if (closures?.n)
         lines.push(`ประตูปิดเอง ${closures.n} ครั้งใน 24 ชั่วโมงที่ผ่านมา`);
       if (lines.length) {
-        sections.push(`[${fridge.name}]\n${lines.join("\n")}`);
+        sections.push(
+          `🏠 [${fridge.name}] (รหัสตู้: ${fridge.id})\n${lines.join("\n")}`,
+        );
         included.push(fridge.id);
       }
     }
     if (!sections.length) continue;
+    const userLabel = profile.user_name
+      ? `${profile.user_name} (${profile.user_email})`
+      : profile.user_email;
     const summary =
-      `สวัสดีตอนเช้า 🥬 สรุป FoodWarden ${today}\n\n` + sections.join("\n\n");
+      `👤 สวัสดีตอนเช้า 🥬 สรุปเช้า FoodWarden ${today} (LINE ส่วนตัว · ${userLabel})\n\n` +
+      sections.join("\n\n");
     const text =
       summary.length > 4500
         ? summary.slice(0, 4400) +

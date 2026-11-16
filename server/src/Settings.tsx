@@ -557,7 +557,11 @@ export function Settings(props: {
         </p>
       )}
       {error && <StatusAlert>{error}</StatusAlert>}
-      <LineConnection language={props.language} fridgeId={props.fridgeId} />
+      <LineConnection
+        language={props.language}
+        fridgeId={props.fridgeId}
+        fridgeName={settings.name}
+      />
       <FamilySetupGuide view={view} />
       <GeneralSettings view={view} />
       <GatewaySettings view={view} />
