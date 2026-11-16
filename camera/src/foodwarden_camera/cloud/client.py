@@ -10,6 +10,7 @@ import logging
 import time
 import uuid
 from datetime import datetime, timedelta
+from typing import Literal
 
 import httpx
 
@@ -30,6 +31,29 @@ from foodwarden_camera.models.cloud_cbs import (
 )
 
 logger = logging.getLogger(__name__)
+
+CloudErrorKind = Literal["offline", "unidentifiable", "auth", "rate_limited", "rejected"]
+
+
+def classify_cloud_error(err_msg: str) -> CloudErrorKind:
+    """Classifies CloudClient error text to distinguish offline loss from HTTP rejections."""
+    upper = err_msg.upper()
+    if "HTTP 422" in upper or "UNIDENTIFIABLE" in upper:
+        return "unidentifiable"
+    if (
+        "HTTP 401" in upper
+        or "HTTP 403" in upper
+        or "UNAUTHORIZED" in upper
+        or "INVALID_TOKEN" in upper
+    ):
+        return "auth"
+    if "HTTP 429" in upper or "RATE_LIMITED" in upper:
+        return "rate_limited"
+    if "OPERATION_PENDING" in upper:
+        return "offline"
+    if "HTTP 400" in upper or "HTTP 413" in upper or "CONFLICT" in upper:
+        return "rejected"
+    return "offline"
 
 
 class CloudClient:
@@ -121,7 +145,10 @@ class CloudClient:
                 return True, result, ""
 
             if resp.status_code == 422:
-                err_msg = "Unidentifiable food item or low confidence"
+                err_msg = (
+                    "HTTP 422 UNIDENTIFIABLE: Item could not be reliably identified "
+                    "(confidence below 0.60 or non-food item)."
+                )
                 logger.warning("Check-in draft rejected: %s", resp.text)
                 return False, None, err_msg
 

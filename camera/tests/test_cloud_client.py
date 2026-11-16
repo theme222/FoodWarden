@@ -453,3 +453,34 @@ def test_idempotency_key_persistence_across_commit_retry_and_timestamp_clamping(
     assert normalize_event_timestamp(42, now_s=now_ref) == now_ref
     assert normalize_event_timestamp(now_ref + 900, now_s=now_ref) == now_ref
     assert normalize_event_timestamp(now_ref + 50, now_s=now_ref) == now_ref + 50
+
+
+def test_sync_manager_drops_422_unidentifiable_offline_checkin(tmp_path: Path) -> None:
+    queue = OfflineQueue(db_path=str(tmp_path / "drop_422.db"))
+    captures_dir = tmp_path / "captures"
+
+    def handler_422(request: httpx.Request) -> httpx.Response:
+        if request.url.path.endswith("/inventory/checkin/draft"):
+            return httpx.Response(
+                422,
+                json={"error": "UNIDENTIFIABLE", "message": "Not food"},
+            )
+        return httpx.Response(200, json={"success": True})
+
+    client = CloudClient(base_url="https://test.local/api", gateway_token="test_token")
+    client._get_client = lambda: httpx.Client(  # type: ignore[method-assign]
+        base_url=client.base_url,
+        headers=client._headers,
+        transport=httpx.MockTransport(handler_422),
+    )
+
+    manager = CloudSyncManager(client, queue, captures_dir=str(captures_dir))
+    manager.enqueue_offline_checkin(b"\xff\xd8\xff\xe0blurry_jpeg")
+    assert len(queue.get_pending_checkins()) == 1
+    assert len(list(captures_dir.glob("offline_checkin_*.jpg"))) == 1
+
+    counts = manager.flush_offline_queue()
+    assert counts["checkins"] == 0
+    assert manager.is_online is True
+    assert len(queue.get_pending_checkins()) == 0
+    assert len(list(captures_dir.glob("offline_checkin_*.jpg"))) == 0

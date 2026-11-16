@@ -13,7 +13,7 @@ import uuid
 from pathlib import Path
 from typing import Any
 
-from foodwarden_camera.cloud.client import CloudClient
+from foodwarden_camera.cloud.client import CloudClient, classify_cloud_error
 from foodwarden_camera.models.ble_fuc import SensorSample
 from foodwarden_camera.models.cloud_cbs import (
     CheckInCommitPayload,
@@ -285,12 +285,26 @@ class CloudSyncManager:
                 with open(img_path, "rb") as f:
                     img_bytes = f.read()
 
-                draft_ok, draft_res, _ = self.client.checkin_draft(
+                draft_ok, draft_res, draft_err = self.client.checkin_draft(
                     img_bytes,
                     idempotency_key=draft_key,
                 )
                 if not (draft_ok and draft_res is not None):
-                    self._is_online = False
+                    draft_err_kind = classify_cloud_error(draft_err)
+                    if draft_err_kind in ("unidentifiable", "rejected"):
+                        logger.warning(
+                            "Dropping permanently rejected offline check-in id=%s (%s)",
+                            chk["id"],
+                            draft_err,
+                        )
+                        self.queue.delete_checkin(int(chk["id"]))
+                        try:
+                            img_path.unlink(missing_ok=True)
+                        except OSError:
+                            pass
+                        self._is_online = True
+                        continue
+                    self._is_online = draft_err_kind in ("auth", "rate_limited")
                     break
 
                 # Use user confirmed expiry if set, otherwise fallback to AI suggestion
@@ -317,7 +331,7 @@ class CloudSyncManager:
                     expiry,
                 )
 
-            commit_ok, commit_res, _ = self.client.checkin_commit(
+            commit_ok, commit_res, commit_err = self.client.checkin_commit(
                 commit_payload,
                 idempotency_key=commit_key,
             )
@@ -331,7 +345,22 @@ class CloudSyncManager:
                 counts["checkins"] += 1
                 self._is_online = True
             else:
-                self._is_online = False
+                commit_err_kind = classify_cloud_error(commit_err)
+                if commit_err_kind in ("unidentifiable", "rejected"):
+                    logger.warning(
+                        "Dropping permanently rejected offline commit id=%s (%s)",
+                        chk["id"],
+                        commit_err,
+                    )
+                    self.queue.delete_checkin(int(chk["id"]))
+                    if img_path is not None:
+                        try:
+                            img_path.unlink(missing_ok=True)
+                        except OSError:
+                            pass
+                    self._is_online = True
+                    continue
+                self._is_online = commit_err_kind in ("auth", "rate_limited")
                 break
 
         total = sum(counts.values())

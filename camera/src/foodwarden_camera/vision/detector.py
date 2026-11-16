@@ -164,9 +164,9 @@ class VisionDetector:
             x1, y1, x2, y2 = best_bbox
             h, w = frame.shape[:2]
 
-            # Add 5% padding around bounding box for context
-            pad_x = int((x2 - x1) * 0.05)
-            pad_y = int((y2 - y1) * 0.05)
+            # Add 12% padding around bounding box so packaging labels stay intact for Gemini
+            pad_x = int((x2 - x1) * 0.12)
+            pad_y = int((y2 - y1) * 0.12)
             crop_x1 = max(0, x1 - pad_x)
             crop_y1 = max(0, y1 - pad_y)
             crop_x2 = min(w, x2 + pad_x)

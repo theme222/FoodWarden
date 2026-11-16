@@ -179,13 +179,27 @@ def check_peripherals(
     ).rstrip("/")
     health_url = f"{base_url}/health"
     try:
-        with urllib.request.urlopen(health_url, timeout=3.0) as resp:
-            print(f"  - Server 'S' Health ({health_url}): REACHABLE (HTTP {resp.status})")
+        try:
+            import httpx
+
+            resp = httpx.get(health_url, timeout=3.0)
+            status_code = resp.status_code
+        except ImportError:
+            with urllib.request.urlopen(health_url, timeout=3.0) as urllib_resp:
+                status_code = int(urllib_resp.status)
+
+        if 200 <= status_code < 300:
+            print(f"  - Server 'S' Health ({health_url}): REACHABLE (HTTP {status_code})")
+        else:
+            print(
+                f"  - Server 'S' Health ({health_url}): HTTP {status_code} "
+                "(reachable, endpoint returned error)"
+            )
     except urllib.error.HTTPError as exc:
         print(
             f"  - Server 'S' Health ({health_url}): HTTP {exc.code} (reachable, endpoint returned error)"
         )
-    except (urllib.error.URLError, OSError, TimeoutError) as exc:
+    except Exception as exc:  # noqa: BLE001
         print(f"  - Server 'S' Health ({health_url}): UNREACHABLE ({exc})")
 
 

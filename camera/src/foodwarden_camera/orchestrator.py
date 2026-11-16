@@ -16,7 +16,7 @@ from datetime import datetime, timedelta
 from typing import Any
 
 from foodwarden_camera.ble.receiver import BLEReceiver
-from foodwarden_camera.cloud.client import CloudClient
+from foodwarden_camera.cloud.client import CloudClient, CloudErrorKind, classify_cloud_error
 from foodwarden_camera.cloud.sync_manager import CloudSyncManager
 from foodwarden_camera.config import GatewaySettings
 from foodwarden_camera.hardware.buttons import ButtonController
@@ -409,6 +409,42 @@ class GatewayOrchestrator:
     # Check-In & Check-Out Workflow Actions
     # ==========================================================================
 
+    def _show_cloud_error_alert(
+        self,
+        err_kind: CloudErrorKind,
+        *,
+        action_th: str,
+        action_en: str,
+    ) -> None:
+        """Displays a bilingual alert matching the failure kind instead of blaming Wi-Fi."""
+        alerts: dict[CloudErrorKind, tuple[str, str, bool]] = {
+            "unidentifiable": (
+                f"ไม่พบอาหารขณะ{action_th} กรุณาถือให้ชัดแล้วลองใหม่",
+                f"Food not identified during {action_en} — hold clearly and retry",
+                False,
+            ),
+            "auth": (
+                "Token เชื่อมต่อไม่ถูกต้อง กรุณาตรวจสอบ GATEWAY_TOKEN",
+                "Invalid Gateway Token — check Settings",
+                True,
+            ),
+            "rate_limited": (
+                "ใช้งาน AI เกินโควตาชั่วคราว กรุณารอสักครู่",
+                "AI rate limit reached — please wait a moment",
+                False,
+            ),
+            "rejected": (
+                f"ข้อมูล{action_th}ไม่ถูกต้อง กรุณาลองถ่ายใหม่",
+                f"{action_en.capitalize()} request rejected — please retake photo",
+                False,
+            ),
+        }
+        if err_kind in alerts:
+            msg_th, msg_en, critical = alerts[err_kind]
+            self.window.alert_banner.show_alert(msg_th, msg_en, is_critical=critical)
+        else:
+            self.window.show_offline_warning()
+
     def handle_checkin_capture(self) -> None:
         """Triggered when user presses 'O' from Idle screen to check in food."""
         has_frame, frame = self.camera.get_latest_frame()
@@ -432,30 +468,47 @@ class GatewayOrchestrator:
         )
         if ok and draft is not None:
             self.window.show_checkin_draft(draft, jpeg_bytes)
-        else:
-            logger.warning("Check-in draft failed (%s); buffering offline capture", err_msg)
-            self.sync_manager.enqueue_offline_checkin(
-                jpeg_bytes,
-                draft_idempotency_key=draft_key,
-            )
-            self.window.show_offline_warning()
+            return
 
-            # Offline Check-In Screen per GOAL.md §3:
-            # Show captured photo, allow user to adjust expiry date, and run 5s countdown
-            offline_expiry = (datetime.now() + timedelta(days=7)).strftime("%Y-%m-%d")
-            offline_draft = CheckInDraftResult(
-                name_th="บันทึกภาพออฟไลน์ (รอเชื่อมต่อคลาวด์)",
-                name_en="Offline Capture (Pending Cloud Sync)",
-                category="General",
-                category_th="ทั่วไป (ออฟไลน์)",
-                estimated_shelf_life_days=7,
-                estimated_expiry_date=offline_expiry,
-                storage_recommendation_th="จะส่งให้ AI วิเคราะห์อัตโนมัติเมื่อต่อเน็ต",
-                storage_recommendation_en="Auto-analyzed by AI once online",
-                image_storage_path="local_offline",
-                confidence=0.0,
+        err_kind = classify_cloud_error(err_msg)
+        if err_kind in ("unidentifiable", "auth", "rejected"):
+            logger.warning("Check-in draft declined (%s): %s", err_kind, err_msg)
+            self._show_cloud_error_alert(
+                err_kind,
+                action_th="ตรวจรับเข้า",
+                action_en="check-in",
             )
-            self.window.show_checkin_draft(offline_draft, jpeg_bytes)
+            return
+
+        logger.warning(
+            "Check-in draft unavailable (%s: %s); buffering offline capture", err_kind, err_msg
+        )
+        self.sync_manager.enqueue_offline_checkin(
+            jpeg_bytes,
+            draft_idempotency_key=draft_key,
+        )
+        self._show_cloud_error_alert(
+            err_kind,
+            action_th="ตรวจรับเข้า",
+            action_en="check-in",
+        )
+
+        # Offline Check-In Screen per GOAL.md §3:
+        # Show captured photo, allow user to adjust expiry date, and run 5s countdown
+        offline_expiry = (datetime.now() + timedelta(days=7)).strftime("%Y-%m-%d")
+        offline_draft = CheckInDraftResult(
+            name_th="บันทึกภาพออฟไลน์ (รอเชื่อมต่อคลาวด์)",
+            name_en="Offline Capture (Pending Cloud Sync)",
+            category="General",
+            category_th="ทั่วไป (ออฟไลน์)",
+            estimated_shelf_life_days=7,
+            estimated_expiry_date=offline_expiry,
+            storage_recommendation_th="จะส่งให้ AI วิเคราะห์อัตโนมัติเมื่อต่อเน็ต",
+            storage_recommendation_en="Auto-analyzed by AI once online",
+            image_storage_path="local_offline",
+            confidence=0.0,
+        )
+        self.window.show_checkin_draft(offline_draft, jpeg_bytes)
 
     def handle_commit_checkin(self, draft: CheckInDraftResult, expiry_date: str) -> None:
         """Triggered when user confirms check-in item on LCD (or 5s countdown elapses)."""
@@ -480,8 +533,15 @@ class GatewayOrchestrator:
         if ok and res is not None:
             logger.info("Successfully committed check-in: %s", res.item_id)
         else:
-            logger.warning("Cloud checkin commit failed (%s); buffering for later sync", err)
-            self.sync_manager.enqueue_pending_commit(payload, commit_key)
+            err_kind = classify_cloud_error(err)
+            logger.warning("Cloud checkin commit failed (%s): %s", err_kind, err)
+            if err_kind in ("offline", "rate_limited"):
+                self.sync_manager.enqueue_pending_commit(payload, commit_key)
+            self._show_cloud_error_alert(
+                err_kind,
+                action_th="ตรวจรับเข้า",
+                action_en="check-in",
+            )
 
     def handle_checkout_capture(self) -> None:
         """Triggered when user presses 'X' from Idle screen to check out food."""
@@ -498,8 +558,13 @@ class GatewayOrchestrator:
         if ok and result is not None:
             self.window.show_checkout_candidates(result.candidates)
         else:
-            logger.warning("Check-out draft failed: %s", err)
-            self.window.show_offline_warning()
+            err_kind = classify_cloud_error(err)
+            logger.warning("Check-out draft failed (%s): %s", err_kind, err)
+            self._show_cloud_error_alert(
+                err_kind,
+                action_th="นำอาหารออก",
+                action_en="check-out",
+            )
 
     def handle_commit_checkout(self, candidate: CheckOutCandidate) -> None:
         """Triggered when user confirms item removal on LCD."""

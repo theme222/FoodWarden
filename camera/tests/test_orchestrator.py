@@ -236,3 +236,41 @@ def test_door_fault_lockout_clears_closing_state(test_orchestrator: GatewayOrche
 
     assert test_orchestrator._is_door_closing is False
     test_orchestrator.sync_manager.record_node_seen.assert_called_once_with("D0", 1729930200)
+
+
+def test_checkin_and_checkout_422_shows_unidentifiable_not_offline(
+    test_orchestrator: GatewayOrchestrator,
+) -> None:
+    # 1. Check-in HTTP 422 must stay on Idle screen and NOT enqueue offline capture
+    test_orchestrator.cloud_client.checkin_draft.return_value = (
+        False,
+        None,
+        "HTTP 422 UNIDENTIFIABLE: Item could not be reliably identified.",
+    )
+    test_orchestrator.handle_checkin_capture()
+
+    assert test_orchestrator.window.stack.currentIndex() == 0
+    test_orchestrator.sync_manager.enqueue_offline_checkin.assert_not_called()
+    assert "ไม่พบอาหาร" in test_orchestrator.window.alert_banner.label_th.text()
+
+    # 2. Check-out HTTP 422 must alert unidentifiable instead of offline warning
+    test_orchestrator.cloud_client.checkout_draft.return_value = (
+        False,
+        None,
+        "Check-out draft error: HTTP 422 - UNIDENTIFIABLE",
+    )
+    test_orchestrator.handle_checkout_capture()
+
+    assert "ไม่พบอาหาร" in test_orchestrator.window.alert_banner.label_th.text()
+    assert "ไม่มีสัญญาณอินเทอร์เน็ต" not in test_orchestrator.window.alert_banner.label_th.text()
+
+    # 3. Genuine network failure still buffers offline capture and transitions screen
+    test_orchestrator.cloud_client.checkin_draft.return_value = (
+        False,
+        None,
+        "Network connection error during check-in draft: timed out",
+    )
+    test_orchestrator.handle_checkin_capture()
+
+    test_orchestrator.sync_manager.enqueue_offline_checkin.assert_called_once()
+    assert test_orchestrator.window.stack.currentIndex() == 1
