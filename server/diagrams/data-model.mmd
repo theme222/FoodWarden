@@ -1,0 +1,25 @@
+flowchart TB
+    accTitle: D1 logical storage groups and actual ownership relationships
+    accDescr: Logical table groups from migrations 0001 through 0004. Arrows describe ownership or application lookup, not a claim that every link is a foreign key.
+    user["Identity<br/>user, session, account, verification"]
+    fridge["Tenant<br/>fridges, fridge_members, fridge_secrets<br/>Membership email matched to verified user"]
+    inventory["Food inventory<br/>inventory<br/>Bilingual names, category and expiry"]
+    receipts["Idempotency<br/>inventory_operations, draft_operations<br/>Operation key and request fingerprint"]
+    telemetry["Device history<br/>telemetry_samples, door_events, system_status"]
+    quotas["Inference budget<br/>ai_reservations<br/>Creator and global reservation limits"]
+    family["Family notification delivery<br/>alert_cooldowns, line_alert_events, line_outbox"]
+    personal["Personal preferences and delivery<br/>user_line_profiles, user_fridge_favorites<br/>user_fridge_fav_categories, user_alert_cooldowns<br/>user_line_events, user_line_outbox"]
+    pairing["LINE binding and lifecycle<br/>line_pairing_codes, line_webhook_attempts<br/>line_target_resets"]
+    photo["Photo retirement claims<br/>photo_gc_claims<br/>Private R2 keys referenced by inventory"]
+    user -->|"Session identity and normalized email"| fridge
+    fridge --> inventory
+    fridge --> receipts
+    fridge --> telemetry
+    fridge --> family
+    fridge --> quotas
+    user --> personal
+    fridge --> personal
+    user --> pairing
+    fridge --> pairing
+    inventory --> photo
+    receipts -->|"Commit outcome references item ID"| inventory

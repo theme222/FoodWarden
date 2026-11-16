@@ -1,0 +1,21 @@
+flowchart TB
+    accTitle: React dashboard state and live data lifecycle
+    accDescr: SessionCache is keyed by user ID. SWR snapshots reconcile with WebSocket events and access errors clear private views.
+    auth["Google sign-in or dev-only login"] --> gate["Authenticated route gate"]
+    gate --> cache["SessionCache keyed by user.id<br/>Fresh in-memory SWR provider<br/>Discard on logout or account switch"]
+    cache --> hub["Fridge list and current membership"]
+    hub --> workspace["Per-fridge workspace"]
+    workspace --> snapshots["SWR REST snapshots<br/>Inventory, telemetry, door events and status"]
+    workspace --> socket["Same-origin WebSocket<br/>Ping and reconnect backoff"]
+    socket --> events{"Event type"}
+    events -->|"telemetry, status, door_events"| merge["Merge validated event into loaded cache<br/>Revalidate if initial snapshot missing"]
+    events -->|"inventory_changed"| refetch["Revalidate inventory and favorites"]
+    events -->|"member_revoked or fridge_deleted"| close["Close live connection<br/>Leave private workspace"]
+    socket -->|"Reconnect"| refresh["Refresh room snapshots"]
+    snapshots -->|"401, 403 or 404"| close
+    snapshots --> pages["Food dashboard, item editor<br/>Charts and device timeline"]
+    merge --> pages
+    refetch --> pages
+    refresh --> pages
+    workspace --> lazy["Lazy routes<br/>Settings, charts, personal account<br/>Owner-only gateway simulator"]
+    pages --> language["Thai and English labels<br/>Localized dates and FEFO display"]

@@ -1,0 +1,27 @@
+sequenceDiagram
+    accTitle: Fridge sensor BLE telemetry design
+    accDescr: Planned behavior from FUC and the project summary. Firmware and gateway implementations are still scaffolds on this branch.
+    participant F as F0 sensor design
+    participant C as C0 gateway design
+    participant Q as Durable local queue design
+    participant S as Implemented Worker
+    Note over F,C: BLE GATT peripheral F and central C, sensor uses no Wi-Fi
+    F->>F: Wake, FreeRTOS tasks sample LM73, SGP40 and LDR
+    Note over F: Sensor failure becomes defined sentinel, not a blocked I2C loop
+    C->>F: Connect, negotiate MTU at least 128
+    C->>F: Write 8-byte little-endian Unix time to FFF2
+    F->>F: Pack 1 to 6 timestamped samples
+    Note over F,C: 15-byte authenticated header: version, node ID, session salt, counter
+    F-->>C: FFF1 notify: AAD header, AES-128-GCM ciphertext and tag
+    C->>C: Authenticate, check session/counter and decode sentinels
+    C->>Q: Persist validated sample before cloud delivery
+    F->>F: Finish bounded BLE cycle and enter deep sleep
+    alt Internet available
+        Q->>S: HTTPS Bearer POST /api/telemetry
+        S->>S: Dedup by fridge, node and sample timestamp
+        S-->>Q: Ingested count
+        Q->>Q: Retire acknowledged batch
+    else Internet unavailable
+        Q->>Q: Retain records and retry with exponential backoff
+    end
+    Note over F,C: Application ACK/retry details need implementation and PDR measurement
