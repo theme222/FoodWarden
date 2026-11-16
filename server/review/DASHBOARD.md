@@ -1,6 +1,6 @@
 # Dashboard work log
 
-This work lives on `feat/server`. It adds the requested dashboard flows and documents the physical system without changing the canonical cross-device contracts.
+This work lives on `feat/server`. It adds the requested dashboard flows and documents the physical system without changing the canonical cross-device contracts. See [DASHBOARD-DESIGN-LOG.md](DASHBOARD-DESIGN-LOG.md) for the chronological UI/UX design iteration history and user feedback summary.
 
 ## Decisions and evidence
 
