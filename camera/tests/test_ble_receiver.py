@@ -116,14 +116,15 @@ def test_ble_connect_and_listen_notify_avoids_duplicate_replay(
         adv = MagicMock()
         adv.local_name = "FoodWarden-Fridge"
         adv.service_uuids = ["0000fff0-0000-1000-8000-00805f9b34fb"]
+        adv.rssi = -52
         assert filterfunc(fake_device, adv) is True
         return fake_device
 
     class FakeBleakClient:
-        def __init__(self, device: Any) -> None:
+        def __init__(self, device: Any, **kwargs: Any) -> None:
             self.device = device
             self.is_connected = True
-            self.notify_cb: Any = None
+            self.time_synced = False
             self.read_called = False
 
         async def __aenter__(self) -> Self:
@@ -134,13 +135,13 @@ def test_ble_connect_and_listen_notify_avoids_duplicate_replay(
 
         async def start_notify(self, uuid: str, cb: Any) -> None:
             assert uuid == TELEMETRY_CHAR_UUID
-            self.notify_cb = cb
+            assert self.time_synced is True
+            cb(None, bytearray(raw_pkt))
 
         async def write_gatt_char(self, uuid: str, data: bytes, response: bool = True) -> None:
             assert uuid == TIME_SYNC_CHAR_UUID
             assert len(data) == 8
-            if self.notify_cb is not None:
-                self.notify_cb(None, bytearray(raw_pkt))
+            self.time_synced = True
 
         async def read_gatt_char(self, uuid: str) -> bytearray:
             self.read_called = True

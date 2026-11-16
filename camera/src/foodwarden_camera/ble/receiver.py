@@ -179,6 +179,7 @@ class BLEReceiver:
         logger.info("Scanning for Node 'F' (Service UUID: %s)...", TELEMETRY_SERVICE_UUID)
 
         device: BLEDevice | None = None
+        rssis: dict[str, int] = {}
         if self.target_mac_address:
             device = await BleakScanner.find_device_by_address(
                 self.target_mac_address, timeout=timeout_s
@@ -187,6 +188,7 @@ class BLEReceiver:
 
             def _matches_node_f(candidate: BLEDevice, adv_data: AdvertisementData) -> bool:
                 name = candidate.name or adv_data.local_name or ""
+                rssis[candidate.address] = adv_data.rssi
                 if self.device_name_prefix in name:
                     return True
                 uuids = [u.lower() for u in (adv_data.service_uuids or ())]
@@ -202,7 +204,12 @@ class BLEReceiver:
             logger.debug("Node 'F' not found during scan window (sensor may be in deep sleep)")
             return
 
-        logger.info("Discovered Node 'F' at %s (%s). Connecting...", device.address, device.name)
+        logger.info(
+            "Discovered Node 'F' at %s (name=%s, rssi=%s). Connecting...",
+            device.address,
+            device.name,
+            rssis.get(device.address, "unknown"),
+        )
 
         packet_received = asyncio.Event()
 
@@ -210,19 +217,23 @@ class BLEReceiver:
             if self.handle_raw_telemetry(bytes(data)) is not None:
                 packet_received.set()
 
-        async with BleakClient(device) as client:
+        async with BleakClient(
+            device,
+            timeout=8.0,
+            services=[TELEMETRY_SERVICE_UUID],
+        ) as client:
             self._client = client
             self._connected = True
+            logger.info("Connected to Node 'F' at %s", device.address)
             try:
-                # 1. Subscribe before time write so notification fires as soon as packet is ready
-                await client.start_notify(TELEMETRY_CHAR_UUID, _on_notify)
-                logger.info("Subscribed to BLE telemetry notifications on %s", TELEMETRY_CHAR_UUID)
-
-                # 2. Synchronize 64-bit Unix RTC time on FFF2 (triggers encryption on Node 'F')
+                # 1. Synchronize 64-bit Unix RTC time on FFF2 first per FUC.md §6
                 if not await self.sync_time(client):
                     return
 
-                # 3. Wait briefly for notification; fallback to ATT long read if MTU was small
+                # 2. Subscribe to telemetry notifications; fallback to long read if MTU was small
+                await client.start_notify(TELEMETRY_CHAR_UUID, _on_notify)
+                logger.info("Subscribed to BLE telemetry notifications on %s", TELEMETRY_CHAR_UUID)
+
                 try:
                     await asyncio.wait_for(packet_received.wait(), timeout=1.5)
                 except TimeoutError:
@@ -231,7 +242,11 @@ class BLEReceiver:
                         self.handle_raw_telemetry(bytes(initial_bytes))
 
             except (BleakError, OSError, asyncio.CancelledError) as exc:
-                logger.warning("BLE communication exception with Node 'F': %s", exc)
+                logger.warning(
+                    "BLE communication exception with Node 'F' (%s): %s",
+                    type(exc).__name__,
+                    exc or repr(exc),
+                )
             finally:
                 self._connected = False
                 self._client = None
@@ -240,20 +255,28 @@ class BLEReceiver:
     async def run_loop(self) -> None:
         """Continuous background loop scanning and connecting with backoff."""
         self._running = True
-        backoff_s = 2.0
+        backoff_s = 1.0
         while self._running:
             try:
                 await self.connect_and_listen()
-                backoff_s = 2.0  # Reset backoff on successful connection
+                backoff_s = 1.0  # Reset backoff on successful cycle
             except (BleakError, OSError) as exc:
-                logger.warning("Error in BLE run loop: %s", exc)
+                logger.warning(
+                    "Error in BLE run loop (%s): %s",
+                    type(exc).__name__,
+                    exc or repr(exc),
+                )
                 await asyncio.sleep(backoff_s)
-                backoff_s = min(backoff_s * 1.5, 30.0)
+                backoff_s = min(backoff_s * 1.5, 10.0)
             except Exception as exc:  # noqa: BLE001
-                logger.warning("Unexpected BLE adapter error: %s", exc)
+                logger.warning(
+                    "Unexpected BLE adapter error (%s): %s",
+                    type(exc).__name__,
+                    exc or repr(exc),
+                )
                 await asyncio.sleep(backoff_s)
-                backoff_s = min(backoff_s * 1.5, 30.0)
-            await asyncio.sleep(1.0)
+                backoff_s = min(backoff_s * 1.5, 10.0)
+            await asyncio.sleep(0.5)
 
     def start(self) -> None:
         """Starts the BLE GATT scanner loop in a background daemon thread."""
