@@ -10,7 +10,8 @@ const text: Schema = { type: "string" };
 const timestamp: Schema = {
   type: "integer",
   minimum: 0,
-  description: "Unix time in seconds.",
+  description:
+    "Unix time in seconds. Event ingestion permits at most five minutes of future clock skew; historical buffered events remain valid.",
 };
 const nullableNumber: Schema = { type: ["number", "null"] };
 const date: Schema = {
@@ -47,7 +48,6 @@ const itemId = object({ item_id: text });
 const settingsPatch = object(
   {
     name: { type: "string", minLength: 1, maxLength: 80 },
-    line_target_id: { type: ["string", "null"], maxLength: 128 },
   },
   [],
 );
@@ -181,6 +181,23 @@ function route(
     required: true,
     schema: { type: "string" },
   }));
+  if (
+    method === "post" &&
+    [
+      "/api/inventory/checkin/draft",
+      "/api/inventory/checkout/draft",
+      "/api/inventory/checkin",
+    ].includes(path)
+  ) {
+    parameters.push({
+      in: "header",
+      name: "Idempotency-Key",
+      required: true,
+      description:
+        "UUID v4 per logical operation. Persist and reuse for identical retries; new real items and intentional analyses need a new UUID. Reusing a key with different input returns 409. Pending/uncertain operations never automatically regenerate.",
+      schema: { type: "string", format: "uuid" },
+    });
+  }
   const operation: OpenAPIV3_1.OperationObject = {
     summary,
     tags: [tag],
@@ -319,12 +336,11 @@ route(
   "Settings",
   {
     description:
-      "Owner only. Supply name, line_target_id and/or gemini_api_key. Empty string or null clears a saved secret/target. The Gemini key is never returned.",
+      "Owner only. Supply name and/or gemini_api_key. Empty string or null clears a saved Gemini key. LINE recipients must use verified pairing and dedicated disconnect. The Gemini key is never returned.",
     requestBody: body(
       object(
         {
           name: { type: "string", minLength: 1, maxLength: 80 },
-          line_target_id: { type: ["string", "null"], maxLength: 128 },
           gemini_api_key: {
             type: ["string", "null"],
             maxLength: 256,

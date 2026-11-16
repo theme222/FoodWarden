@@ -56,19 +56,28 @@ function FoodPhoto({
   );
 }
 
-export function FoodDetail({
-  itemId,
-  items,
-  fridgeId,
-  language,
-  onChanged,
-}: {
+interface FoodDetailProps {
   itemId: string;
   items: Food[];
   fridgeId: string;
   language: Language;
   onChanged: () => void;
-}) {
+}
+export function FoodDetail(props: FoodDetailProps) {
+  return (
+    <FoodDetailEditor
+      key={JSON.stringify([props.fridgeId, props.itemId])}
+      {...props}
+    />
+  );
+}
+function FoodDetailEditor({
+  itemId,
+  items,
+  fridgeId,
+  language,
+  onChanged,
+}: FoodDetailProps) {
   const t = words[language];
   const navigate = useNavigate();
   const [editing, setEditing] = useState(false);

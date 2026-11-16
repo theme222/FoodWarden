@@ -1,3 +1,4 @@
+import { eventTimeIsValid } from "./event-time";
 export const DOOR_EVENT_STATUSES = [
   "CLOSING",
   "SUCCESS",
@@ -16,10 +17,12 @@ export interface DoorEvent {
   status: DoorEventStatus;
 }
 
-const MAX_TIMESTAMP_S = 253_402_300_799;
 const MAX_EVENTS_PER_BATCH = 499;
 
-export function parseDoorEvents(body: unknown): DoorEvent[] | null {
+export function parseDoorEvents(
+  body: unknown,
+  nowS = Math.floor(Date.now() / 1000),
+): DoorEvent[] | null {
   if (
     typeof body !== "object" ||
     body === null ||
@@ -48,8 +51,7 @@ export function parseDoorEvents(body: unknown): DoorEvent[] | null {
       node_id.length > 128 ||
       typeof timestamp_s !== "number" ||
       !Number.isSafeInteger(timestamp_s) ||
-      timestamp_s < 0 ||
-      timestamp_s > MAX_TIMESTAMP_S ||
+      !eventTimeIsValid(timestamp_s, nowS) ||
       !validStatus
     ) {
       return null;
@@ -65,6 +67,8 @@ export async function ingestDoorEvents(
   events: DoorEvent[],
   nowS: number,
 ): Promise<number> {
+  if (events.some((event) => !eventTimeIsValid(event.timestamp_s, nowS)))
+    throw new Error("INVALID_EVENT_TIME");
   const unique = new Map<string, DoorEvent>();
   for (const event of events) {
     const key = `${event.node_id}\u0000${event.timestamp_s}\u0000${event.status}`;

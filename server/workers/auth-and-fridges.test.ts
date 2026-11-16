@@ -258,7 +258,6 @@ describe("Better Auth, fridge RBAC, and inventory CRUD", () => {
         headers: { Cookie: ownerCookie, "Content-Type": "application/json" },
         body: JSON.stringify({
           name: "Upstairs Fridge",
-          line_target_id: "U1234567890",
           gemini_api_key: "AIzaSyTestKey",
         }),
       },
@@ -270,7 +269,7 @@ describe("Better Auth, fridge RBAC, and inventory CRUD", () => {
       has_gemini_api_key: boolean;
     };
     expect(updatedSettings.name).toBe("Upstairs Fridge");
-    expect(updatedSettings.line_target_id).toBe("U1234567890");
+    expect(updatedSettings.line_target_id).toBeNull();
     expect(updatedSettings.has_gemini_api_key).toBe(true);
 
     // Gateway token rotation invalidates old token and activates new token.

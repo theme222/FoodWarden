@@ -1,3 +1,4 @@
+import { commitInventoryOperation } from "./operations";
 import { sha256Hex } from "./gateway";
 import {
   buildFoodPhotoKey,
@@ -202,7 +203,7 @@ export async function addManualFood(
     })(),
     db
       .prepare(
-        "SELECT fridge_id, manual_request_hash FROM inventory WHERE id = ?",
+        "SELECT fridge_id, request_hash AS manual_request_hash FROM inventory_operations WHERE kind='manual' AND operation_id = ?",
       )
       .bind(food.itemId)
       .first<{ fridge_id: string; manual_request_hash: string | null }>(),
@@ -254,32 +255,32 @@ export async function addManualFood(
   };
 
   try {
-    await db
-      .prepare(
-        `INSERT INTO inventory (
-           id, fridge_id, name_th, name_en, category, category_th,
-           estimated_expiry_date, storage_recommendation_th, storage_recommendation_en,
-           check_in_timestamp_s, image_storage_path, confidence, check_in_source, manual_request_hash
-         ) VALUES (?, ?, ?, ?, ?, ?, ?, '', '', ?, ?, 1.0, 'WEB_MANUAL', ?)`,
-      )
-      .bind(
-        food.itemId,
-        fridgeId,
-        resolvedNames.name_th,
-        resolvedNames.name_en,
-        food.category,
-        CATEGORY_TH_MAP[food.category],
-        food.expiry,
-        nowS,
-        photoKey ? toStoragePath(photoKey) : null,
-        fingerprint,
-      )
-      .run();
-    return "created";
+    const outcome = await commitInventoryOperation(
+      db,
+      fridgeId,
+      "manual",
+      food.itemId,
+      fingerprint,
+      {
+        id: food.itemId,
+        name_th: resolvedNames.name_th,
+        name_en: resolvedNames.name_en,
+        category: food.category,
+        category_th: CATEGORY_TH_MAP[food.category],
+        estimated_expiry_date: food.expiry,
+        storage_recommendation_th: "",
+        storage_recommendation_en: "",
+        check_in_timestamp_s: nowS,
+        image_storage_path: photoKey ? toStoragePath(photoKey) : null,
+        confidence: 1,
+        check_in_source: "WEB_MANUAL",
+      },
+    );
+    return outcome.created ? "created" : "duplicate";
   } catch {
     const raced = await db
       .prepare(
-        "SELECT fridge_id, manual_request_hash FROM inventory WHERE id = ?",
+        "SELECT fridge_id, request_hash AS manual_request_hash FROM inventory_operations WHERE kind='manual' AND operation_id = ?",
       )
       .bind(food.itemId)
       .first<{ fridge_id: string; manual_request_hash: string | null }>();
@@ -393,11 +394,11 @@ export async function queryTelemetryHistory(
     .prepare(
       `SELECT node_id, timestamp_s, temp_celsius, voc_index, light_ldr
        FROM telemetry_samples
-       WHERE fridge_id = ? AND timestamp_s >= ?
+       WHERE fridge_id = ? AND timestamp_s >= ? AND timestamp_s <= ?
        ORDER BY timestamp_s DESC
        LIMIT 2000`,
     )
-    .bind(fridgeId, sinceS)
+    .bind(fridgeId, sinceS, nowS)
     .all<{
       node_id: string;
       timestamp_s: number;
@@ -437,6 +438,7 @@ export async function listDoorEvents(
   db: D1Database,
   fridgeId: string,
   limitRaw: string | undefined,
+  nowS = Math.floor(Date.now() / 1000),
 ) {
   const parsed = limitRaw ? Number.parseInt(limitRaw, 10) : 50;
   const limit =
@@ -445,11 +447,11 @@ export async function listDoorEvents(
     .prepare(
       `SELECT node_id, timestamp_s, status
        FROM door_events
-       WHERE fridge_id = ?
+       WHERE fridge_id = ? AND timestamp_s <= ?
        ORDER BY timestamp_s DESC
        LIMIT ?`,
     )
-    .bind(fridgeId, limit)
+    .bind(fridgeId, nowS, limit)
     .all<{ node_id: string; timestamp_s: number; status: string }>();
   return results;
 }

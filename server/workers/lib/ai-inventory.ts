@@ -1,3 +1,5 @@
+import { sha256Hex } from "./gateway";
+import { commitInventoryOperation } from "./operations";
 import { isValidFridgeId } from "./fridges";
 import type {
   CheckOutMatchType,
@@ -196,32 +198,22 @@ export async function commitCameraCheckIn(
   fridgeId: string,
   payload: CheckInCommitPayload,
   nowS: number,
+  operationId: string,
 ): Promise<string> {
-  const itemId = `item_${crypto.randomUUID().replace(/-/g, "").slice(0, 16)}`;
-  await db
-    .prepare(
-      `INSERT INTO inventory (
-         id, fridge_id, name_th, name_en, category, category_th,
-         estimated_expiry_date, storage_recommendation_th, storage_recommendation_en,
-         check_in_timestamp_s, image_storage_path, confidence, check_in_source, manual_request_hash
-       ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'CAMERA', NULL)`,
-    )
-    .bind(
-      itemId,
-      fridgeId,
-      payload.name_th,
-      payload.name_en,
-      payload.category,
-      payload.category_th,
-      payload.estimated_expiry_date,
-      payload.storage_recommendation_th,
-      payload.storage_recommendation_en,
-      nowS,
-      payload.image_storage_path,
-      payload.confidence,
-    )
-    .run();
-  return itemId;
+  const outcome = await commitInventoryOperation(
+    db,
+    fridgeId,
+    "camera",
+    operationId,
+    await sha256Hex(JSON.stringify(payload)),
+    {
+      ...payload,
+      id: `item_${crypto.randomUUID().replace(/-/g, "").slice(0, 16)}`,
+      check_in_timestamp_s: nowS,
+      check_in_source: "CAMERA",
+    },
+  );
+  return outcome.itemId;
 }
 
 export async function listCheckOutCandidateRows(

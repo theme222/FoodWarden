@@ -161,8 +161,9 @@ async function callModelWithRetries(
   const endpoint = `${baseUrl.replace(/\/+$/, "")}/v1beta/models/${encodeURIComponent(model)}:generateContent`;
 
   for (let attempt = 0; attempt <= delays.length; attempt += 1) {
+    let response: Response;
     try {
-      const response = await fetch(endpoint, {
+      response = await fetch(endpoint, {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
@@ -171,7 +172,11 @@ async function callModelWithRetries(
         body: JSON.stringify(body),
         signal: AbortSignal.timeout(15_000),
       });
-
+    } catch {
+      // The provider may have accepted the request; never replay an uncertain call.
+      return { ok: false, status: 502, retriable: false };
+    }
+    try {
       if (response.ok) {
         const json = (await response.json()) as unknown;
         const text = extractGeminiJsonText(json);
@@ -191,11 +196,7 @@ async function callModelWithRetries(
 
       return { ok: false, status: response.status, retriable };
     } catch {
-      if (attempt < delays.length) {
-        await sleep(delays[attempt]!);
-        continue;
-      }
-      return { ok: false, status: 503, retriable: true };
+      return { ok: false, status: 502, retriable: false };
     }
   }
 

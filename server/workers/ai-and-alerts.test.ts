@@ -127,7 +127,10 @@ function multipartImageRequest(
   );
   return new Request(url, {
     method: "POST",
-    headers: { Authorization: `Bearer ${token}` },
+    headers: {
+      Authorization: `Bearer ${token}`,
+      "Idempotency-Key": crypto.randomUUID(),
+    },
     body: form,
   });
 }
@@ -455,6 +458,7 @@ describe("Gemini AI check-in/out, LINE alerts, and daily Cron", () => {
         headers: {
           "Content-Type": "application/json",
           Authorization: `Bearer ${token}`,
+          "Idempotency-Key": crypto.randomUUID(),
         },
         body: JSON.stringify({
           ...draftBody,
@@ -471,6 +475,7 @@ describe("Gemini AI check-in/out, LINE alerts, and daily Cron", () => {
         headers: {
           "Content-Type": "application/json",
           Authorization: `Bearer ${token}`,
+          "Idempotency-Key": crypto.randomUUID(),
         },
         body: JSON.stringify(draftBody),
       },
@@ -657,6 +662,7 @@ describe("Gemini AI check-in/out, LINE alerts, and daily Cron", () => {
         headers: {
           "Content-Type": "application/json",
           Authorization: `Bearer ${token}`,
+          "Idempotency-Key": crypto.randomUUID(),
         },
         body: JSON.stringify({ item_id: "milk_earliest" }),
       },
@@ -677,6 +683,7 @@ describe("Gemini AI check-in/out, LINE alerts, and daily Cron", () => {
         headers: {
           "Content-Type": "application/json",
           Authorization: `Bearer ${token}`,
+          "Idempotency-Key": crypto.randomUUID(),
         },
         body: JSON.stringify({ item_id: "milk_earliest" }),
       },
@@ -825,6 +832,7 @@ describe("Gemini AI check-in/out, LINE alerts, and daily Cron", () => {
         headers: {
           "Content-Type": "application/json",
           Authorization: `Bearer ${token}`,
+          "Idempotency-Key": crypto.randomUUID(),
         },
         body: JSON.stringify({
           events: [
@@ -842,6 +850,7 @@ describe("Gemini AI check-in/out, LINE alerts, and daily Cron", () => {
         headers: {
           "Content-Type": "application/json",
           Authorization: `Bearer ${token}`,
+          "Idempotency-Key": crypto.randomUUID(),
         },
         body: JSON.stringify({
           events: [
@@ -870,6 +879,7 @@ describe("Gemini AI check-in/out, LINE alerts, and daily Cron", () => {
       headers: {
         "Content-Type": "application/json",
         Authorization: `Bearer ${token}`,
+        "Idempotency-Key": crypto.randomUUID(),
       },
       body: JSON.stringify({
         samples: [
@@ -890,6 +900,7 @@ describe("Gemini AI check-in/out, LINE alerts, and daily Cron", () => {
       headers: {
         "Content-Type": "application/json",
         Authorization: `Bearer ${token}`,
+        "Idempotency-Key": crypto.randomUUID(),
       },
       body: JSON.stringify({
         samples: [
@@ -905,6 +916,95 @@ describe("Gemini AI check-in/out, LINE alerts, and daily Cron", () => {
     });
     expect(tel2.status).toBe(200);
     expect(pushedPayloads.length).toBe(3);
+  });
+
+  it("bypasses LINE alert cooldowns when bypass_cooldown=1 is passed", async () => {
+    const { DB } = getTestEnv();
+    const fridgeId = `bypass-${crypto.randomUUID()}`;
+    const token = `tok-${crypto.randomUUID()}`;
+    const t0 = Math.floor(Date.now() / 1000);
+
+    await seedFridge(DB, {
+      fridgeId,
+      token,
+      lineTargetId: "C_bypass_group_01",
+    });
+
+    const pushedPayloads: string[] = [];
+    mockLinePush((req) => {
+      pushedPayloads.push(req.bodyText);
+      return new Response("{}", { status: 200 });
+    }, 4);
+
+    const postDoor = (url: string, ts: number) =>
+      exports.default.fetch(url, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${token}`,
+          "Idempotency-Key": crypto.randomUUID(),
+        },
+        body: JSON.stringify({
+          events: [
+            {
+              node_id: "D0",
+              timestamp_s: ts,
+              status: "OBSTRUCTION_ERROR",
+            },
+          ],
+        }),
+      });
+
+    const door1 = await postDoor("http://localhost/api/door_events", t0);
+    expect(door1.status).toBe(200);
+    expect(pushedPayloads.length).toBe(1);
+
+    const door2 = await postDoor("http://localhost/api/door_events", t0 + 10);
+    expect(door2.status).toBe(200);
+    expect(pushedPayloads.length).toBe(1);
+
+    const door3 = await postDoor(
+      "http://localhost/api/door_events?bypass_cooldown=1",
+      t0 + 20,
+    );
+    expect(door3.status).toBe(200);
+    expect(pushedPayloads.length).toBe(2);
+
+    const postTemp = (url: string, ts: number) =>
+      exports.default.fetch(url, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${token}`,
+          "Idempotency-Key": crypto.randomUUID(),
+        },
+        body: JSON.stringify({
+          samples: [
+            {
+              node_id: "F0",
+              timestamp_s: ts,
+              temp_celsius: 11.5,
+              voc_index: 100,
+              light_ldr: 30,
+            },
+          ],
+        }),
+      });
+
+    const tel1 = await postTemp("http://localhost/api/telemetry", t0);
+    expect(tel1.status).toBe(200);
+    expect(pushedPayloads.length).toBe(3);
+
+    const tel2 = await postTemp("http://localhost/api/telemetry", t0 + 60);
+    expect(tel2.status).toBe(200);
+    expect(pushedPayloads.length).toBe(3);
+
+    const tel3 = await postTemp(
+      "http://localhost/api/telemetry?bypass_cooldown=1",
+      t0 + 120,
+    );
+    expect(tel3.status).toBe(200);
+    expect(pushedPayloads.length).toBe(4);
   });
 
   it("runs scheduled cron expiry digest (FEFO <= 2 days) and cleans up orphaned R2 crops", async () => {

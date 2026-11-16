@@ -1,3 +1,10 @@
+import {
+  requireOperationId,
+  runDraftOperation,
+  OperationConflictError,
+} from "./lib/operations";
+import { HTTPException } from "hono/http-exception";
+import { readLimitedBody } from "./lib/line-pairing";
 import { lineRoutes } from "./line-routes";
 import {
   personalDoorAlerts,
@@ -91,11 +98,36 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 async function parseJsonBody(
   c: Context<{ Bindings: AppBindings }>,
 ): Promise<unknown> {
+  const path = c.req.path;
+  const limit =
+    path === "/api/telemetry"
+      ? 16 * 1024 * 1024
+      : path === "/api/door_events"
+        ? 2 * 1024 * 1024
+        : path === "/api/status"
+          ? 512 * 1024
+          : c.req.method === "POST" &&
+              /^\/api\/fridges\/[^/]+\/inventory$/.test(path)
+            ? 2_000_000 + 64 * 1024
+            : 64 * 1024;
+  const bytes = await readLimitedBody(c.req.raw, limit);
+  if (!bytes)
+    throw new HTTPException(413, {
+      message: "JSON body exceeds this endpoint's byte limit.",
+    });
   try {
-    return await c.req.json<unknown>();
+    return JSON.parse(
+      new TextDecoder("utf-8", { fatal: true }).decode(bytes),
+    ) as unknown;
   } catch {
     return undefined;
   }
+}
+function ownerRevoked(c: Context<{ Bindings: AppBindings }>) {
+  return c.json(
+    { error: "FORBIDDEN", message: "Owner permission was revoked." },
+    403,
+  );
 }
 
 async function requireGatewayFridge(
@@ -350,24 +382,18 @@ app.patch("/api/fridges/:fridgeId", async (c) => {
     name = body.name.trim();
   }
 
-  let lineTargetId: string | null | undefined;
-  if (body.line_target_id !== undefined) {
-    if (body.line_target_id === null || body.line_target_id === "") {
-      lineTargetId = null;
-    } else if (
-      typeof body.line_target_id === "string" &&
-      body.line_target_id.trim().length <= 128
-    ) {
-      lineTargetId = body.line_target_id.trim();
-    } else {
-      return c.json<ApiErrorEnvelope>(
-        { error: "INVALID_PAYLOAD", message: "Invalid line_target_id." },
-        400,
-      );
-    }
+  if (Object.hasOwn(body, "line_target_id")) {
+    return c.json(
+      {
+        error: "INVALID_PAYLOAD",
+        message:
+          "Use verified LINE pairing or the dedicated disconnect endpoint.",
+      },
+      400,
+    );
   }
 
-  if (name === undefined && lineTargetId === undefined) {
+  if (name === undefined) {
     return c.json<ApiErrorEnvelope>(
       { error: "INVALID_PAYLOAD", message: "No editable fields provided." },
       400,
@@ -375,12 +401,16 @@ app.patch("/api/fridges/:fridgeId", async (c) => {
   }
 
   const nowS = Math.floor(Date.now() / 1000);
-  await updateFridgeSettings(
-    c.env.DB,
-    auth.fridgeId,
-    { name, line_target_id: lineTargetId },
-    nowS,
-  );
+  if (
+    !(await updateFridgeSettings(
+      c.env.DB,
+      auth.fridgeId,
+      { name },
+      nowS,
+      auth.user.email,
+    ))
+  )
+    return ownerRevoked(c);
   return c.json({ ok: true });
 });
 
@@ -388,7 +418,15 @@ app.delete("/api/fridges/:fridgeId", async (c) => {
   const auth = await requireFridgeRole(c, "owner");
   if (auth instanceof Response) return auth;
 
-  await deleteFridge(c.env.DB, c.env.PHOTOS, auth.fridgeId);
+  if (
+    !(await deleteFridge(
+      c.env.DB,
+      c.env.PHOTOS,
+      auth.fridgeId,
+      auth.user.email,
+    ))
+  )
+    return ownerRevoked(c);
   await notifyFridgeRoom(c.env, auth.fridgeId, { type: "fridge_deleted" });
   return c.json({ ok: true, deleted: true });
 });
@@ -397,7 +435,11 @@ app.get("/api/fridges/:fridgeId/settings", async (c) => {
   const auth = await requireFridgeRole(c, "owner");
   if (auth instanceof Response) return auth;
 
-  const settings = await getFridgeSettings(c.env.DB, auth.fridgeId);
+  const settings = await getFridgeSettings(
+    c.env.DB,
+    auth.fridgeId,
+    auth.user.email,
+  );
   if (!settings) {
     return c.json<ApiErrorEnvelope>(
       { error: "NOT_FOUND", message: "Fridge not found." },
@@ -437,21 +479,15 @@ app.put("/api/fridges/:fridgeId/settings", async (c) => {
     name = body.name.trim();
   }
 
-  let lineTargetId: string | null | undefined;
-  if (body.line_target_id !== undefined) {
-    if (body.line_target_id === null || body.line_target_id === "") {
-      lineTargetId = null;
-    } else if (
-      typeof body.line_target_id === "string" &&
-      body.line_target_id.trim().length <= 128
-    ) {
-      lineTargetId = body.line_target_id.trim();
-    } else {
-      return c.json<ApiErrorEnvelope>(
-        { error: "INVALID_PAYLOAD", message: "Invalid line_target_id." },
-        400,
-      );
-    }
+  if (Object.hasOwn(body, "line_target_id")) {
+    return c.json(
+      {
+        error: "INVALID_PAYLOAD",
+        message:
+          "Use verified LINE pairing or the dedicated disconnect endpoint.",
+      },
+      400,
+    );
   }
 
   let geminiApiKey: string | null | undefined;
@@ -471,11 +507,7 @@ app.put("/api/fridges/:fridgeId/settings", async (c) => {
     }
   }
 
-  if (
-    name === undefined &&
-    lineTargetId === undefined &&
-    geminiApiKey === undefined
-  ) {
+  if (name === undefined && geminiApiKey === undefined) {
     return c.json<ApiErrorEnvelope>(
       { error: "INVALID_PAYLOAD", message: "No settings fields provided." },
       400,
@@ -483,13 +515,22 @@ app.put("/api/fridges/:fridgeId/settings", async (c) => {
   }
 
   const nowS = Math.floor(Date.now() / 1000);
-  await updateFridgeSettings(
+  if (
+    !(await updateFridgeSettings(
+      c.env.DB,
+      auth.fridgeId,
+      { name, gemini_api_key: geminiApiKey },
+      nowS,
+      auth.user.email,
+    ))
+  )
+    return ownerRevoked(c);
+  const updated = await getFridgeSettings(
     c.env.DB,
     auth.fridgeId,
-    { name, line_target_id: lineTargetId, gemini_api_key: geminiApiKey },
-    nowS,
+    auth.user.email,
   );
-  const updated = await getFridgeSettings(c.env.DB, auth.fridgeId);
+  if (!updated) return ownerRevoked(c);
   return c.json(updated);
 });
 
@@ -498,7 +539,13 @@ app.post("/api/fridges/:fridgeId/gateway-token/rotate", async (c) => {
   if (auth instanceof Response) return auth;
 
   const nowS = Math.floor(Date.now() / 1000);
-  const gatewayToken = await rotateGatewayToken(c.env.DB, auth.fridgeId, nowS);
+  const gatewayToken = await rotateGatewayToken(
+    c.env.DB,
+    auth.fridgeId,
+    nowS,
+    auth.user.email,
+  );
+  if (!gatewayToken) return ownerRevoked(c);
   return c.json({ gateway_token: gatewayToken });
 });
 
@@ -799,6 +846,7 @@ app.all("/api/inventory/checkin/draft", async (c) => {
   const auth = await requireGatewayFridge(c);
   if (auth instanceof Response) return auth;
 
+  const operationId = requireOperationId(c.req.header("Idempotency-Key"));
   const parsed = await parseMultipartJpeg(c.req.raw);
   if (parsed.kind === "too_large") {
     return c.json<ApiErrorEnvelope>(
@@ -830,63 +878,73 @@ app.all("/api/inventory/checkin/draft", async (c) => {
     );
   }
 
-  const nowS = Math.floor(Date.now() / 1000);
-  let result;
-  try {
-    result = await withInferenceQuota(c.env, auth, () =>
-      classifyCheckInImage(c.env, apiKey, parsed.bytes, nowS),
-    );
-  } catch (error) {
-    if (error instanceof InferenceQuotaError) {
-      c.header("Retry-After", "60");
-      return c.json({ error: "RATE_LIMITED", message: error.message }, 429);
-    }
-    if (error instanceof GeminiUnavailableError) {
-      return c.json<ApiErrorEnvelope>(
-        { error: "SERVICE_UNAVAILABLE", message: error.message },
-        503,
+  return runDraftOperation(
+    c.env.DB,
+    auth,
+    "checkin",
+    operationId,
+    await sha256Hex(parsed.bytes),
+    async () => {
+      const nowS = Math.floor(Date.now() / 1000);
+      let result;
+      try {
+        result = await withInferenceQuota(c.env, auth, () =>
+          classifyCheckInImage(c.env, apiKey, parsed.bytes, nowS),
+        );
+      } catch (error) {
+        if (error instanceof InferenceQuotaError) {
+          c.header("Retry-After", "60");
+          return c.json({ error: "RATE_LIMITED", message: error.message }, 429);
+        }
+        if (error instanceof GeminiUnavailableError) {
+          return c.json<ApiErrorEnvelope>(
+            { error: "SERVICE_UNAVAILABLE", message: error.message },
+            503,
+          );
+        }
+        throw error;
+      }
+
+      if (!result || !result.is_food || result.confidence < 0.6) {
+        return c.json<ApiErrorEnvelope>(
+          {
+            error: "UNIDENTIFIABLE",
+            message:
+              "Item could not be reliably identified (confidence below 0.60 or non-food item).",
+          },
+          422,
+        );
+      }
+
+      const cropKey = `food_crops/${auth}/crop_${crypto.randomUUID()}.jpg`;
+      await putImmutablePhoto(c.env.PHOTOS, cropKey, parsed.bytes);
+
+      const estimatedExpiryDate = addDaysToIsoDate(
+        bangkokIsoDate(nowS),
+        result.estimated_shelf_life_days,
       );
-    }
-    throw error;
-  }
 
-  if (!result || !result.is_food || result.confidence < 0.6) {
-    return c.json<ApiErrorEnvelope>(
-      {
-        error: "UNIDENTIFIABLE",
-        message:
-          "Item could not be reliably identified (confidence below 0.60 or non-food item).",
-      },
-      422,
-    );
-  }
-
-  const cropKey = `food_crops/${auth}/crop_${crypto.randomUUID()}.jpg`;
-  await putImmutablePhoto(c.env.PHOTOS, cropKey, parsed.bytes);
-
-  const estimatedExpiryDate = addDaysToIsoDate(
-    bangkokIsoDate(nowS),
-    result.estimated_shelf_life_days,
+      return c.json({
+        name_th: result.name_th,
+        name_en: result.name_en,
+        category: result.category,
+        category_th: CATEGORY_TH_MAP[result.category],
+        estimated_shelf_life_days: result.estimated_shelf_life_days,
+        estimated_expiry_date: estimatedExpiryDate,
+        storage_recommendation_th: result.storage_recommendation_th,
+        storage_recommendation_en: result.storage_recommendation_en,
+        image_storage_path: toStoragePath(cropKey),
+        confidence: result.confidence,
+      });
+    },
   );
-
-  return c.json({
-    name_th: result.name_th,
-    name_en: result.name_en,
-    category: result.category,
-    category_th: CATEGORY_TH_MAP[result.category],
-    estimated_shelf_life_days: result.estimated_shelf_life_days,
-    estimated_expiry_date: estimatedExpiryDate,
-    storage_recommendation_th: result.storage_recommendation_th,
-    storage_recommendation_en: result.storage_recommendation_en,
-    image_storage_path: toStoragePath(cropKey),
-    confidence: result.confidence,
-  });
 });
 
 app.all("/api/inventory/checkin", async (c) => {
   const auth = await requireGatewayFridge(c);
   if (auth instanceof Response) return auth;
 
+  const operationId = requireOperationId(c.req.header("Idempotency-Key"));
   const body = await parseJsonBody(c);
   const payload = parseCheckInCommit(body, auth);
   if (!payload) {
@@ -900,7 +958,13 @@ app.all("/api/inventory/checkin", async (c) => {
   }
 
   const nowS = Math.floor(Date.now() / 1000);
-  const itemId = await commitCameraCheckIn(c.env.DB, auth, payload, nowS);
+  const itemId = await commitCameraCheckIn(
+    c.env.DB,
+    auth,
+    payload,
+    nowS,
+    operationId,
+  );
   await notifyFridgeRoom(c.env, auth, {
     type: "inventory_changed",
     action: "created",
@@ -921,6 +985,7 @@ app.all("/api/inventory/checkout/draft", async (c) => {
   const auth = await requireGatewayFridge(c);
   if (auth instanceof Response) return auth;
 
+  const operationId = requireOperationId(c.req.header("Idempotency-Key"));
   const parsed = await parseMultipartJpeg(c.req.raw);
   if (parsed.kind === "too_large") {
     return c.json<ApiErrorEnvelope>(
@@ -952,38 +1017,52 @@ app.all("/api/inventory/checkout/draft", async (c) => {
     );
   }
 
-  const rows = await listCheckOutCandidateRows(c.env.DB, auth);
-  let result;
-  try {
-    result = await withInferenceQuota(c.env, auth, () =>
-      matchCheckOutImage(c.env, apiKey, parsed.bytes, toPromptCandidates(rows)),
-    );
-  } catch (error) {
-    if (error instanceof InferenceQuotaError) {
-      c.header("Retry-After", "60");
-      return c.json({ error: "RATE_LIMITED", message: error.message }, 429);
-    }
-    if (error instanceof GeminiUnavailableError) {
-      return c.json<ApiErrorEnvelope>(
-        { error: "SERVICE_UNAVAILABLE", message: error.message },
-        503,
-      );
-    }
-    throw error;
-  }
+  return runDraftOperation(
+    c.env.DB,
+    auth,
+    "checkout",
+    operationId,
+    await sha256Hex(parsed.bytes),
+    async () => {
+      const rows = await listCheckOutCandidateRows(c.env.DB, auth);
+      let result;
+      try {
+        result = await withInferenceQuota(c.env, auth, () =>
+          matchCheckOutImage(
+            c.env,
+            apiKey,
+            parsed.bytes,
+            toPromptCandidates(rows),
+          ),
+        );
+      } catch (error) {
+        if (error instanceof InferenceQuotaError) {
+          c.header("Retry-After", "60");
+          return c.json({ error: "RATE_LIMITED", message: error.message }, 429);
+        }
+        if (error instanceof GeminiUnavailableError) {
+          return c.json<ApiErrorEnvelope>(
+            { error: "SERVICE_UNAVAILABLE", message: error.message },
+            503,
+          );
+        }
+        throw error;
+      }
 
-  if (!result || result.confidence < 0.6) {
-    return c.json<ApiErrorEnvelope>(
-      {
-        error: "UNIDENTIFIABLE",
-        message:
-          "Removed item could not be reliably identified (confidence below 0.60).",
-      },
-      422,
-    );
-  }
+      if (!result || result.confidence < 0.6) {
+        return c.json<ApiErrorEnvelope>(
+          {
+            error: "UNIDENTIFIABLE",
+            message:
+              "Removed item could not be reliably identified (confidence below 0.60).",
+          },
+          422,
+        );
+      }
 
-  return c.json(resolveCheckOutDraft(rows, result));
+      return c.json(resolveCheckOutDraft(rows, result));
+    },
+  );
 });
 
 app.all("/api/inventory/checkout", async (c) => {
@@ -1029,6 +1108,26 @@ app.all("/api/inventory/checkout", async (c) => {
   });
 });
 
+async function clearFridgeAlertCooldowns(
+  db: D1Database,
+  fridgeId: string,
+): Promise<void> {
+  await db.batch([
+    db
+      .prepare("DELETE FROM alert_cooldowns WHERE fridge_id = ?")
+      .bind(fridgeId),
+    db
+      .prepare("DELETE FROM user_alert_cooldowns WHERE fridge_id = ?")
+      .bind(fridgeId),
+    db
+      .prepare("DELETE FROM line_alert_events WHERE fridge_id = ?")
+      .bind(fridgeId),
+    db
+      .prepare("DELETE FROM user_line_events WHERE fridge_id = ?")
+      .bind(fridgeId),
+  ]);
+}
+
 app.all("/api/telemetry", async (c) => {
   const auth = await requireGatewayFridge(c);
   if (auth instanceof Response) return auth;
@@ -1046,6 +1145,7 @@ app.all("/api/telemetry", async (c) => {
   }
 
   const nowS = Math.floor(Date.now() / 1000);
+  const bypassCooldown = c.req.query("bypass_cooldown") === "1";
   const ingestedCount = await ingestTelemetry(c.env.DB, auth, samples, nowS);
   if (ingestedCount > 0) {
     await Promise.all([
@@ -1056,6 +1156,7 @@ app.all("/api/telemetry", async (c) => {
       }),
     ]);
   }
+  if (bypassCooldown) await clearFridgeAlertCooldowns(c.env.DB, auth);
   await Promise.all([
     maybeSendTelemetryAlerts(c.env, auth, samples, nowS),
     personalTelemetryAlerts(c.env, auth, samples, nowS),
@@ -1112,6 +1213,7 @@ app.all("/api/door_events", async (c) => {
   }
 
   const nowS = Math.floor(Date.now() / 1000);
+  const bypassCooldown = c.req.query("bypass_cooldown") === "1";
   const ingestedCount = await ingestDoorEvents(c.env.DB, auth, events, nowS);
   if (ingestedCount > 0) {
     await Promise.all([
@@ -1121,6 +1223,7 @@ app.all("/api/door_events", async (c) => {
       }),
     ]);
   }
+  if (bypassCooldown) await clearFridgeAlertCooldowns(c.env.DB, auth);
   await Promise.all([
     maybeSendDoorSafetyAlerts(c.env, auth, events, nowS),
     personalDoorAlerts(c.env, auth, events, nowS),
@@ -1138,6 +1241,19 @@ app.all("/api/*", (c) => {
 });
 
 app.onError((_err, c) => {
+  if (
+    _err instanceof HTTPException &&
+    (_err.status === 413 || _err.status === 400)
+  )
+    return c.json(
+      {
+        error: _err.status === 413 ? "PAYLOAD_TOO_LARGE" : "INVALID_PAYLOAD",
+        message: _err.message,
+      },
+      _err.status,
+    );
+  if (_err instanceof OperationConflictError)
+    return c.json({ error: "CONFLICT", message: _err.message }, 409);
   if (_err.message.includes("PHOTO_RETIRED"))
     return c.json(
       {

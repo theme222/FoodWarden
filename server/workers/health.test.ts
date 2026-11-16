@@ -8,6 +8,8 @@ interface TestEnv {
 }
 
 const EXPECTED_TABLES = [
+  "inventory_operations",
+  "draft_operations",
   "line_pairing_codes",
   "line_webhook_attempts",
   "line_target_resets",

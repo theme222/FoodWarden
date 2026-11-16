@@ -105,7 +105,13 @@ export function useFridgeRoom(
           );
           break;
         case "status":
-          void status.mutate(event.status, { revalidate: false });
+          void status.mutate(
+            (previous) =>
+              previous && previous.gatewaySeenS >= event.status.gatewaySeenS
+                ? previous
+                : event.status,
+            { revalidate: false },
+          );
           break;
         case "door_events":
           if (doors.data === undefined) {

@@ -151,15 +151,16 @@ export async function createFridge(
 export async function getFridgeSettings(
   db: D1Database,
   fridgeId: string,
+  actorEmail: string,
 ): Promise<FridgeSettings | null> {
   const fridge = await db
     .prepare(
       `SELECT f.id, f.name, f.line_target_id, fs.gateway_token, fs.gemini_api_key
        FROM fridges f
        INNER JOIN fridge_secrets fs ON fs.fridge_id = f.id
-       WHERE f.id = ?`,
+       WHERE f.id = ? AND EXISTS (SELECT 1 FROM fridge_members WHERE fridge_id=f.id AND email=? AND role='owner')`,
     )
-    .bind(fridgeId)
+    .bind(fridgeId, actorEmail)
     .first<{
       id: string;
       name: string;
@@ -193,68 +194,48 @@ export async function getFridgeSettings(
 export async function updateFridgeSettings(
   db: D1Database,
   fridgeId: string,
-  patch: {
-    name?: string;
-    line_target_id?: string | null;
-    gemini_api_key?: string | null;
-  },
+  patch: { name?: string; gemini_api_key?: string | null },
   nowS: number,
-): Promise<void> {
+  actorEmail: string,
+): Promise<boolean> {
   const statements: D1PreparedStatement[] = [];
-
-  if (patch.name !== undefined || patch.line_target_id !== undefined) {
-    if (patch.name !== undefined && patch.line_target_id !== undefined) {
-      statements.push(
-        db
-          .prepare(
-            "UPDATE fridges SET name = ?, line_target_id = ? WHERE id = ?",
-          )
-          .bind(patch.name, patch.line_target_id, fridgeId),
-      );
-    } else if (patch.name !== undefined) {
-      statements.push(
-        db
-          .prepare("UPDATE fridges SET name = ? WHERE id = ?")
-          .bind(patch.name, fridgeId),
-      );
-    } else if (patch.line_target_id !== undefined) {
-      statements.push(
-        db
-          .prepare("UPDATE fridges SET line_target_id = ? WHERE id = ?")
-          .bind(patch.line_target_id, fridgeId),
-      );
-    }
-  }
-
-  if (patch.gemini_api_key !== undefined) {
+  const owner =
+    "EXISTS (SELECT 1 FROM fridge_members WHERE fridge_id=? AND email=? AND role='owner')";
+  if (patch.name !== undefined)
+    statements.push(
+      db
+        .prepare("UPDATE fridges SET name=? WHERE id=? AND " + owner)
+        .bind(patch.name, fridgeId, fridgeId, actorEmail),
+    );
+  if (patch.gemini_api_key !== undefined)
     statements.push(
       db
         .prepare(
-          "UPDATE fridge_secrets SET gemini_api_key = ?, updated_at_s = ? WHERE fridge_id = ?",
+          "UPDATE fridge_secrets SET gemini_api_key=?, updated_at_s=? WHERE fridge_id=? AND " +
+            owner,
         )
-        .bind(patch.gemini_api_key, nowS, fridgeId),
+        .bind(patch.gemini_api_key, nowS, fridgeId, fridgeId, actorEmail),
     );
-  }
-
-  if (statements.length > 0) {
-    await db.batch(statements);
-  }
+  if (!statements.length) return false;
+  const results = await db.batch(statements);
+  return results.every((result) => (result.meta.changes ?? 0) > 0);
 }
 
 export async function rotateGatewayToken(
   db: D1Database,
   fridgeId: string,
   nowS: number,
-): Promise<string> {
-  const gatewayToken = generateGatewayToken();
-  const gatewayTokenHash = await sha256Hex(gatewayToken);
-  await db
+  actorEmail: string,
+): Promise<string | null> {
+  const token = generateGatewayToken();
+  const hash = await sha256Hex(token);
+  const result = await db
     .prepare(
-      "UPDATE fridge_secrets SET gateway_token = ?, gateway_token_hash = ?, updated_at_s = ? WHERE fridge_id = ?",
+      "UPDATE fridge_secrets SET gateway_token=?,gateway_token_hash=?,updated_at_s=? WHERE fridge_id=? AND EXISTS (SELECT 1 FROM fridge_members WHERE fridge_id=? AND email=? AND role='owner')",
     )
-    .bind(gatewayToken, gatewayTokenHash, nowS, fridgeId)
+    .bind(token, hash, nowS, fridgeId, fridgeId, actorEmail)
     .run();
-  return gatewayToken;
+  return result.meta.changes ? token : null;
 }
 
 export async function upsertFridgeMember(
@@ -319,7 +300,15 @@ export async function deleteFridge(
   db: D1Database,
   photos: R2Bucket,
   fridgeId: string,
-): Promise<void> {
+  actorEmail: string,
+): Promise<boolean> {
+  const removed = await db
+    .prepare(
+      "DELETE FROM fridges WHERE id=? AND EXISTS (SELECT 1 FROM fridge_members WHERE fridge_id=? AND email=? AND role='owner')",
+    )
+    .bind(fridgeId, fridgeId, actorEmail)
+    .run();
+  if (!removed.meta.changes) return false;
   let cursor: string | undefined;
   const prefix = `food_crops/${fridgeId}/`;
   do {
@@ -330,5 +319,5 @@ export async function deleteFridge(
     cursor = listed.truncated ? listed.cursor : undefined;
   } while (cursor);
 
-  await db.prepare("DELETE FROM fridges WHERE id = ?").bind(fridgeId).run();
+  return true;
 }

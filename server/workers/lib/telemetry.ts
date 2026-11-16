@@ -1,3 +1,4 @@
+import { eventTimeIsValid, MAX_FUTURE_SKEW_S } from "./event-time";
 export interface TelemetrySample {
   node_id: string;
   timestamp_s: number;
@@ -6,7 +7,6 @@ export interface TelemetrySample {
   light_ldr: number | null;
 }
 
-const MAX_TIMESTAMP_S = 253_402_300_799; // Last second of year 9999 in UTC.
 const MAX_SAMPLES_PER_BATCH = 10_000;
 const D1_BATCH_CHUNK_SIZE = 500;
 
@@ -20,7 +20,7 @@ function isNullableNumber(value: unknown): value is number | null {
   );
 }
 
-function parseSample(value: unknown): TelemetrySample | null {
+function parseSample(value: unknown, nowS: number): TelemetrySample | null {
   if (!isRecord(value)) return null;
   const { node_id, timestamp_s, temp_celsius, voc_index, light_ldr } = value;
   if (
@@ -30,8 +30,7 @@ function parseSample(value: unknown): TelemetrySample | null {
     node_id !== node_id.trim() ||
     typeof timestamp_s !== "number" ||
     !Number.isSafeInteger(timestamp_s) ||
-    timestamp_s < 0 ||
-    timestamp_s > MAX_TIMESTAMP_S ||
+    !eventTimeIsValid(timestamp_s, nowS) ||
     !isNullableNumber(temp_celsius) ||
     !isNullableNumber(voc_index) ||
     !isNullableNumber(light_ldr)
@@ -41,7 +40,10 @@ function parseSample(value: unknown): TelemetrySample | null {
   return { node_id, timestamp_s, temp_celsius, voc_index, light_ldr };
 }
 
-export function parseTelemetry(body: unknown): TelemetrySample[] | null {
+export function parseTelemetry(
+  body: unknown,
+  nowS = Math.floor(Date.now() / 1000),
+): TelemetrySample[] | null {
   if (
     !isRecord(body) ||
     !Array.isArray(body.samples) ||
@@ -53,7 +55,7 @@ export function parseTelemetry(body: unknown): TelemetrySample[] | null {
 
   const samples: TelemetrySample[] = [];
   for (const rawSample of body.samples as unknown[]) {
-    const sample = parseSample(rawSample);
+    const sample = parseSample(rawSample, nowS);
     if (!sample) return null;
     samples.push(sample);
   }
@@ -66,6 +68,8 @@ export async function ingestTelemetry(
   samples: TelemetrySample[],
   nowS: number,
 ): Promise<number> {
+  if (samples.some((sample) => !eventTimeIsValid(sample.timestamp_s, nowS)))
+    throw new Error("INVALID_EVENT_TIME");
   // Deduplicate within the incoming payload by (node_id, timestamp_s), keeping the first seen reading.
   const unique = new Map<string, TelemetrySample>();
   let newestSample: TelemetrySample | undefined;
@@ -114,12 +118,19 @@ export async function ingestTelemetry(
              last_telemetry_json = CASE
                WHEN last_telemetry_json IS NULL
                  OR COALESCE(CAST(json_extract(last_telemetry_json, '$.timestamp_s') AS INTEGER), -1) < ?
+                 OR CAST(json_extract(last_telemetry_json, '$.timestamp_s') AS INTEGER) > ?
                THEN ?
                ELSE last_telemetry_json
              END
          WHERE id = ?`,
       )
-      .bind(nowS, newestSample.timestamp_s, newestJson, fridgeId)
+      .bind(
+        nowS,
+        newestSample.timestamp_s,
+        nowS + MAX_FUTURE_SKEW_S,
+        newestJson,
+        fridgeId,
+      )
       .run();
   }
 
