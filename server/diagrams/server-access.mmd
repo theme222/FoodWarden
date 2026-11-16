@@ -1,0 +1,22 @@
+flowchart TB
+    accTitle: Server authentication and authorization boundaries
+    accDescr: Gateway tokens, verified user sessions and signed LINE webhooks use separate entry guards. Photos and realtime enforce fridge access.
+    request["Incoming HTTPS request"] --> route{"Entry route"}
+    route -->|"Gateway ingestion or camera inventory"| bearer["Extract Bearer token<br/>SHA-256 lookup in fridge_secrets"]
+    bearer --> tenant["Resolve exactly one fridge<br/>Validate body, timestamps and operation ID"]
+    route -->|"Dashboard API"| session["Better Auth cookie<br/>Verified user and normalized email"]
+    session --> membership{"Current fridge membership"}
+    membership -->|"Member"| member["Inventory, telemetry, status<br/>Private photos and live room"]
+    membership -->|"Owner"| owner["Settings, member roles, token rotation<br/>Family LINE and fridge deletion"]
+    session --> personal["Personal LINE and favorites<br/>Stable authenticated user ID"]
+    route -->|"LINE webhook"| signature["Bound raw body size<br/>HMAC-SHA256 signature verification"]
+    signature --> webhook["Event deduplication<br/>One-use pairing and lifecycle ordering"]
+    route -->|"Local dev login"| dev["APP_ENV must be development<br/>Production route disabled"]
+    tenant --> operations["Tenant-scoped D1 operations<br/>Bound inference quotas and receipts"]
+    member --> operations
+    owner --> operations
+    operations --> photo["R2 photo stream<br/>Membership plus item reference<br/>No public bucket URLs"]
+    operations --> room["FridgeRoom WebSocket<br/>Upgrade and live session reauthorization<br/>Close on revocation or deletion"]
+    membership -->|"Missing or invalid"| deny["Deny private data access"]
+    bearer -->|"Invalid token"| deny
+    signature -->|"Invalid signature"| deny

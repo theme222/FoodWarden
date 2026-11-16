@@ -27,8 +27,8 @@ sequenceDiagram
         C->>R: Send or retry buffered telemetry
         R->>S: POST /api/telemetry
         S-->>C: Return ingested count
-        C->>R: Heartbeat every 60 s per PR #5
+        C->>R: Periodic gateway heartbeat - planned sender
         R->>S: POST /api/status · C0, F0, D0 and last seen values
         S-->>C: Return updated count
-        Note over C,S: Gateway sender still needs the PR #5 integration.
+        Note over C,S: Gateway and firmware entry points are scaffolds in this branch.
     end

@@ -1,9 +1,9 @@
 flowchart TB
     accTitle: Camera and gateway hardware
     accDescr: Gateway power, camera, display and motion sensor from Fridge.drawio. See the review notes for firmware differences.
-    %% Pi-top [4] runs Raspberry Pi OS Bullseye (Legacy 64-bit) and Python 3.11 (uv).
-    %% YOLOv8n handles food cropping and human detection. Mosquitto, Bleak and SQLite handle communications.
-    %% PyQt5 UI uses Up, Down, O and X. Check-out defaults to FEFO.
+    %% Pi-top [4] runs Raspberry Pi OS Bookworm (64-bit) and Python 3.11 (uv).
+    %% YOLO11n handles food cropping and human detection. Mosquitto, Bleak and SQLite handle communications.
+    %% PyQt6 UI uses Up, Down, O and X. Check-out defaults to FEFO.
     %% PIR wakes the display and webcam. They sleep after 10 minutes of inactivity.
 
     outlet["AC 220 V outlet"]

@@ -1,0 +1,32 @@
+sequenceDiagram
+    accTitle: Gateway intended local user and safety workflows
+    accDescr: Design from SUMMARY and interface contracts. Camera code on feat/server currently only prints a greeting.
+    participant U as User and LCD
+    participant C as C0 gateway design
+    participant V as Local YOLO11n
+    participant D as D0 closer design
+    participant S as Implemented Worker API
+    U->>C: O check-in or X check-out
+    C->>V: Capture camera frame and detect grocery
+    V-->>C: Crop if confidence at least 0.60, otherwise full frame
+    C->>S: JPEG draft request with Bearer and stable operation ID
+    S-->>C: Bilingual metadata or FEFO candidate list
+    C-->>U: Review expiry or select matching item
+    U->>C: Confirm selection or cancel
+    C->>S: Commit confirmed operation
+    S-->>C: Persisted outcome
+    C-->>U: Show success or retryable error
+    Note over C,D: Separate local safety path, no cloud dependency
+    C->>V: Door ajar over 60 s, check for people
+    V-->>C: No person detected
+    C->>D: MQTT TLS CLOSE_DOOR with cmd_id
+    D-->>C: Acknowledgement and status events
+    alt Person approaches during motion
+        V-->>C: Human detected
+        C->>D: MQTT TLS ABORT
+    else Hardware obstruction
+        D->>D: INA219 cutoff and bounded safe retract
+    end
+    D-->>C: Final result
+    C->>S: Report or store-and-forward door event
+    Note over U,C: PIR wakes camera/display, inactivity sleep is a design requirement

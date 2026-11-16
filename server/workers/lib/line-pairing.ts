@@ -1,6 +1,7 @@
 import type { AppBindings } from "../types";
 import type { AuthenticatedUser } from "./auth";
 import { sha256Hex } from "./gateway";
+import { LINE_MAX_TEXT_LENGTH, capLineText } from "./line-format";
 import { notifyFridgeRoom } from "./room";
 
 export class LinePairingError extends Error {
@@ -162,7 +163,9 @@ async function reply(env: AppBindings, event: LineEvent, message: string) {
         signal: AbortSignal.timeout(10_000),
         body: JSON.stringify({
           replyToken: event.replyToken,
-          messages: [{ type: "text", text: message }],
+          messages: [
+            { type: "text", text: capLineText(message, LINE_MAX_TEXT_LENGTH) },
+          ],
         }),
       },
     );

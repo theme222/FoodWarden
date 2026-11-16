@@ -4,6 +4,13 @@ import type { TelemetrySample } from "./telemetry";
 import { LinePairingError } from "./line-pairing";
 import { readFavorites, type LineProfile } from "./personal";
 import { addDaysToIsoDate, bangkokIsoDate } from "./gemini";
+import {
+  LINE_MAX_MESSAGES_PER_REQUEST,
+  LINE_MAX_TEXT_LENGTH,
+  capLineText,
+  safeSliceText,
+  summarizeLineItems,
+} from "./line-format";
 interface Message {
   type: "text";
   text: string;
@@ -14,6 +21,13 @@ async function push(
   messages: Message[],
   key: string,
 ): Promise<"accepted" | "retry" | "rejected"> {
+  const safeMessages = messages
+    .slice(0, LINE_MAX_MESSAGES_PER_REQUEST)
+    .map((msg) => ({
+      type: "text" as const,
+      text: capLineText(msg.text, LINE_MAX_TEXT_LENGTH),
+    }));
+  if (safeMessages.length === 0) return "rejected";
   try {
     const res = await fetch(
       `${env.LINE_API_BASE_URL?.replace(/\/+$/, "") || "https://api.line.me"}/v2/bot/message/push`,
@@ -25,7 +39,7 @@ async function push(
           "X-Line-Retry-Key": key,
         },
         signal: AbortSignal.timeout(10_000),
-        body: JSON.stringify({ to: target, messages }),
+        body: JSON.stringify({ to: target, messages: safeMessages }),
       },
     );
     const accepted =
@@ -69,17 +83,27 @@ export async function enqueuePersonalTest(
       .bind(userId)
       .all<{ id: string; name: string }>(),
   ]);
-  const accountLabel = userRow?.name
-    ? `${userRow.name} (${userRow.email})`
-    : (userRow?.email ?? userId);
+  const accountLabel = capLineText(
+    userRow?.name
+      ? `${userRow.name} (${userRow.email})`
+      : (userRow?.email ?? userId),
+    300,
+  );
+  const fridgeItems = fridges.results.map((f) => `${f.name} (${f.id})`);
   const fridgeSummary =
-    fridges.results.length > 0
-      ? fridges.results.map((f) => `${f.name} (${f.id})`).join(", ")
+    fridgeItems.length > 0
+      ? summarizeLineItems(
+          fridgeItems,
+          2500,
+          (omitted) => ` และอีก ${omitted} ตู้`,
+        )
       : "ยังไม่ได้เป็นสมาชิกตู้เย็นใด";
-  const text =
+  const text = capLineText(
     `👤 [LINE ส่วนตัว · บัญชี ${accountLabel}]\n` +
-    `FoodWarden เชื่อมต่อแล้ว ✅ คุณจะได้รับการแจ้งเตือนส่วนตัวที่แชทนี้\n` +
-    `ตู้เย็นในบัญชีของคุณ (${fridges.results.length} ตู้): ${fridgeSummary}`;
+      `FoodWarden เชื่อมต่อแล้ว ✅ คุณจะได้รับการแจ้งเตือนส่วนตัวที่แชทนี้\n` +
+      `ตู้เย็นในบัญชีของคุณ (${fridges.results.length} ตู้): ${fridgeSummary}`,
+    LINE_MAX_TEXT_LENGTH,
+  );
   const insert = await env.DB.prepare(
     `INSERT INTO user_line_outbox(id,user_id,alert_type,event_key,fridge_ids_json,target_id,messages_json,created_s,next_attempt_s)
     SELECT ?,?,'test',?,'[]',?,?,?,? WHERE NOT EXISTS(SELECT 1 FROM user_line_outbox WHERE user_id=? AND alert_type='test' AND created_s>?)`,
@@ -240,12 +264,19 @@ async function queueInstant(
   for (const profile of profiles.results) {
     const id = crypto.randomUUID();
     const cooldown = kind === "obstruct" ? 300 : 1800;
-    const userLabel = profile.user_name
-      ? `${profile.user_name} (${profile.user_email})`
-      : profile.user_email;
-    const messageText =
+    const userLabel = capLineText(
+      profile.user_name
+        ? `${profile.user_name} (${profile.user_email})`
+        : profile.user_email,
+      300,
+    );
+    const fridgeName = capLineText(profile.name, 160);
+    const boundedDetail = detail ? capLineText(detail, 2500) : "";
+    const messageText = capLineText(
       `👤 [แจ้งเตือนส่วนตัว · ${userLabel}]\n` +
-      `[${profile.name}] ${text} (รหัสตู้: ${fridgeId}${detail ? ` · ${detail}` : ""})`;
+        `[${fridgeName}] ${text} (รหัสตู้: ${fridgeId}${boundedDetail ? ` · ${boundedDetail}` : ""})`,
+      LINE_MAX_TEXT_LENGTH,
+    );
     statements.push(
       env.DB.prepare(
         `INSERT INTO user_line_outbox(id,user_id,alert_type,event_key,fridge_ids_json,target_id,messages_json,created_s,next_attempt_s)
@@ -297,7 +328,12 @@ export async function personalDoorAlerts(
     ].includes(event.status),
   );
   if (!relevant.length) return;
-  const nodeIds = [...new Set(relevant.map((e) => e.node_id))].join(", ");
+  const uniqueNodes = [...new Set(relevant.map((e) => e.node_id))];
+  const nodeIds = summarizeLineItems(
+    uniqueNodes,
+    1200,
+    (omitted) => ` และอีก ${omitted} โหนด`,
+  );
   await queueInstant(
     env,
     fridgeId,
@@ -426,17 +462,20 @@ export async function queueMorningDigests(
       }
     }
     if (!sections.length) continue;
-    const userLabel = profile.user_name
-      ? `${profile.user_name} (${profile.user_email})`
-      : profile.user_email;
+    const userLabel = capLineText(
+      profile.user_name
+        ? `${profile.user_name} (${profile.user_email})`
+        : profile.user_email,
+      300,
+    );
     const summary =
       `👤 สวัสดีตอนเช้า 🥬 สรุปเช้า FoodWarden ${today} (LINE ส่วนตัว · ${userLabel})\n\n` +
       sections.join("\n\n");
+    const digestSuffix = "\n\nสรุปบางส่วน กรุณาเปิด FoodWarden เพื่อดูรายการทั้งหมด";
     const text =
       summary.length > 4500
-        ? summary.slice(0, 4400) +
-          "\n\nสรุปบางส่วน กรุณาเปิด FoodWarden เพื่อดูรายการทั้งหมด"
-        : summary;
+        ? safeSliceText(summary, 4400) + digestSuffix
+        : capLineText(summary, LINE_MAX_TEXT_LENGTH);
     await env.DB.prepare(
       `INSERT INTO user_line_outbox(id,user_id,alert_type,event_key,fridge_ids_json,target_id,messages_json,created_s,next_attempt_s) VALUES(?,?,'morning',?,?,?,?,?,?) ON CONFLICT(user_id,alert_type,event_key) DO NOTHING`,
     )

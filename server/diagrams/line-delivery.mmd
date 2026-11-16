@@ -1,0 +1,30 @@
+sequenceDiagram
+    accTitle: LINE pairing and durable notification delivery
+    accDescr: Personal profiles and family destinations are separate. Signed webhook events bind one-use codes, outboxes retry with leases and current-recipient checks.
+    participant U as Signed-in dashboard
+    participant S as Worker / LINE routes
+    participant D as D1
+    participant L as LINE platform
+    participant J as Cron jobs
+    U->>S: Request personal or owner-only family pairing code
+    S->>D: Store code hash with session and 10-minute expiry
+    S-->>U: Show one-use code
+    Note over U,L: User sends code to bot in intended chat
+    L->>S: POST /api/line/webhook with signature
+    S->>S: Verify bounded raw body HMAC-SHA256
+    S->>D: Dedup event, check live session, scope and role
+    S->>D: Atomically consume code and bind destination
+    S-->>L: Webhook response
+    Note over S,D: Lifecycle events use ordering watermarks and reset guards
+    S->>D: Telemetry or door event triggers cooldown and outbox
+    J->>S: Daily family digest and orphan photo cleanup
+    J->>S: Every-minute personal digest and outbox dispatch
+    S->>D: Claim outbox lease and check current recipient
+    S->>L: Push bilingual messages with stable retry key
+    alt Delivery accepted
+        S->>D: Complete matching lease
+    else Transient delivery failure
+        S->>D: Schedule bounded retry with backoff
+    else Destination revoked or changed
+        S->>D: Cancel stale delivery
+    end
