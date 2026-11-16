@@ -22,8 +22,8 @@ const DOOR_STATUSES = [
 ] as const;
 
 const RAW_ENDPOINTS = [
-  "/api/telemetry?bypass_cooldown=1",
-  "/api/door_events?bypass_cooldown=1",
+  "/api/telemetry",
+  "/api/door_events",
   "/api/status",
   "/api/inventory/checkin",
   "/api/inventory/checkout",
@@ -93,7 +93,7 @@ function resolveNodeLastSeen(
 function sampleRawPayload(endpoint: RawEndpoint, fridgeId: string): string {
   const nowS = Math.floor(Date.now() / 1000);
   switch (endpoint) {
-    case "/api/telemetry?bypass_cooldown=1":
+    case "/api/telemetry":
       return JSON.stringify(
         {
           samples: [
@@ -109,7 +109,7 @@ function sampleRawPayload(endpoint: RawEndpoint, fridgeId: string): string {
         null,
         2,
       );
-    case "/api/door_events?bypass_cooldown=1":
+    case "/api/door_events":
       return JSON.stringify(
         {
           events: [
@@ -184,6 +184,7 @@ function useSimulatorSender(gatewayToken: string, th: boolean) {
         typeof payload === "string" ? payload : JSON.stringify(payload);
       const res = await fetch(endpoint, {
         method: "POST",
+        credentials: "same-origin",
         headers: {
           "Content-Type": "application/json",
           Authorization: `Bearer ${gatewayToken}`,
@@ -248,7 +249,7 @@ function TelemetrySimulatorSection({
   const [voc, setVoc] = useState("95");
   const [light, setLight] = useState("20");
   const [timestampRaw, setTimestampRaw] = useState("");
-  const [bypassCooldown, setBypassCooldown] = useState(true);
+  const [bypassCooldown, setBypassCooldown] = useState(false);
 
   function applyPreset(tVal: string, vVal: string, lVal: string) {
     setTemp(tVal);
@@ -387,8 +388,8 @@ function TelemetrySimulatorSection({
         <label className="toggle-row">
           <span>
             {th
-              ? "ข้าม Cooldown แจ้งเตือน LINE (ส่งแจ้งเตือนซ้ำได้ทันที)"
-              : "Bypass LINE alert cooldown (send alert immediately)"}
+              ? "ข้าม Cooldown แจ้งเตือน LINE (เฉพาะ dev + สิทธิ์ owner)"
+              : "Bypass LINE alert cooldown (dev only, owner session)"}
           </span>
           <input
             type="checkbox"
@@ -417,7 +418,7 @@ function DoorSimulatorSection({
   const [status, setStatus] =
     useState<(typeof DOOR_STATUSES)[number]>("OBSTRUCTION_ERROR");
   const [timestampRaw, setTimestampRaw] = useState("");
-  const [bypassCooldown, setBypassCooldown] = useState(true);
+  const [bypassCooldown, setBypassCooldown] = useState(false);
 
   async function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -481,8 +482,8 @@ function DoorSimulatorSection({
         <label className="toggle-row">
           <span>
             {th
-              ? "ข้าม Cooldown แจ้งเตือน LINE (ส่งแจ้งเตือนซ้ำได้ทันที)"
-              : "Bypass LINE alert cooldown (send alert immediately)"}
+              ? "ข้าม Cooldown แจ้งเตือน LINE (เฉพาะ dev + สิทธิ์ owner)"
+              : "Bypass LINE alert cooldown (dev only, owner session)"}
           </span>
           <input
             type="checkbox"

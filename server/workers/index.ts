@@ -1108,29 +1108,88 @@ app.all("/api/inventory/checkout", async (c) => {
   });
 });
 
-async function clearFridgeAlertCooldowns(
+async function authorizeCooldownBypass(
+  c: Context<{ Bindings: AppBindings }>,
+  fridgeId: string,
+): Promise<{ ownerUserId: string } | Response | null> {
+  const raw = c.req.query("bypass_cooldown");
+  if (raw === undefined || raw === "" || raw === "0") return null;
+  if (raw !== "1") {
+    return c.json<ApiErrorEnvelope>(
+      {
+        error: "INVALID_PAYLOAD",
+        message: "Invalid bypass_cooldown parameter.",
+      },
+      400,
+    );
+  }
+  if (c.env.APP_ENV !== "development") {
+    return c.json<ApiErrorEnvelope>(
+      {
+        error: "FORBIDDEN",
+        message: "Cooldown bypass is disabled outside development.",
+      },
+      403,
+    );
+  }
+  const user = await getAuthenticatedUser(c.env, c.req.raw);
+  if (
+    !user ||
+    (await getMemberRole(c.env.DB, fridgeId, user.email)) !== "owner"
+  ) {
+    return c.json<ApiErrorEnvelope>(
+      {
+        error: "FORBIDDEN",
+        message: "Cooldown bypass requires an authenticated fridge owner.",
+      },
+      403,
+    );
+  }
+  return { ownerUserId: user.id };
+}
+
+async function clearScopedAlertCooldowns(
   db: D1Database,
   fridgeId: string,
+  ownerUserId: string,
+  scope: "telemetry" | "door",
 ): Promise<void> {
+  // Never delete line_alert_events or user_line_events: replay receipts must remain intact.
+  if (scope === "telemetry") {
+    await db.batch([
+      db
+        .prepare(
+          "DELETE FROM alert_cooldowns WHERE fridge_id = ? AND alert_type IN ('voc_high', 'temp_high')",
+        )
+        .bind(fridgeId),
+      db
+        .prepare(
+          "DELETE FROM user_alert_cooldowns WHERE user_id = ? AND fridge_id = ? AND alert_type IN ('warm', 'spoil')",
+        )
+        .bind(ownerUserId, fridgeId),
+    ]);
+    return;
+  }
   await db.batch([
     db
-      .prepare("DELETE FROM alert_cooldowns WHERE fridge_id = ?")
+      .prepare(
+        "DELETE FROM alert_cooldowns WHERE fridge_id = ? AND alert_type IN ('door_obstruction', 'door_timeout', 'door_fault_lockout', 'door_contradiction')",
+      )
       .bind(fridgeId),
     db
-      .prepare("DELETE FROM user_alert_cooldowns WHERE fridge_id = ?")
-      .bind(fridgeId),
-    db
-      .prepare("DELETE FROM line_alert_events WHERE fridge_id = ?")
-      .bind(fridgeId),
-    db
-      .prepare("DELETE FROM user_line_events WHERE fridge_id = ?")
-      .bind(fridgeId),
+      .prepare(
+        "DELETE FROM user_alert_cooldowns WHERE user_id = ? AND fridge_id = ? AND alert_type = 'obstruct'",
+      )
+      .bind(ownerUserId, fridgeId),
   ]);
 }
 
 app.all("/api/telemetry", async (c) => {
   const auth = await requireGatewayFridge(c);
   if (auth instanceof Response) return auth;
+
+  const bypassAuth = await authorizeCooldownBypass(c, auth);
+  if (bypassAuth instanceof Response) return bypassAuth;
 
   const body = await parseJsonBody(c);
   const samples = parseTelemetry(body);
@@ -1145,22 +1204,31 @@ app.all("/api/telemetry", async (c) => {
   }
 
   const nowS = Math.floor(Date.now() / 1000);
-  const bypassCooldown = c.req.query("bypass_cooldown") === "1";
-  const ingestedCount = await ingestTelemetry(c.env.DB, auth, samples, nowS);
-  if (ingestedCount > 0) {
+  const { ingestedCount, acceptedSamples } = await ingestTelemetry(
+    c.env.DB,
+    auth,
+    samples,
+    nowS,
+  );
+  if (acceptedSamples.length > 0) {
+    if (bypassAuth) {
+      await clearScopedAlertCooldowns(
+        c.env.DB,
+        auth,
+        bypassAuth.ownerUserId,
+        "telemetry",
+      );
+    }
     await Promise.all([
       notifyFridgeRoom(c.env, auth, {
         type: "telemetry",
-        samples,
+        samples: acceptedSamples,
         last_seen_s: nowS,
       }),
+      maybeSendTelemetryAlerts(c.env, auth, acceptedSamples, nowS),
+      personalTelemetryAlerts(c.env, auth, acceptedSamples, nowS),
     ]);
   }
-  if (bypassCooldown) await clearFridgeAlertCooldowns(c.env.DB, auth);
-  await Promise.all([
-    maybeSendTelemetryAlerts(c.env, auth, samples, nowS),
-    personalTelemetryAlerts(c.env, auth, samples, nowS),
-  ]);
   return c.json({ success: true, ingested_count: ingestedCount });
 });
 
@@ -1200,6 +1268,9 @@ app.all("/api/door_events", async (c) => {
   const auth = await requireGatewayFridge(c);
   if (auth instanceof Response) return auth;
 
+  const bypassAuth = await authorizeCooldownBypass(c, auth);
+  if (bypassAuth instanceof Response) return bypassAuth;
+
   const body = await parseJsonBody(c);
   const events = parseDoorEvents(body);
   if (!events) {
@@ -1213,21 +1284,30 @@ app.all("/api/door_events", async (c) => {
   }
 
   const nowS = Math.floor(Date.now() / 1000);
-  const bypassCooldown = c.req.query("bypass_cooldown") === "1";
-  const ingestedCount = await ingestDoorEvents(c.env.DB, auth, events, nowS);
-  if (ingestedCount > 0) {
+  const { ingestedCount, acceptedEvents } = await ingestDoorEvents(
+    c.env.DB,
+    auth,
+    events,
+    nowS,
+  );
+  if (acceptedEvents.length > 0) {
+    if (bypassAuth) {
+      await clearScopedAlertCooldowns(
+        c.env.DB,
+        auth,
+        bypassAuth.ownerUserId,
+        "door",
+      );
+    }
     await Promise.all([
       notifyFridgeRoom(c.env, auth, {
         type: "door_events",
-        events,
+        events: acceptedEvents,
       }),
+      maybeSendDoorSafetyAlerts(c.env, auth, acceptedEvents, nowS),
+      personalDoorAlerts(c.env, auth, acceptedEvents, nowS),
     ]);
   }
-  if (bypassCooldown) await clearFridgeAlertCooldowns(c.env.DB, auth);
-  await Promise.all([
-    maybeSendDoorSafetyAlerts(c.env, auth, events, nowS),
-    personalDoorAlerts(c.env, auth, events, nowS),
-  ]);
   return c.json({ success: true, ingested_count: ingestedCount });
 });
 

@@ -61,12 +61,17 @@ export function parseDoorEvents(
   return events;
 }
 
+export interface DoorEventIngestResult {
+  ingestedCount: number;
+  acceptedEvents: DoorEvent[];
+}
+
 export async function ingestDoorEvents(
   db: D1Database,
   fridgeId: string,
   events: DoorEvent[],
   nowS: number,
-): Promise<number> {
+): Promise<DoorEventIngestResult> {
   if (events.some((event) => !eventTimeIsValid(event.timestamp_s, nowS)))
     throw new Error("INVALID_EVENT_TIME");
   const unique = new Map<string, DoorEvent>();
@@ -77,11 +82,12 @@ export async function ingestDoorEvents(
     }
   }
 
+  const deduped = [...unique.values()];
   const insertStmt = db.prepare(
     `INSERT OR IGNORE INTO door_events (fridge_id, node_id, timestamp_s, status)
      VALUES (?, ?, ?, ?)`,
   );
-  const statements = [...unique.values()].map((event) =>
+  const statements = deduped.map((event) =>
     insertStmt.bind(fridgeId, event.node_id, event.timestamp_s, event.status),
   );
   const touchFridgeStmt = db
@@ -91,9 +97,14 @@ export async function ingestDoorEvents(
     .bind(nowS, fridgeId);
 
   const results = await db.batch([...statements, touchFridgeStmt]);
-  let ingestedCount = 0;
-  for (let i = 0; i < statements.length; i += 1) {
-    ingestedCount += results[i]?.meta.changes ?? 0;
+  const acceptedEvents: DoorEvent[] = [];
+  for (let i = 0; i < deduped.length; i += 1) {
+    if ((results[i]?.meta.changes ?? 0) > 0) {
+      acceptedEvents.push(deduped[i]!);
+    }
   }
-  return ingestedCount;
+  return {
+    ingestedCount: acceptedEvents.length,
+    acceptedEvents,
+  };
 }
