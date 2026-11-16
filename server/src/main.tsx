@@ -53,6 +53,11 @@ import "./dashboard-theme.css";
 const Settings = lazy(() =>
   import("./Settings").then((module) => ({ default: module.Settings })),
 );
+const GatewaySimulatorPage = lazy(() =>
+  import("./GatewaySimulator").then((module) => ({
+    default: module.GatewaySimulatorPage,
+  })),
+);
 
 const MyAccount = lazy(() =>
   import("./MyAccount").then((module) => ({ default: module.MyAccount })),
@@ -194,8 +199,20 @@ function FridgeWorkspace({
   onAccessLost: () => void;
 }) {
   const t = words[language];
+  const location = useLocation();
   const room = useFridgeRoom(fridge.id, fridge.latest, onAccessLost);
   const base = "/fridges/" + encodeURIComponent(fridge.id);
+  const simQuery =
+    fridge.role === "owner" &&
+    new URLSearchParams(location.search).get("sim") === "1";
+
+  if (
+    simQuery &&
+    !location.pathname.endsWith("/sim") &&
+    !location.pathname.endsWith("/simulator")
+  ) {
+    return <Navigate to={base + "/sim"} replace />;
+  }
 
   return (
     <>
@@ -307,6 +324,25 @@ function FridgeWorkspace({
               <Navigate to={base} replace />
             )
           }
+        />
+        <Route
+          path="sim"
+          element={
+            fridge.role === "owner" ? (
+              <Suspense fallback={<output>{t.loading}</output>}>
+                <GatewaySimulatorPage
+                  fridgeId={fridge.id}
+                  language={language}
+                />
+              </Suspense>
+            ) : (
+              <Navigate to={base} replace />
+            )
+          }
+        />
+        <Route
+          path="simulator"
+          element={<Navigate to={base + "/sim"} replace />}
         />
         <Route path="*" element={<Navigate to={base} replace />} />
       </Routes>

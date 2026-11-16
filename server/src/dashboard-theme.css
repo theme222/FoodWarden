@@ -178,6 +178,7 @@ button:disabled {
   align-items: center;
   justify-content: center;
   gap: 0.4rem;
+  background: transparent;
   border: 0 !important;
   text-decoration: none;
   border-radius: 999px;
@@ -817,4 +818,80 @@ button:disabled {
 :focus-visible {
   outline: 3px solid #4e7a12;
   outline-offset: 3px;
+}
+
+.gateway-simulator {
+  display: grid;
+  gap: 1.1rem;
+  max-width: 52rem;
+}
+.sim-panel {
+  background: #f9fbf4;
+  border: 1px solid #d3e0b0;
+  border-radius: 20px;
+  padding: 1.25rem;
+  margin-top: 0.5rem;
+}
+.sim-panel h3 {
+  margin: 0 0 0.75rem;
+  font-size: 1.08rem;
+}
+.sim-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(13.5rem, 1fr));
+  gap: 0.85rem;
+  margin-block: 0.75rem;
+}
+.gateway-simulator label:not(.toggle-row) {
+  display: grid;
+  gap: 0.35rem;
+  font-weight: 600;
+  font-size: 0.88rem;
+}
+.gateway-simulator :is(input:not([type="checkbox"]), select, textarea) {
+  display: block;
+  width: 100%;
+  min-width: 0;
+  min-height: 44px;
+  padding: 0.55rem 0.75rem;
+  border: 1px solid #c5d69b;
+  border-radius: 12px;
+  background: #fff;
+  color: #161a12;
+  font: inherit;
+}
+.gateway-simulator textarea {
+  font-family: ui-monospace, monospace;
+  font-size: 0.84rem;
+  min-height: 9rem;
+}
+.sim-checkout-form {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  gap: 0.75rem;
+  margin-top: 1rem;
+  padding-top: 1rem;
+  border-top: 1px solid #d3e0b0;
+}
+.sim-checkout-form label {
+  flex: 1 1 14rem;
+}
+.sim-output {
+  display: block;
+  margin-top: 0.75rem;
+  padding: 0.9rem 1rem;
+  border-radius: 14px;
+  font-family: ui-monospace, monospace;
+  font-size: 0.82rem;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  border: 1px solid #b7cf86;
+  background: #eef6dc;
+  color: #1f2b08;
+}
+.sim-output.err {
+  background: #fff0ed;
+  border-color: #e4aba4;
+  color: #812418;
 }

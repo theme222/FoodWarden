@@ -7,6 +7,8 @@ for (const name of [
   "document",
   "navigator",
   "location",
+  "sessionStorage",
+  "localStorage",
   "HTMLElement",
   "Element",
   "Node",

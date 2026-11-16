@@ -12,11 +12,14 @@ import { SWRConfig, useSWRConfig } from "swr";
 import { MemoryRouter } from "react-router-dom";
 import { ConfirmationProvider } from "@/components/confirmation";
 import { LineConnection } from "@/LineConnection";
+import { GatewaySimulator } from "@/GatewaySimulator";
 import { Inventory } from "@/Inventory";
 import type { Food } from "@/model";
 const originalFetch = globalThis.fetch;
 afterEach(() => {
   cleanup();
+  sessionStorage.clear();
+  localStorage.clear();
   globalThis.fetch = originalFetch;
 });
 const json = (data: unknown, status = 200) =>
@@ -56,13 +59,16 @@ test("LINE pairing shows direct-chat instructions, updates connection status and
     refresh = () => mutate("/api/me/line");
     return <LineConnection language="en" />;
   }
-  render(
-    <SWRConfig value={{ provider: () => new Map(), dedupingInterval: 0 }}>
-      <ConfirmationProvider language="en">
-        <Probe />
-      </ConfirmationProvider>
-    </SWRConfig>,
-  );
+  function renderConnection() {
+    return render(
+      <SWRConfig value={{ provider: () => new Map(), dedupingInterval: 0 }}>
+        <ConfirmationProvider language="en">
+          <Probe />
+        </ConfirmationProvider>
+      </SWRConfig>,
+    );
+  }
+  renderConnection();
   const user = userEvent.setup({ document });
   await user.click(
     await screen.findByRole("button", { name: "Create connection code" }),
@@ -72,10 +78,19 @@ test("LINE pairing shows direct-chat instructions, updates connection status and
     screen.getByText("Send personal codes in a direct chat, never in a group."),
   ).toBeTruthy();
   expect(screen.getByTitle("Scan to add FoodWarden")).toBeTruthy();
+  cleanup();
+  renderConnection();
+  expect(await screen.findByText("FW-ABCD-EFGH")).toBeTruthy();
+  expect(
+    mutations.filter((value) => value === "POST /api/me/line/pair"),
+  ).toHaveLength(1);
   linked = true;
   await act(async () => {
     await refresh();
   });
+  expect(
+    sessionStorage.getItem("foodwarden_line_pair:/api/me/line"),
+  ).toBeNull();
   await user.click(await screen.findByRole("button", { name: "Disconnect" }));
   expect(screen.getByRole("alertdialog")).toBeTruthy();
   expect(mutations.some((value) => value.startsWith("DELETE"))).toBe(false);
@@ -411,4 +426,71 @@ test("bulk editing patches only supplied fields and preserves failed items for r
     (screen.getByRole("checkbox", { name: "Select Milk" }) as HTMLInputElement)
       .checked,
   ).toBe(false);
+});
+
+test("GatewaySimulator flag toggles panel and posts telemetry, door events, and device status with gateway Bearer token", async () => {
+  const user = userEvent.setup({ document });
+  const calls: Array<{
+    url: string;
+    method: string;
+    auth: string | null;
+    body: unknown;
+  }> = [];
+
+  globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
+    const url = typeof input === "string" ? input : input.toString();
+    const headers = new Headers(init?.headers);
+    const bodyText = typeof init?.body === "string" ? init.body : "";
+    calls.push({
+      url,
+      method: init?.method ?? "GET",
+      auth: headers.get("Authorization"),
+      body: bodyText ? JSON.parse(bodyText) : null,
+    });
+    return new Response(JSON.stringify({ ok: true, accepted: 1 }), {
+      status: 200,
+      headers: { "Content-Type": "application/json" },
+    });
+  }) as unknown as typeof fetch;
+
+  render(
+    <GatewaySimulator
+      fridgeId="fridge_sim_1"
+      gatewayToken="tok_secret_sim"
+      language="en"
+    />,
+  );
+
+  expect(screen.queryByRole("button", { name: "Send Telemetry" })).toBeNull();
+
+  await user.click(
+    screen.getByRole("button", { name: "Enable Gateway Simulator" }),
+  );
+  expect(localStorage.getItem("foodwarden_gateway_sim")).toBe("1");
+
+  await user.click(screen.getByRole("button", { name: "Send Telemetry" }));
+  await screen.findByText(/200 POST \/api\/telemetry\?bypass_cooldown=1/);
+
+  await user.click(screen.getByRole("button", { name: "Send Door Event" }));
+  await screen.findByText(/200 POST \/api\/door_events\?bypass_cooldown=1/);
+
+  await user.click(screen.getByRole("button", { name: "Send Device Status" }));
+  await screen.findByText(/200 POST \/api\/status/);
+
+  expect(calls.length).toBe(3);
+  expect(calls[0]).toMatchObject({
+    url: "/api/telemetry?bypass_cooldown=1",
+    method: "POST",
+    auth: "Bearer tok_secret_sim",
+  });
+  expect(calls[1]).toMatchObject({
+    url: "/api/door_events?bypass_cooldown=1",
+    method: "POST",
+    auth: "Bearer tok_secret_sim",
+  });
+  expect(calls[2]).toMatchObject({
+    url: "/api/status",
+    method: "POST",
+    auth: "Bearer tok_secret_sim",
+  });
 });
