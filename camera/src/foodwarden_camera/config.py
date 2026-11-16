@@ -59,9 +59,9 @@ class GatewaySettings(BaseModel):
     firebase_api_base_url: str = Field(
         default=os.getenv(
             "FIREBASE_API_BASE_URL",
-            "https://asia-southeast1-foodwarden-app.cloudfunctions.net/api",
+            "https://foodwarden.newisnooby.workers.dev/api",
         ),
-        description="Base URL for Firebase Cloud Functions REST API",
+        description="Base URL for Server 'S' REST API",
     )
     gateway_token: str = Field(
         default=os.getenv("GATEWAY_TOKEN", ""),

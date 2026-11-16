@@ -2,6 +2,7 @@
 
 import json
 import time
+import uuid
 from pathlib import Path
 
 import httpx
@@ -17,12 +18,23 @@ from foodwarden_camera.models.cloud_cbs import (
     DoorEventSyncPayload,
     NodeStatusItem,
     StatusPayload,
+    normalize_event_timestamp,
 )
 from foodwarden_camera.storage.offline_queue import OfflineQueue
 
 
+def _has_valid_idempotency_key(request: httpx.Request) -> bool:
+    raw = request.headers.get("Idempotency-Key", "").strip()
+    if not raw:
+        return False
+    try:
+        return uuid.UUID(raw).version == 4
+    except ValueError:
+        return False
+
+
 def mock_api_handler(request: httpx.Request) -> httpx.Response:
-    """Simulates Firebase Cloud Functions endpoints per CBS.md & Server 'S'."""
+    """Simulates Server 'S' endpoints per CBS.md & openapi.ts."""
     path = request.url.path
     if request.method == "GET" and path.endswith("/health"):
         return httpx.Response(200, json={"ok": True})
@@ -33,6 +45,8 @@ def mock_api_handler(request: httpx.Request) -> httpx.Response:
         return httpx.Response(401, json={"error": "UNAUTHORIZED"})
 
     if path.endswith("/inventory/checkin/draft"):
+        if not _has_valid_idempotency_key(request):
+            return httpx.Response(400, json={"error": "INVALID_PAYLOAD"})
         return httpx.Response(
             200,
             json={
@@ -50,6 +64,8 @@ def mock_api_handler(request: httpx.Request) -> httpx.Response:
         )
 
     if path.endswith("/inventory/checkin"):
+        if not _has_valid_idempotency_key(request):
+            return httpx.Response(400, json={"error": "INVALID_PAYLOAD"})
         body = json.loads(request.content.decode("utf-8"))
         if "estimated_expiry_date" not in body:
             return httpx.Response(400, json={"error": "INVALID_PAYLOAD"})
@@ -63,6 +79,8 @@ def mock_api_handler(request: httpx.Request) -> httpx.Response:
         )
 
     if path.endswith("/inventory/checkout/draft"):
+        if not _has_valid_idempotency_key(request):
+            return httpx.Response(400, json={"error": "INVALID_PAYLOAD"})
         return httpx.Response(
             200,
             json={
@@ -366,3 +384,72 @@ def test_sync_manager_clamps_node_seen_timestamps_and_heartbeat_cadence(
         manager.stop_background_sync()
 
     assert heartbeat_count >= 2
+
+
+def test_idempotency_key_persistence_across_commit_retry_and_timestamp_clamping(
+    tmp_path: Path,
+) -> None:
+    queue = OfflineQueue(db_path=str(tmp_path / "idempotent_retry.db"))
+    seen_calls: list[tuple[str, str | None]] = []
+    fail_commit = True
+
+    def retry_handler(request: httpx.Request) -> httpx.Response:
+        path = request.url.path
+        key = request.headers.get("Idempotency-Key")
+        seen_calls.append((path, key))
+        assert key is not None and uuid.UUID(key).version == 4
+
+        if path.endswith("/inventory/checkin/draft"):
+            return httpx.Response(
+                200,
+                json={
+                    "name_th": "แอปเปิล",
+                    "name_en": "Red Apple",
+                    "category": "Produce",
+                    "category_th": "ผักและผลไม้",
+                    "estimated_shelf_life_days": 7,
+                    "estimated_expiry_date": "2026-11-23",
+                    "storage_recommendation_th": "แช่ช่องผัก",
+                    "storage_recommendation_en": "Crisper drawer",
+                    "image_storage_path": "/storage/food_crops/f1/apple.jpg",
+                    "confidence": 0.95,
+                },
+            )
+        if path.endswith("/inventory/checkin"):
+            if fail_commit:
+                return httpx.Response(503, json={"error": "SERVICE_UNAVAILABLE"})
+            return httpx.Response(201, json={"success": True, "item_id": "item_apple"})
+        return httpx.Response(404)
+
+    client = CloudClient(base_url="https://test.local/api", gateway_token="test_token")
+    client._get_client = lambda: httpx.Client(  # type: ignore[method-assign]
+        base_url=client.base_url,
+        headers=client._headers,
+        transport=httpx.MockTransport(retry_handler),
+    )
+
+    manager = CloudSyncManager(client, queue, captures_dir=str(tmp_path / "captures"))
+    manager.enqueue_offline_checkin(b"\xff\xd8\xff\xe0retry_jpeg")
+
+    # 1st flush: draft succeeds & persists draft_json; commit fails 503
+    first_counts = manager.flush_offline_queue()
+    assert first_counts["checkins"] == 0
+    assert len(queue.get_pending_checkins()) == 1
+
+    # 2nd flush: commit recovers and must NOT re-run draft, and MUST reuse the same commit key
+    fail_commit = False
+    second_counts = manager.flush_offline_queue()
+    assert second_counts["checkins"] == 1
+    assert len(queue.get_pending_checkins()) == 0
+
+    draft_calls = [call for call in seen_calls if call[0].endswith("/inventory/checkin/draft")]
+    commit_calls = [call for call in seen_calls if call[0].endswith("/inventory/checkin")]
+    assert len(draft_calls) == 1
+    assert len(commit_calls) == 2
+    assert commit_calls[0][1] == commit_calls[1][1]
+
+    # Timestamp clamping matches Server event-time bounds
+    now_ref = 1_760_000_000
+    assert normalize_event_timestamp(42, now_s=now_ref) == now_ref
+    assert normalize_event_timestamp(now_ref + 900, now_s=now_ref) == now_ref
+    assert normalize_event_timestamp(now_ref + 50, now_s=now_ref) == now_ref + 50

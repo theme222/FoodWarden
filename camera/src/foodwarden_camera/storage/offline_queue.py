@@ -9,6 +9,7 @@ from __future__ import annotations
 import json
 import sqlite3
 import time
+import uuid
 from pathlib import Path
 from typing import Any
 
@@ -73,12 +74,22 @@ class OfflineQueue:
                     image_path TEXT NOT NULL,
                     captured_at INTEGER NOT NULL,
                     confirmed_expiry TEXT,
+                    draft_idempotency_key TEXT,
+                    commit_idempotency_key TEXT,
+                    draft_json TEXT,
                     status TEXT DEFAULT 'PENDING',
                     created_at INTEGER NOT NULL,
                     attempts INTEGER DEFAULT 0
                 )
                 """
             )
+            existing_cols = {
+                str(row["name"])
+                for row in cursor.execute("PRAGMA table_info(offline_checkin)").fetchall()
+            }
+            for col_name in ("draft_idempotency_key", "commit_idempotency_key", "draft_json"):
+                if col_name not in existing_cols:
+                    cursor.execute(f"ALTER TABLE offline_checkin ADD COLUMN {col_name} TEXT")
             conn.commit()
 
     # ==========================================================================
@@ -229,21 +240,70 @@ class OfflineQueue:
         image_path: str,
         captured_at: int,
         confirmed_expiry: str | None = None,
+        draft_idempotency_key: str | None = None,
+        commit_idempotency_key: str | None = None,
+        draft_json: str | None = None,
     ) -> int:
-        """Enqueues an offline grocery check-in capture."""
+        """Enqueues an offline grocery check-in capture with persistent UUID v4 keys."""
         now = int(time.time())
+        draft_key = draft_idempotency_key or str(uuid.uuid4())
+        commit_key = commit_idempotency_key or str(uuid.uuid4())
         with self._get_connection() as conn:
             cursor = conn.cursor()
             cursor.execute(
                 """
                 INSERT INTO offline_checkin (
-                    image_path, captured_at, confirmed_expiry, status, created_at
-                ) VALUES (?, ?, ?, 'PENDING', ?)
+                    image_path,
+                    captured_at,
+                    confirmed_expiry,
+                    draft_idempotency_key,
+                    commit_idempotency_key,
+                    draft_json,
+                    status,
+                    created_at
+                ) VALUES (?, ?, ?, ?, ?, ?, 'PENDING', ?)
                 """,
-                (image_path, captured_at, confirmed_expiry, now),
+                (
+                    image_path,
+                    captured_at,
+                    confirmed_expiry,
+                    draft_key,
+                    commit_key,
+                    draft_json,
+                    now,
+                ),
             )
             conn.commit()
             return int(cursor.lastrowid or 0)
+
+    def save_checkin_draft(
+        self,
+        checkin_id: int,
+        draft_json: str,
+        confirmed_expiry: str | None = None,
+    ) -> None:
+        """Persists resolved draft payload so commit retries do not re-run inference."""
+        with self._get_connection() as conn:
+            cursor = conn.cursor()
+            if confirmed_expiry is not None:
+                cursor.execute(
+                    """
+                    UPDATE offline_checkin
+                    SET draft_json = ?, confirmed_expiry = ?
+                    WHERE id = ?
+                    """,
+                    (draft_json, confirmed_expiry, checkin_id),
+                )
+            else:
+                cursor.execute(
+                    """
+                    UPDATE offline_checkin
+                    SET draft_json = ?
+                    WHERE id = ?
+                    """,
+                    (draft_json, checkin_id),
+                )
+            conn.commit()
 
     def get_pending_checkins(self, limit: int = 10) -> list[dict[str, Any]]:
         """Retrieves pending offline grocery check-in captures."""
@@ -251,7 +311,9 @@ class OfflineQueue:
             cursor = conn.cursor()
             cursor.execute(
                 """
-                SELECT id, image_path, captured_at, confirmed_expiry, status, attempts
+                SELECT id, image_path, captured_at, confirmed_expiry,
+                       draft_idempotency_key, commit_idempotency_key, draft_json,
+                       status, attempts
                 FROM offline_checkin
                 WHERE status = 'PENDING'
                 ORDER BY captured_at ASC
@@ -260,7 +322,25 @@ class OfflineQueue:
                 (limit,),
             )
             rows = cursor.fetchall()
-            return [dict(row) for row in rows]
+            results: list[dict[str, Any]] = []
+            for row in rows:
+                item = dict(row)
+                if not item.get("draft_idempotency_key") or not item.get("commit_idempotency_key"):
+                    draft_key = str(item.get("draft_idempotency_key") or uuid.uuid4())
+                    commit_key = str(item.get("commit_idempotency_key") or uuid.uuid4())
+                    item["draft_idempotency_key"] = draft_key
+                    item["commit_idempotency_key"] = commit_key
+                    cursor.execute(
+                        """
+                        UPDATE offline_checkin
+                        SET draft_idempotency_key = ?, commit_idempotency_key = ?
+                        WHERE id = ?
+                        """,
+                        (draft_key, commit_key, item["id"]),
+                    )
+                results.append(item)
+            conn.commit()
+            return results
 
     def delete_checkin(self, checkin_id: int) -> int:
         """Deletes finalized checkin from queue."""

@@ -11,6 +11,7 @@ import subprocess
 import sys
 import threading
 import time
+import uuid
 from datetime import datetime, timedelta
 from typing import Any
 
@@ -423,13 +424,20 @@ class GatewayOrchestrator:
         # Crop grocery item with YOLO26n (fallback to full-frame if conf < 0.60)
         jpeg_bytes, _, _, _ = self.detector.crop_grocery(frame)
 
-        # Request AI draft from Cloud
-        ok, draft, err_msg = self.cloud_client.checkin_draft(jpeg_bytes)
+        # Request AI draft from Cloud with persistent UUID v4 Idempotency-Key
+        draft_key = str(uuid.uuid4())
+        ok, draft, err_msg = self.cloud_client.checkin_draft(
+            jpeg_bytes,
+            idempotency_key=draft_key,
+        )
         if ok and draft is not None:
             self.window.show_checkin_draft(draft, jpeg_bytes)
         else:
             logger.warning("Check-in draft failed (%s); buffering offline capture", err_msg)
-            self.sync_manager.enqueue_offline_checkin(jpeg_bytes)
+            self.sync_manager.enqueue_offline_checkin(
+                jpeg_bytes,
+                draft_idempotency_key=draft_key,
+            )
             self.window.show_offline_warning()
 
             # Offline Check-In Screen per GOAL.md §3:
@@ -451,6 +459,10 @@ class GatewayOrchestrator:
 
     def handle_commit_checkin(self, draft: CheckInDraftResult, expiry_date: str) -> None:
         """Triggered when user confirms check-in item on LCD (or 5s countdown elapses)."""
+        if draft.image_storage_path == "local_offline":
+            logger.info("Offline check-in already buffered for background draft/commit")
+            return
+
         payload = CheckInCommitPayload(
             name_th=draft.name_th,
             name_en=draft.name_en,
@@ -463,11 +475,13 @@ class GatewayOrchestrator:
             image_storage_path=draft.image_storage_path,
             confidence=draft.confidence,
         )
-        ok, res, err = self.cloud_client.checkin_commit(payload)
+        commit_key = str(uuid.uuid4())
+        ok, res, err = self.cloud_client.checkin_commit(payload, idempotency_key=commit_key)
         if ok and res is not None:
             logger.info("Successfully committed check-in: %s", res.item_id)
         else:
             logger.warning("Cloud checkin commit failed (%s); buffering for later sync", err)
+            self.sync_manager.enqueue_pending_commit(payload, commit_key)
 
     def handle_checkout_capture(self) -> None:
         """Triggered when user presses 'X' from Idle screen to check out food."""
@@ -477,7 +491,10 @@ class GatewayOrchestrator:
             return
 
         jpeg_bytes, _, _, _ = self.detector.crop_grocery(frame)
-        ok, result, err = self.cloud_client.checkout_draft(jpeg_bytes)
+        ok, result, err = self.cloud_client.checkout_draft(
+            jpeg_bytes,
+            idempotency_key=str(uuid.uuid4()),
+        )
         if ok and result is not None:
             self.window.show_checkout_candidates(result.candidates)
         else:

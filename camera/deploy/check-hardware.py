@@ -175,7 +175,7 @@ def check_peripherals(
 
     base_url = (
         (env_values or {}).get("FIREBASE_API_BASE_URL")
-        or "https://asia-southeast1-foodwarden-app.cloudfunctions.net/api"
+        or "https://foodwarden.newisnooby.workers.dev/api"
     ).rstrip("/")
     health_url = f"{base_url}/health"
     try:

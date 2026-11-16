@@ -321,3 +321,15 @@ class StatusPayload(BaseModel):
     """Component status heartbeat payload for POST /status."""
 
     nodes: list[NodeStatusItem]
+
+
+MIN_EVENT_TIME_S = 1_577_836_800  # 2020-01-01T00:00:00Z
+MAX_FUTURE_SKEW_S = 300
+
+
+def normalize_event_timestamp(timestamp_s: int, now_s: int | None = None) -> int:
+    """Clamps unsynced (< 2020-01-01) or future-skewed (> now + 300s) timestamps to wall-clock."""
+    ref_now = int(time.time()) if now_s is None else int(now_s)
+    if timestamp_s < MIN_EVENT_TIME_S or timestamp_s > ref_now + MAX_FUTURE_SKEW_S:
+        return ref_now
+    return int(timestamp_s)

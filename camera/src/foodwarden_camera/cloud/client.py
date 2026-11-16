@@ -1,13 +1,14 @@
-"""Firebase Cloud Functions HTTPS REST Client for Node 'C' <-> Server 'S'.
+"""Server 'S' HTTPS REST Client for Node 'C' <-> Server 'S'.
 
 Implements grocery check-in draft/commit, FEFO check-out candidate draft/commit,
-sensor telemetry batch upload, and door event logging per CBS.md.
+sensor telemetry batch upload, door event logging, and status heartbeats per CBS.md.
 """
 
 from __future__ import annotations
 
 import logging
 import time
+import uuid
 from datetime import datetime, timedelta
 
 import httpx
@@ -32,11 +33,11 @@ logger = logging.getLogger(__name__)
 
 
 class CloudClient:
-    """HTTPS REST client communicating with Firebase Cloud Functions."""
+    """HTTPS REST client communicating with Server 'S'."""
 
     def __init__(
         self,
-        base_url: str = "https://asia-southeast1-foodwarden-app.cloudfunctions.net/api",
+        base_url: str = "https://foodwarden.newisnooby.workers.dev/api",
         gateway_token: str = "",
         timeout_s: float = 20.0,
         mock_cloud: bool = False,
@@ -55,6 +56,10 @@ class CloudClient:
             headers["Authorization"] = f"Bearer {self.gateway_token}"
         return headers
 
+    @staticmethod
+    def _idempotency_headers(idempotency_key: str | None = None) -> dict[str, str]:
+        return {"Idempotency-Key": idempotency_key or str(uuid.uuid4())}
+
     def _get_client(self) -> httpx.Client:
         return httpx.Client(
             base_url=self.base_url,
@@ -66,7 +71,11 @@ class CloudClient:
     # 1. Grocery Check-In (CBS.md §3)
     # ==========================================================================
 
-    def checkin_draft(self, image_jpeg_bytes: bytes) -> tuple[bool, CheckInDraftResult | None, str]:
+    def checkin_draft(
+        self,
+        image_jpeg_bytes: bytes,
+        idempotency_key: str | None = None,
+    ) -> tuple[bool, CheckInDraftResult | None, str]:
         """Uploads compressed JPEG to request Gemini draft metadata.
 
         Returns:
@@ -95,7 +104,11 @@ class CloudClient:
         }
         try:
             with self._get_client() as client:
-                resp = client.post(url, files=files)
+                resp = client.post(
+                    url,
+                    files=files,
+                    headers=self._idempotency_headers(idempotency_key),
+                )
 
             if resp.status_code == 200:
                 data = resp.json()
@@ -122,9 +135,11 @@ class CloudClient:
             return False, None, err_msg
 
     def checkin_commit(
-        self, payload: CheckInCommitPayload
+        self,
+        payload: CheckInCommitPayload,
+        idempotency_key: str | None = None,
     ) -> tuple[bool, CheckInCommitResult | None, str]:
-        """Commits finalized grocery check-in item to Firestore."""
+        """Commits finalized grocery check-in item to Server 'S'."""
         if self.mock_cloud:
             result = CheckInCommitResult(
                 item_id=f"mock-item-{int(time.time())}",
@@ -137,7 +152,11 @@ class CloudClient:
         url = "/inventory/checkin"
         try:
             with self._get_client() as client:
-                resp = client.post(url, json=payload.to_cbs_dict())
+                resp = client.post(
+                    url,
+                    json=payload.to_cbs_dict(),
+                    headers=self._idempotency_headers(idempotency_key),
+                )
 
             if resp.status_code in (200, 201):
                 result = CheckInCommitResult.model_validate(resp.json())
@@ -158,7 +177,9 @@ class CloudClient:
     # ==========================================================================
 
     def checkout_draft(
-        self, image_jpeg_bytes: bytes
+        self,
+        image_jpeg_bytes: bytes,
+        idempotency_key: str | None = None,
     ) -> tuple[bool, CheckOutDraftResult | None, str]:
         """Uploads JPEG to request FEFO candidate matches from fridge inventory."""
         if self.mock_cloud:
@@ -201,7 +222,11 @@ class CloudClient:
         }
         try:
             with self._get_client() as client:
-                resp = client.post(url, files=files)
+                resp = client.post(
+                    url,
+                    files=files,
+                    headers=self._idempotency_headers(idempotency_key),
+                )
 
             if resp.status_code == 200:
                 result = CheckOutDraftResult.model_validate(resp.json())

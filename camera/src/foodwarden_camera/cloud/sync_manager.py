@@ -9,6 +9,7 @@ from __future__ import annotations
 import logging
 import threading
 import time
+import uuid
 from pathlib import Path
 from typing import Any
 
@@ -23,6 +24,7 @@ from foodwarden_camera.models.cloud_cbs import (
     TelemetrySamplePayload,
     TelemetrySyncPayload,
     normalize_door_event_status,
+    normalize_event_timestamp,
 )
 from foodwarden_camera.storage.offline_queue import OfflineQueue
 
@@ -107,7 +109,7 @@ class CloudSyncManager:
         sample_items = [
             TelemetrySamplePayload(
                 node_id=node_id,
-                timestamp_s=sample.timestamp_s,
+                timestamp_s=normalize_event_timestamp(sample.timestamp_s),
                 temp_celsius=sample.temp_celsius,
                 voc_index=sample.voc_index,
                 light_ldr=sample.light_ldr,
@@ -137,10 +139,11 @@ class CloudSyncManager:
         details: dict[str, Any],
     ) -> bool:
         """Attempts real-time cloud sync; buffers to SQLite if offline."""
+        norm_ts = normalize_event_timestamp(timestamp)
         payload = DoorEventSyncPayload(
             node_id=node_id,
             event_type=event_type,
-            timestamp=timestamp,
+            timestamp=norm_ts,
             details=details,
         )
         success = self.client.sync_door_event(payload)
@@ -150,7 +153,7 @@ class CloudSyncManager:
 
         # Failed: buffer to SQLite
         self._is_online = False
-        self.queue.enqueue_door_event(node_id, event_type, timestamp, details)
+        self.queue.enqueue_door_event(node_id, event_type, norm_ts, details)
         logger.info("Buffered door event %s to offline queue", event_type)
         return False
 
@@ -158,10 +161,12 @@ class CloudSyncManager:
         self,
         image_bytes: bytes,
         confirmed_expiry: str | None = None,
+        draft_idempotency_key: str | None = None,
+        commit_idempotency_key: str | None = None,
     ) -> int:
-        """Saves image to disk and enqueues offline check-in record."""
+        """Saves image to disk and enqueues offline check-in record with persistent keys."""
         now = int(time.time())
-        filename = f"offline_checkin_{now}.jpg"
+        filename = f"offline_checkin_{now}_{uuid.uuid4().hex[:6]}.jpg"
         file_path = self.captures_dir / filename
 
         with open(file_path, "wb") as f:
@@ -171,9 +176,25 @@ class CloudSyncManager:
             image_path=str(file_path),
             captured_at=now,
             confirmed_expiry=confirmed_expiry,
+            draft_idempotency_key=draft_idempotency_key,
+            commit_idempotency_key=commit_idempotency_key,
         )
         logger.info("Enqueued offline grocery check-in: id=%d, file=%s", checkin_id, file_path)
         return checkin_id
+
+    def enqueue_pending_commit(
+        self,
+        payload: CheckInCommitPayload,
+        commit_idempotency_key: str,
+    ) -> int:
+        """Enqueues a finalized check-in commit payload with its original Idempotency-Key."""
+        return self.queue.enqueue_checkin(
+            image_path="",
+            captured_at=int(time.time()),
+            confirmed_expiry=payload.estimated_expiry_date,
+            commit_idempotency_key=commit_idempotency_key,
+            draft_json=payload.model_dump_json(),
+        )
 
     # ==========================================================================
     # Queue Draining / Flush Operations
@@ -193,7 +214,7 @@ class CloudSyncManager:
             sample_items = [
                 TelemetrySamplePayload(
                     node_id=str(r["node_id"]),
-                    timestamp_s=int(r["timestamp_s"]),
+                    timestamp_s=normalize_event_timestamp(int(r["timestamp_s"])),
                     temp_celsius=float(r["temp_cdeg"]) if r["temp_cdeg"] is not None else None,
                     voc_index=int(r["voc_index"]) if r["voc_index"] is not None else None,
                     light_ldr=int(r["light_ldr"]) if r["light_ldr"] is not None else None,
@@ -216,7 +237,7 @@ class CloudSyncManager:
             event_payload = DoorEventSyncPayload(
                 node_id=str(evt["node_id"]),
                 event_type=str(evt["event_type"]),
-                timestamp=int(evt["timestamp"]),
+                timestamp=normalize_event_timestamp(int(evt["timestamp"])),
                 details=dict(evt["details"]),
             )
             if self.client.sync_door_event(event_payload):
@@ -229,7 +250,7 @@ class CloudSyncManager:
             event_items = [
                 DoorEventItem(
                     node_id=str(evt["node_id"]),
-                    timestamp_s=int(evt["timestamp"]),
+                    timestamp_s=normalize_event_timestamp(int(evt["timestamp"])),
                     status=normalize_door_event_status(str(evt["event_type"])),
                 )
                 for evt in pending_events
@@ -245,17 +266,33 @@ class CloudSyncManager:
         # 3. Flush Pending Offline Check-Ins (E4 & Goal.md §3)
         pending_checkins = self.queue.get_pending_checkins(limit=5)
         for chk in pending_checkins:
-            img_path = Path(str(chk["image_path"]))
-            if not img_path.exists():
-                logger.warning("Offline check-in image missing: %s; deleting record", img_path)
-                self.queue.delete_checkin(int(chk["id"]))
-                continue
+            draft_key = str(chk.get("draft_idempotency_key") or uuid.uuid4())
+            commit_key = str(chk.get("commit_idempotency_key") or uuid.uuid4())
+            raw_img_path = str(chk.get("image_path") or "")
+            img_path = Path(raw_img_path) if raw_img_path else None
 
-            with open(img_path, "rb") as f:
-                img_bytes = f.read()
+            raw_draft_json = chk.get("draft_json")
+            if raw_draft_json:
+                commit_payload = CheckInCommitPayload.model_validate_json(str(raw_draft_json))
+            else:
+                if img_path is None or not img_path.exists():
+                    logger.warning(
+                        "Offline check-in image missing: %s; deleting record", raw_img_path
+                    )
+                    self.queue.delete_checkin(int(chk["id"]))
+                    continue
 
-            draft_ok, draft_res, _ = self.client.checkin_draft(img_bytes)
-            if draft_ok and draft_res is not None:
+                with open(img_path, "rb") as f:
+                    img_bytes = f.read()
+
+                draft_ok, draft_res, _ = self.client.checkin_draft(
+                    img_bytes,
+                    idempotency_key=draft_key,
+                )
+                if not (draft_ok and draft_res is not None):
+                    self._is_online = False
+                    break
+
                 # Use user confirmed expiry if set, otherwise fallback to AI suggestion
                 expiry = (
                     str(chk["confirmed_expiry"])
@@ -274,18 +311,25 @@ class CloudSyncManager:
                     image_storage_path=draft_res.image_storage_path,
                     confidence=draft_res.confidence,
                 )
-                commit_ok, commit_res, _ = self.client.checkin_commit(commit_payload)
-                if commit_ok and commit_res is not None:
-                    self.queue.delete_checkin(int(chk["id"]))
+                self.queue.save_checkin_draft(
+                    int(chk["id"]),
+                    commit_payload.model_dump_json(),
+                    expiry,
+                )
+
+            commit_ok, commit_res, _ = self.client.checkin_commit(
+                commit_payload,
+                idempotency_key=commit_key,
+            )
+            if commit_ok and commit_res is not None:
+                self.queue.delete_checkin(int(chk["id"]))
+                if img_path is not None:
                     try:
                         img_path.unlink(missing_ok=True)
                     except OSError:
                         pass
-                    counts["checkins"] += 1
-                    self._is_online = True
-                else:
-                    self._is_online = False
-                    break
+                counts["checkins"] += 1
+                self._is_online = True
             else:
                 self._is_online = False
                 break
