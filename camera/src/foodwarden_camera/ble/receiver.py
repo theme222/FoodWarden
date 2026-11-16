@@ -16,6 +16,8 @@ from typing import Any
 
 from bleak import BleakClient, BleakScanner
 from bleak.backends.characteristic import BleakGATTCharacteristic
+from bleak.backends.device import BLEDevice
+from bleak.backends.scanner import AdvertisementData
 from bleak.exc import BleakError
 from cryptography.exceptions import InvalidTag
 
@@ -173,22 +175,28 @@ class BLEReceiver:
             return False
 
     async def connect_and_listen(self, timeout_s: float = 10.0) -> None:
-        """Discovers Node 'F', synchronizes time, and subscribes to telemetry."""
+        """Discovers Node 'F', synchronizes time, receives telemetry, and closes cleanly."""
         logger.info("Scanning for Node 'F' (Service UUID: %s)...", TELEMETRY_SERVICE_UUID)
 
-        device = None
+        device: BLEDevice | None = None
         if self.target_mac_address:
             device = await BleakScanner.find_device_by_address(
                 self.target_mac_address, timeout=timeout_s
             )
         else:
-            devices = await BleakScanner.discover(
-                timeout=timeout_s, service_uuids=[TELEMETRY_SERVICE_UUID]
+
+            def _matches_node_f(candidate: BLEDevice, adv_data: AdvertisementData) -> bool:
+                name = candidate.name or adv_data.local_name or ""
+                if self.device_name_prefix in name:
+                    return True
+                uuids = [u.lower() for u in (adv_data.service_uuids or ())]
+                return not name and TELEMETRY_SERVICE_UUID in uuids
+
+            device = await BleakScanner.find_device_by_filter(
+                _matches_node_f,
+                timeout=timeout_s,
+                service_uuids=[TELEMETRY_SERVICE_UUID],
             )
-            for d in devices:
-                if d.name and self.device_name_prefix in d.name:
-                    device = d
-                    break
 
         if not device:
             logger.debug("Node 'F' not found during scan window (sensor may be in deep sleep)")
@@ -196,25 +204,31 @@ class BLEReceiver:
 
         logger.info("Discovered Node 'F' at %s (%s). Connecting...", device.address, device.name)
 
+        packet_received = asyncio.Event()
+
+        def _on_notify(_characteristic: BleakGATTCharacteristic, data: bytearray) -> None:
+            if self.handle_raw_telemetry(bytes(data)) is not None:
+                packet_received.set()
+
         async with BleakClient(device) as client:
             self._client = client
             self._connected = True
             try:
-                # 1. Synchronize time
-                await self.sync_time(client)
-
-                # 2. Subscribe to telemetry notifications
-                await client.start_notify(TELEMETRY_CHAR_UUID, self._notification_handler)
+                # 1. Subscribe before time write so notification fires as soon as packet is ready
+                await client.start_notify(TELEMETRY_CHAR_UUID, _on_notify)
                 logger.info("Subscribed to BLE telemetry notifications on %s", TELEMETRY_CHAR_UUID)
 
-                # 3. Read initial payload if available
-                initial_bytes = await client.read_gatt_char(TELEMETRY_CHAR_UUID)
-                if initial_bytes:
-                    self.handle_raw_telemetry(bytes(initial_bytes))
+                # 2. Synchronize 64-bit Unix RTC time on FFF2 (triggers encryption on Node 'F')
+                if not await self.sync_time(client):
+                    return
 
-                # Keep connected until peripheral disconnects or deep sleeps
-                while self._running and client.is_connected:
-                    await asyncio.sleep(1.0)
+                # 3. Wait briefly for notification; fallback to ATT long read if MTU was small
+                try:
+                    await asyncio.wait_for(packet_received.wait(), timeout=1.5)
+                except TimeoutError:
+                    initial_bytes = await client.read_gatt_char(TELEMETRY_CHAR_UUID)
+                    if initial_bytes:
+                        self.handle_raw_telemetry(bytes(initial_bytes))
 
             except (BleakError, OSError, asyncio.CancelledError) as exc:
                 logger.warning("BLE communication exception with Node 'F': %s", exc)

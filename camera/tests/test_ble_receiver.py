@@ -1,9 +1,17 @@
 """Unit tests for BLE GATT Receiver and PDR Tracker."""
 
+import asyncio
 import os
 import struct
+from typing import Any, Self
+from unittest.mock import MagicMock, patch
 
+import pytest
+
+import foodwarden_camera.ble.receiver as receiver_module
 from foodwarden_camera.ble.receiver import (
+    TELEMETRY_CHAR_UUID,
+    TIME_SYNC_CHAR_UUID,
     BLEReceiver,
     PDRTracker,
 )
@@ -85,3 +93,66 @@ def test_time_sync_byte_format() -> None:
     assert len(packed) == 8
     (unpacked,) = struct.unpack("<Q", packed)
     assert unpacked == now_s
+
+
+def test_ble_connect_and_listen_notify_avoids_duplicate_replay(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    key = bytes.fromhex("bf067af927bc016b2947c25fe9544b45")
+    salt = os.urandom(8)
+    raw_pkt = SensorPacket.pack_and_encrypt(
+        TelemetryHeader(version=1, node_id="F0", session_salt=salt, counter=1),
+        [SensorSample.from_raw(1729930000, 340, 115, 25)],
+        key,
+    )
+    received: list[SensorPacket] = []
+    receiver = BLEReceiver(aes_key=key, on_telemetry_callback=lambda p: received.append(p))
+
+    fake_device = MagicMock()
+    fake_device.address = "AA:BB:CC:DD:EE:FF"
+    fake_device.name = "FoodWarden-Fridge"
+
+    async def fake_find_by_filter(filterfunc: Any, **kwargs: Any) -> Any:
+        adv = MagicMock()
+        adv.local_name = "FoodWarden-Fridge"
+        adv.service_uuids = ["0000fff0-0000-1000-8000-00805f9b34fb"]
+        assert filterfunc(fake_device, adv) is True
+        return fake_device
+
+    class FakeBleakClient:
+        def __init__(self, device: Any) -> None:
+            self.device = device
+            self.is_connected = True
+            self.notify_cb: Any = None
+            self.read_called = False
+
+        async def __aenter__(self) -> Self:
+            return self
+
+        async def __aexit__(self, *args: object) -> None:
+            self.is_connected = False
+
+        async def start_notify(self, uuid: str, cb: Any) -> None:
+            assert uuid == TELEMETRY_CHAR_UUID
+            self.notify_cb = cb
+
+        async def write_gatt_char(self, uuid: str, data: bytes, response: bool = True) -> None:
+            assert uuid == TIME_SYNC_CHAR_UUID
+            assert len(data) == 8
+            if self.notify_cb is not None:
+                self.notify_cb(None, bytearray(raw_pkt))
+
+        async def read_gatt_char(self, uuid: str) -> bytearray:
+            self.read_called = True
+            return bytearray(raw_pkt)
+
+    fake_client = FakeBleakClient(fake_device)
+    monkeypatch.setattr(receiver_module.BleakScanner, "find_device_by_filter", fake_find_by_filter)
+    with patch.object(receiver_module, "BleakClient", return_value=fake_client):
+        asyncio.run(receiver.connect_and_listen(timeout_s=2.0))
+
+    assert len(received) == 1
+    assert received[0].samples[0].temp_celsius == 3.4
+    assert fake_client.read_called is False
+    assert receiver.pdr_tracker.received_count == 1
+    assert receiver.pdr_tracker.replay_dropped_count == 0
