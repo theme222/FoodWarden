@@ -10,14 +10,20 @@
 #define PIN_I2C0_SCL 22
 
 // How the 16 display columns map onto the HT16K33's 16 RAM bytes.
-//   1 (default): column x is RAM byte x, row y is bit y.
+//   1:           column x is RAM byte x, row y is bit y.
 //   2:           Adafruit-style backpack: byte = 2*y + (x >= 8), bit = x % 8.
-// The KidBright32 wiring is not documented in this repo, so this is UNVERIFIED
-// until tested on the board. If the S1 readout looks scrambled, build with
-// -DMATRIX_RAM_LAYOUT=2.
+//   3 (default): KidBright32, two 8x8 modules side by side:
+//                byte = 2*(x % 8) + (x >= 8), bit = 7 - y (rows wired bottom-up).
+// Found on the bench KidBright (2026-11-16): layout 1 showed the same squashed
+// text on both 8x8 halves; without the row flip the text was upside down, and
+// adding a column flip as well mirrored it.
 #ifndef MATRIX_RAM_LAYOUT
-#define MATRIX_RAM_LAYOUT 1
+#define MATRIX_RAM_LAYOUT 3
 #endif
+
+// Tell the driver another user (the sensors) shares I2C0, so it must leave the
+// bus running when the display is off or missing.
+void matrixShareBus(bool shared);
 
 // Power up the HT16K33 and clear it. Returns false if the chip does not answer
 // (the node keeps running without a display).

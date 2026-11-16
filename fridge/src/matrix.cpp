@@ -21,6 +21,13 @@ static const uint32_t I2C_CLOCK_HZ = 100000;
 static const size_t MAX_TEXT_COLS = 160;
 
 static bool started = false;
+static bool busShared = false; // sensors also use Wire: never end() it here
+
+void matrixShareBus(bool shared) { busShared = shared; }
+
+static void releaseBus() {
+  if (!busShared) Wire.end();
+}
 
 static bool sendCommand(uint8_t cmd) {
   Wire.beginTransmission(MATRIX_I2C_ADDRESS);
@@ -32,7 +39,19 @@ static bool sendCommand(uint8_t cmd) {
 static bool writeFrame(const uint8_t cols[MATRIX_COLS]) {
   uint8_t ram[16];
   memset(ram, 0, sizeof(ram));
-#if MATRIX_RAM_LAYOUT == 2
+#if MATRIX_RAM_LAYOUT == 3
+  // KidBright32: two 8x8 modules share COM0-7; one is on ROW0-7 (even RAM
+  // bytes), the other on ROW8-15 (odd bytes). Rows are wired bottom-up, so
+  // flip each column vertically (checked on the bench board).
+  for (uint8_t x = 0; x < MATRIX_COLS; x++) {
+    const uint8_t px = x;
+    uint8_t col = cols[x], flipped = 0;
+    for (uint8_t y = 0; y < 8; y++) {
+      if (col & (1 << y)) flipped |= (uint8_t)(1 << (7 - y));
+    }
+    ram[2 * (px % 8) + (px >= 8 ? 1 : 0)] = flipped;
+  }
+#elif MATRIX_RAM_LAYOUT == 2
   for (uint8_t x = 0; x < MATRIX_COLS; x++) {
     for (uint8_t y = 0; y < 8; y++) {
       if (cols[x] & (1 << y)) ram[2 * y + (x >= 8 ? 1 : 0)] |= (uint8_t)(1 << (x % 8));
@@ -53,7 +72,7 @@ bool matrixBegin() {
 
   Wire.beginTransmission(MATRIX_I2C_ADDRESS);
   if (Wire.endTransmission() != 0) {
-    Wire.end();
+    releaseBus();
     return false;
   }
 
@@ -61,7 +80,7 @@ bool matrixBegin() {
   bool ok = sendCommand(CMD_OSCILLATOR_ON) && writeFrame(blank) &&
             sendCommand(CMD_BRIGHTNESS | DEFAULT_BRIGHTNESS) && sendCommand(CMD_DISPLAY_ON);
   started = ok;
-  if (!ok) Wire.end();
+  if (!ok) releaseBus();
   return ok;
 }
 
@@ -86,6 +105,6 @@ void matrixOff() {
   writeFrame(blank);
   sendCommand(CMD_DISPLAY_OFF);
   sendCommand(CMD_OSCILLATOR_STANDBY);
-  Wire.end();
+  releaseBus();
   started = false;
 }

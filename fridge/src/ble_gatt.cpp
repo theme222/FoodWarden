@@ -13,6 +13,14 @@
 #define HAVE_SECRETS 1
 #endif
 
+// Arduino-ESP32 3.x frees the BLE controller memory in initArduino() unless the
+// sketch says BLE is used, and NimBLE-Arduino 1.4.x does not say so. Without
+// this, NimBLEDevice::init() aborts with ESP_ERR_INVALID_STATE in
+// esp_bt_controller_init() and the chip reboots on every send (seen on the
+// bench board 2026-11-16; the reboot also wiped the RTC state, so the VOC index
+// never left its warm-up 0). Classic BT memory is still released.
+extern "C" bool bleInUse(void) { return true; }
+
 // Characteristic / service UUIDs (interface/FUC.md §1)
 #define UUID_SERVICE "0000FFF0-0000-1000-8000-00805F9B34FB"
 #define UUID_TELEMETRY "0000FFF1-0000-1000-8000-00805F9B34FB"
@@ -110,7 +118,9 @@ void bleGattInit() {
   NimBLEDevice::setMTU(PREFERRED_MTU);
 
   server = NimBLEDevice::createServer();
-  server->setCallbacks(&serverCallbacks);
+  // false: serverCallbacks is static, so NimBLEDevice::deinit(true) must not
+  // delete it (that freed a non-heap pointer and rebooted the chip).
+  server->setCallbacks(&serverCallbacks, false);
   server->advertiseOnDisconnect(false); // never keep advertising on our own
 
   NimBLEService *service = server->createService(UUID_SERVICE);

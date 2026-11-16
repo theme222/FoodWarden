@@ -90,7 +90,7 @@ This runs the Unity suites in `test/`, a simulation of the real Sensirion VOC al
 | `-DFRIDGE_LDR_OPEN_IS_LOW=1` | "Door open" means the LDR reading is **below** the threshold |
 | `-DFRIDGE_SGP40_HEATER_OFF` | Turn the SGP40 heater off after each reading to save power (check accuracy) |
 | `-DFRIDGE_LOG_PACKETS` | Print each encrypted packet as `packet=<hex>` |
-| `-DMATRIX_RAM_LAYOUT=2` | Alternative LED matrix RAM mapping |
+| `-DMATRIX_RAM_LAYOUT=1` / `2` | Alternative LED matrix RAM mappings (default `3`, KidBright32) |
 
 ### Debugging the encrypted packet
 ```bash
@@ -100,4 +100,4 @@ python tools/decrypt_packet.py <hex> --key-hex <your AES_KEY as 32 hex chars>
 ```
 
 ### Display layout note
-The LED matrix RAM mapping is unverified on real hardware. If the S1 readout looks scrambled, add `-DMATRIX_RAM_LAYOUT=2` to `build_flags` (see `src/matrix.h`).
+The LED matrix uses RAM layout 3 (two 8x8 modules: left on even bytes, right on odd). If the S1 readout looks scrambled, try `-DMATRIX_RAM_LAYOUT=1` or `2` in `build_flags` (see `src/matrix.h`).

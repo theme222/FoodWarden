@@ -53,13 +53,16 @@ static inline size_t matrixRenderText(const char *text, uint8_t *cols, size_t ma
   return n;
 }
 
-// Formats the diagnostic readout, e.g. "T3.4C V100 L512". A sensor error is
-// shown as "E" in place of its value. Returns the string length.
-static inline int matrixFormatReadings(char *out, size_t cap, int16_t temp_cdeg,
-                                       uint16_t voc_index, uint16_t light_ldr) {
-  char t[12];
+// The readout as three separate display items, shown one after another:
+// "T3.4C", "V100", "L512". A sensor error is shown as "E" in place of its value.
+#define MATRIX_READING_ITEMS 3
+#define MATRIX_READING_ITEM_LEN 12
+
+static inline void matrixFormatReadingItems(char items[MATRIX_READING_ITEMS][MATRIX_READING_ITEM_LEN],
+                                            int16_t temp_cdeg, uint16_t voc_index,
+                                            uint16_t light_ldr) {
   if (temp_cdeg == (int16_t)-32768) {
-    snprintf(t, sizeof(t), "E");
+    snprintf(items[0], MATRIX_READING_ITEM_LEN, "TEC");
   } else {
     int v = temp_cdeg;
     const char *sign = "";
@@ -69,15 +72,21 @@ static inline int matrixFormatReadings(char *out, size_t cap, int16_t temp_cdeg,
     }
     // One decimal place, rounded half up on the centi-degree value.
     int tenths = (v + 5) / 10;
-    snprintf(t, sizeof(t), "%s%d.%d", sign, tenths / 10, tenths % 10);
+    snprintf(items[0], MATRIX_READING_ITEM_LEN, "T%s%d.%dC", sign, tenths / 10, tenths % 10);
   }
-  char v[8];
-  char l[8];
-  if (voc_index == 0xFFFF) snprintf(v, sizeof(v), "E");
-  else snprintf(v, sizeof(v), "%u", (unsigned)voc_index);
-  if (light_ldr == 0xFFFF) snprintf(l, sizeof(l), "E");
-  else snprintf(l, sizeof(l), "%u", (unsigned)light_ldr);
-  return snprintf(out, cap, "T%sC V%s L%s", t, v, l);
+  if (voc_index == 0xFFFF) snprintf(items[1], MATRIX_READING_ITEM_LEN, "VE");
+  else snprintf(items[1], MATRIX_READING_ITEM_LEN, "V%u", (unsigned)voc_index);
+  if (light_ldr == 0xFFFF) snprintf(items[2], MATRIX_READING_ITEM_LEN, "LE");
+  else snprintf(items[2], MATRIX_READING_ITEM_LEN, "L%u", (unsigned)light_ldr);
+}
+
+// The whole readout on one line, e.g. "T3.4C V100 L512" (serial log).
+// Returns the string length.
+static inline int matrixFormatReadings(char *out, size_t cap, int16_t temp_cdeg,
+                                       uint16_t voc_index, uint16_t light_ldr) {
+  char items[MATRIX_READING_ITEMS][MATRIX_READING_ITEM_LEN];
+  matrixFormatReadingItems(items, temp_cdeg, voc_index, light_ldr);
+  return snprintf(out, cap, "%s %s %s", items[0], items[1], items[2]);
 }
 
 #endif // MATRIX_TEXT_H_

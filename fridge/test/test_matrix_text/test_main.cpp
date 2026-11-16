@@ -54,6 +54,21 @@ void test_format_shows_errors_as_E() {
   TEST_ASSERT_EQUAL_STRING("TEC VE LE", out);
 }
 
+void test_items_one_per_sensor() {
+  char items[MATRIX_READING_ITEMS][MATRIX_READING_ITEM_LEN];
+  matrixFormatReadingItems(items, 342, 100, 512);
+  TEST_ASSERT_EQUAL_STRING("T3.4C", items[0]);
+  TEST_ASSERT_EQUAL_STRING("V100", items[1]);
+  TEST_ASSERT_EQUAL_STRING("L512", items[2]);
+  matrixFormatReadingItems(items, (int16_t)-32768, 0xFFFF, 0xFFFF);
+  TEST_ASSERT_EQUAL_STRING("TEC", items[0]);
+  TEST_ASSERT_EQUAL_STRING("VE", items[1]);
+  TEST_ASSERT_EQUAL_STRING("LE", items[2]);
+  matrixFormatReadingItems(items, -3000, 500, 4095); // longest values still fit
+  TEST_ASSERT_EQUAL_STRING("T-30.0C", items[0]);
+  TEST_ASSERT_EQUAL_STRING("L4095", items[2]);
+}
+
 void test_format_fits_scroll_buffer_worst_case() {
   char out[32];
   int n = matrixFormatReadings(out, sizeof(out), -3000, 500, 4095);
@@ -72,6 +87,7 @@ void setup() {
   RUN_TEST(test_format_normal_readings);
   RUN_TEST(test_format_rounds_and_handles_negative);
   RUN_TEST(test_format_shows_errors_as_E);
+  RUN_TEST(test_items_one_per_sensor);
   RUN_TEST(test_format_fits_scroll_buffer_worst_case);
   UNITY_END();
 }

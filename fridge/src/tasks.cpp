@@ -23,7 +23,9 @@
 static const uint32_t BLE_ADVERTISING_TIMEOUT_MS = 5000; // GOAL.md: 5 s then give up
 static const uint32_t BLE_STARTUP_MARGIN_MS = 2000;      // NimBLE init + encryption, generous
 static const uint32_t DISPLAY_IDLE_WINDOW_MS = 300;      // time to catch a button press
-static const uint32_t DISPLAY_SLEEP_GATE_MS = 9000;      // max wait for a readout scroll to finish
+// Max wait for the S1 readout to finish. Worst case "T-30.0C", "V500", "L4095"
+// at 100 ms/column is about 147 steps = 14.7 s, plus two 0.4 s gaps.
+static const uint32_t DISPLAY_SLEEP_GATE_MS = 18000;
 
 enum {
   EVT_READING_READY = 1 << 0, // sensor task published g_last_reading
@@ -73,19 +75,24 @@ static void vBleGattTask(void *) {
 
 // --- Display / button task -------------------------------------------------
 
-static const uint16_t MATRIX_SCROLL_STEP_MS = 45;
+static const uint16_t MATRIX_SCROLL_STEP_MS = 100; // per column; slower is easier to read
+static const uint32_t MATRIX_ITEM_GAP_MS = 400;   // blank pause between items
 
 static void showLiveReading() {
   xEventGroupWaitBits(g_events, EVT_READING_READY, pdFALSE, pdFALSE, pdMS_TO_TICKS(2000));
   const SensorReading &r = g_last_reading;
 
-  char text[32];
-  matrixFormatReadings(text, sizeof(text), r.temp_cdeg, r.voc_index, r.light_ldr);
-  Serial.printf("[S1] %s\n", text);
+  char items[MATRIX_READING_ITEMS][MATRIX_READING_ITEM_LEN];
+  matrixFormatReadingItems(items, r.temp_cdeg, r.voc_index, r.light_ldr);
+  Serial.printf("[S1] %s %s %s\n", items[0], items[1], items[2]);
 
-  // Scroll the readout, then power the display down to save battery (GOAL.md).
+  // Scroll temperature, VOC and light one at a time, then power the display
+  // down to save battery (GOAL.md).
   if (matrixBegin()) {
-    matrixScrollText(text, MATRIX_SCROLL_STEP_MS);
+    for (int i = 0; i < MATRIX_READING_ITEMS; i++) {
+      if (i > 0) vTaskDelay(pdMS_TO_TICKS(MATRIX_ITEM_GAP_MS));
+      matrixScrollText(items[i], MATRIX_SCROLL_STEP_MS);
+    }
     matrixOff();
   }
 }
@@ -143,6 +150,7 @@ static void vSensorTask(void *) {
   NodeState &node = *g_state;
 
   sensorsInit(node.voc);                       // algorithm state lives in RTC memory
+  matrixShareBus(sensorsShareMatrixBus());     // before any S1 readout can touch Wire
   const SensorReading reading = sensorsRead(); // always feeds the VOC algorithm
   g_last_reading = reading;
   xEventGroupSetBits(g_events, EVT_READING_READY);
@@ -159,9 +167,11 @@ static void vSensorTask(void *) {
   nodeStateTickHoldoff(node);
   nodeStateAppend(node, sample);
 
-  Serial.printf("t=%llu temp_cdeg=%d rh=%.1f voc_raw=%u voc_tx=%u light=%u cooldown=%u buf=%u\n",
+  Serial.printf("t=%llu temp_cdeg=%d rh=%.1f sraw=%u sgp_err=%d voc_raw=%u voc_tx=%u light=%u "
+                "cooldown=%u buf=%u\n",
                 (unsigned long long)sample.timestamp_s, sample.temp_cdeg, reading.humidity_rh,
-                reading.voc_index, sample.voc_index, sample.light_ldr,
+                reading.voc_sraw, reading.sgp40_err, reading.voc_index, sample.voc_index,
+                sample.light_ldr,
                 node.cooldown_packets_remaining, node.sample_count);
 
   // Give the display task a moment to publish a manual S2 request.
