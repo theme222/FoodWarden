@@ -1,0 +1,15 @@
+node_modules/
+dist/
+.wrangler/
+.reports/
+workers/runtime.d.ts
+diagram/Fridge.html
+diagram/Fridge.drawio
+diagram/Fridge.svg
+diagrams/*.svg
+bun.lock
+
+.deepsec/
+
+# Original design reference supplied by the user
+FoodWarden Dashboard (Copy).html

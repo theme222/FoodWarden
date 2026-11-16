@@ -1,0 +1,21 @@
+{
+  "$schema": "https://unpkg.com/knip@latest/schema.json",
+  "entry": [
+    "src/**/*.test.{ts,tsx}",
+    "workers/**/*.test.ts",
+    "test/**/*.{ts,tsx}",
+    "../scripts/*.ts"
+  ],
+  "project": [
+    "src/**/*.{ts,tsx,css}",
+    "workers/**/*.ts",
+    "test/**/*.{ts,tsx}",
+    "*.ts",
+    "../scripts/*.ts",
+    "!workers/runtime.d.ts"
+  ],
+  "ignoreDependencies": ["lefthook"],
+  "ignoreIssues": {
+    "src/components/ui/**": ["exports", "types"]
+  }
+}

@@ -1,0 +1,23 @@
+# Cloudflare Worker local development secrets (.dev.vars)
+# Copy to `.dev.vars` (gitignored) when running `bun run dev:worker`.
+# In production, set secrets with `wrangler secret put <NAME>`.
+
+APP_ENV="development"
+
+BETTER_AUTH_SECRET="replace-with-32+-char-random-secret"
+BETTER_AUTH_URL="http://127.0.0.1:8787"
+
+# Google OAuth 2.0 Web Client (Google Cloud Console -> Google Auth Platform)
+GOOGLE_CLIENT_ID=""
+GOOGLE_CLIENT_SECRET=""
+
+# Local-only dev bypass login (only active when APP_ENV="development")
+DEV_AUTH_BYPASS_EMAIL="dev@example.com"
+
+# Optional fallback Gemini API key (per-fridge keys configured in Settings take precedence)
+GEMINI_API_KEY=""
+
+# LINE Messaging API Channel Access Token for push alerts & daily expiry digest
+LINE_CHANNEL_ACCESS_TOKEN=""
+LINE_CHANNEL_SECRET=""
+LINE_BOT_BASIC_ID=""

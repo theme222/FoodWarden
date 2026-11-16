@@ -1,0 +1,11 @@
+{
+  "name": "foodwarden-server-diagrams",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "render": "bun run render.ts"
+  },
+  "devDependencies": {
+    "pele": "^1.13.0"
+  }
+}
