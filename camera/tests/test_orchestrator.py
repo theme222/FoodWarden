@@ -274,3 +274,33 @@ def test_checkin_and_checkout_422_shows_unidentifiable_not_offline(
 
     test_orchestrator.sync_manager.enqueue_offline_checkin.assert_called_once()
     assert test_orchestrator.window.stack.currentIndex() == 1
+
+
+def test_run_person_safety_check_updates_ui_and_preview_overlay(
+    test_orchestrator: GatewayOrchestrator,
+) -> None:
+    dummy_frame = np.zeros((240, 320, 3), dtype=np.uint8)
+    test_orchestrator.detector.detect_person.return_value = (
+        True,
+        0.88,
+        [(20, 30, 120, 200)],
+    )
+
+    is_person, conf, boxes = test_orchestrator._run_person_safety_check(dummy_frame)
+    assert is_person is True
+    assert conf == 0.88
+    assert boxes == [(20, 30, 120, 200)]
+    assert "88%" in test_orchestrator.window.idle_screen.pill_person.text()
+    assert "พบคน" in test_orchestrator.window.idle_screen.person_label.text()
+
+    annotated = test_orchestrator._annotate_person_preview(dummy_frame)
+    assert annotated is not dummy_frame
+    assert int(annotated.sum()) > 0
+    assert int(dummy_frame.sum()) == 0
+
+    test_orchestrator.detector.detect_person.return_value = (False, 0.0, [])
+    is_person_2, _, boxes_2 = test_orchestrator._run_person_safety_check(dummy_frame)
+    assert is_person_2 is False
+    assert boxes_2 == []
+    assert "Clear" in test_orchestrator.window.idle_screen.pill_person.text()
+    assert test_orchestrator._annotate_person_preview(dummy_frame) is dummy_frame

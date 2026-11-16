@@ -279,6 +279,16 @@ def test_window_controls_and_motion_debug_ui(
     assert "PIR Disabled" in window.idle_screen.motion_label.text()
     assert "1 นาที 15 วินาที" in window.idle_screen.motion_label.text()
 
+    # YOLO person detection debug UI updates
+    window.update_person_state(True, 0.87, 1)
+    assert "87%" in window.idle_screen.pill_person.text()
+    assert "พบคน" in window.idle_screen.person_label.text()
+    assert "87%" in window.idle_screen.person_label.text()
+
+    window.update_person_state(False, 0.0, 0)
+    assert "Clear" in window.idle_screen.pill_person.text()
+    assert "ไม่พบคน" in window.idle_screen.person_label.text()
+
     # Fullscreen / Unfullscreen / Minimize controls
     window.showFullScreen()
     window.unfullscreen_window()

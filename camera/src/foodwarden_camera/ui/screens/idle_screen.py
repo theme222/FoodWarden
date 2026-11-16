@@ -145,11 +145,16 @@ class IdleScreen(QWidget):
         self.pill_motion.setStyleSheet(
             "background-color: #1F2937; color: #9CA3AF; font-size: 11px; font-weight: bold; padding: 4px 8px; border-radius: 4px;"
         )
+        self.pill_person = QLabel("YOLO: Wait", self)
+        self.pill_person.setStyleSheet(
+            "background-color: #1F2937; color: #9CA3AF; font-size: 11px; font-weight: bold; padding: 4px 8px; border-radius: 4px;"
+        )
 
         status_layout.addWidget(self.pill_wifi)
         status_layout.addWidget(self.pill_ble)
         status_layout.addWidget(self.pill_door)
         status_layout.addWidget(self.pill_motion)
+        status_layout.addWidget(self.pill_person)
         status_layout.addStretch()
         main_layout.addLayout(status_layout)
 
@@ -209,6 +214,15 @@ class IdleScreen(QWidget):
         self.motion_label.setWordWrap(True)
         self.motion_label.setStyleSheet("font-size: 13px; color: #9CA3AF;")
         diag_layout.addWidget(self.motion_label)
+
+        # YOLO Person Detection debug state
+        self.person_label = QLabel(
+            "ตรวจจับบุคคล (YOLO): กำลังรอตรวจ... (Waiting)",
+            diag_card,
+        )
+        self.person_label.setWordWrap(True)
+        self.person_label.setStyleSheet("font-size: 13px; color: #9CA3AF;")
+        diag_layout.addWidget(self.person_label)
 
         diag_layout.addStretch()
         mid_layout.addWidget(diag_card)
@@ -360,3 +374,28 @@ class IdleScreen(QWidget):
             f"background-color: {pill_bg}; color: {pill_fg}; font-size: 11px; font-weight: bold; padding: 4px 8px; border-radius: 4px;"
         )
         self.motion_label.setStyleSheet(f"font-size: 13px; color: {pill_fg};")
+
+    def update_person_state(
+        self,
+        is_person: bool,
+        confidence: float = 0.0,
+        person_count: int = 0,
+    ) -> None:
+        """Updates YOLO person detection badge and debug status label."""
+        if is_person:
+            pct = round(max(0.0, min(1.0, confidence)) * 100)
+            count = max(1, person_count)
+            self.pill_person.setText(f"YOLO: Person ({pct}%)")
+            self.pill_person.setStyleSheet(
+                "background-color: #78350F; color: #FBBF24; font-size: 11px; font-weight: bold; padding: 4px 8px; border-radius: 4px;"
+            )
+            self.person_label.setText(f"ตรวจจับบุคคล (YOLO): พบคน! {count} คน (Person {pct}%)")
+            self.person_label.setStyleSheet("font-size: 13px; font-weight: bold; color: #FBBF24;")
+            return
+
+        self.pill_person.setText("YOLO: Clear")
+        self.pill_person.setStyleSheet(
+            "background-color: #1F2937; color: #9CA3AF; font-size: 11px; font-weight: bold; padding: 4px 8px; border-radius: 4px;"
+        )
+        self.person_label.setText("ตรวจจับบุคคล (YOLO): ไม่พบคน (No Person)")
+        self.person_label.setStyleSheet("font-size: 13px; color: #9CA3AF;")

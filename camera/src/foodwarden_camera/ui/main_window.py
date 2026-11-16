@@ -49,6 +49,7 @@ class FoodWardenMainWindow(QMainWindow):
     _sig_update_door_state = pyqtSignal(bool, float)
     _sig_update_wifi_status = pyqtSignal(bool)
     _sig_update_motion_state = pyqtSignal(bool, float, str)
+    _sig_update_person_state = pyqtSignal(bool, float, int)
     _sig_person_abort_alert = pyqtSignal()
     _sig_offline_warning = pyqtSignal()
 
@@ -163,6 +164,7 @@ class FoodWardenMainWindow(QMainWindow):
         self._sig_update_door_state.connect(self.idle_screen.update_door_state)
         self._sig_update_wifi_status.connect(self.idle_screen.update_wifi_status)
         self._sig_update_motion_state.connect(self.idle_screen.update_motion_state)
+        self._sig_update_person_state.connect(self.idle_screen.update_person_state)
         self._sig_person_abort_alert.connect(self.alert_banner.show_person_abort_alert)
         self._sig_offline_warning.connect(self.alert_banner.show_offline_warning)
 
@@ -422,6 +424,18 @@ class FoodWardenMainWindow(QMainWindow):
             self.idle_screen.update_motion_state(has_motion, idle_duration_s, hw_status)
         else:
             self._sig_update_motion_state.emit(has_motion, idle_duration_s, hw_status)
+
+    def update_person_state(
+        self,
+        is_person: bool,
+        confidence: float = 0.0,
+        person_count: int = 0,
+    ) -> None:
+        """Updates YOLO person detection badge & diagnostics label safely across threads."""
+        if self._is_gui_thread():
+            self.idle_screen.update_person_state(is_person, confidence, person_count)
+        else:
+            self._sig_update_person_state.emit(is_person, confidence, person_count)
 
     def show_person_abort_alert(self) -> None:
         if self._is_gui_thread():

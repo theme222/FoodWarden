@@ -112,6 +112,11 @@ class GatewayOrchestrator:
         # Safety & State Tracking
         self._is_door_closing: bool = False
         self._latest_ldr_light: int | None = None
+        self._last_person_detected: bool = False
+        self._last_person_conf: float = 0.0
+        self._last_person_boxes: list[tuple[int, int, int, int]] = []
+        self._last_person_checked_at: float = 0.0
+        self._person_state_lock = threading.Lock()
         self._running: bool = False
         self._safety_thread: threading.Thread | None = None
         self._ui_stream_thread: threading.Thread | None = None
@@ -348,37 +353,84 @@ class GatewayOrchestrator:
     # Door Safety Reflex Loop
     # ==========================================================================
 
+    def _run_person_safety_check(
+        self, frame: Any
+    ) -> tuple[bool, float, list[tuple[int, int, int, int]]]:
+        """Runs YOLO person detection and updates Idle screen debug indicators."""
+        is_person, conf, boxes = self.detector.detect_person(frame)
+        with self._person_state_lock:
+            self._last_person_detected = is_person
+            self._last_person_conf = conf
+            self._last_person_boxes = list(boxes)
+            self._last_person_checked_at = time.monotonic()
+        self.window.update_person_state(is_person, conf, len(boxes))
+        return is_person, conf, boxes
+
+    def _annotate_person_preview(self, frame: Any) -> Any:
+        """Draws cached YOLO person bounding boxes on a preview copy for debugging."""
+        with self._person_state_lock:
+            is_person = self._last_person_detected
+            conf = self._last_person_conf
+            boxes = list(self._last_person_boxes)
+            age_s = time.monotonic() - self._last_person_checked_at
+
+        if not is_person or not boxes or age_s > 3.0:
+            return frame
+
+        import cv2
+
+        annotated = frame.copy()
+        pct = round(max(0.0, min(1.0, conf)) * 100)
+        for x1, y1, x2, y2 in boxes:
+            cv2.rectangle(annotated, (x1, y1), (x2, y2), (36, 191, 251), 3)
+            cv2.putText(
+                annotated,
+                f"Person {pct}%",
+                (x1, max(24, y1 - 10)),
+                cv2.FONT_HERSHEY_SIMPLEX,
+                0.7,
+                (36, 191, 251),
+                2,
+            )
+        return annotated
+
     def _safety_loop(self) -> None:
         """Continuous safety loop monitoring door ajar and human obstruction reflex."""
         while self._running:
             try:
-                # 1. Door-Ajar Automated Closure Check (Goal.md §1 & §2)
-                # If door is open for > 60 seconds and not currently closing
-                if self.mqtt.door_ajar_duration_s >= 60.0 and not self._is_door_closing:
-                    has_frame, frame = self.camera.get_latest_frame()
-                    if has_frame and frame is not None:
-                        is_person, _, _ = self.detector.detect_person(frame)
-                        if not is_person:
-                            logger.info(
-                                "Door open for %.1fs with no human present. Issuing CLOSE_DOOR.",
-                                self.mqtt.door_ajar_duration_s,
-                            )
-                            self._is_door_closing = True
-                            self.mqtt.send_close_door(node_id="D0", timeout_s=30)
-                        else:
-                            logger.debug(
-                                "Door ajar > 60s, but human is present in front of fridge. Holding door open."
-                            )
+                need_ajar_close_check = (
+                    self.mqtt.door_ajar_duration_s >= 60.0 and not self._is_door_closing
+                )
+                need_closing_abort_check = self._is_door_closing
+                need_debug_check = (
+                    self.pir.is_display_awake
+                    and self.window.stack.currentIndex() == 0
+                    and (time.monotonic() - self._last_person_checked_at >= 1.5)
+                )
 
-                # 2. Reflexive Human Abort While Closing
-                # If door is actively closing, immediately abort if a person enters frame
-                if self._is_door_closing:
+                if need_ajar_close_check or need_closing_abort_check or need_debug_check:
                     has_frame, frame = self.camera.get_latest_frame()
                     if has_frame and frame is not None:
-                        is_person, conf, _ = self.detector.detect_person(frame)
-                        if is_person:
+                        is_person, conf, _ = self._run_person_safety_check(frame)
+
+                        # 1. Door-Ajar Automated Closure Check (Goal.md §1 & §2)
+                        if need_ajar_close_check:
+                            if not is_person:
+                                logger.info(
+                                    "Door open for %.1fs with no human present. Issuing CLOSE_DOOR.",
+                                    self.mqtt.door_ajar_duration_s,
+                                )
+                                self._is_door_closing = True
+                                self.mqtt.send_close_door(node_id="D0", timeout_s=30)
+                            else:
+                                logger.debug(
+                                    "Door ajar > 60s, but human is present in front of fridge. Holding door open."
+                                )
+
+                        # 2. Reflexive Human Abort While Closing
+                        if need_closing_abort_check and is_person:
                             logger.warning(
-                                "Human entered camera frame during door closure (conf=%.2f)! Dispathing instant ABORT.",
+                                "Human entered camera frame during door closure (conf=%.2f)! Dispatching instant ABORT.",
                                 conf,
                             )
                             self._is_door_closing = False
@@ -402,7 +454,7 @@ class GatewayOrchestrator:
                 if self.pir.is_display_awake:
                     has_frame, frame = self.camera.get_latest_frame()
                     if has_frame and frame is not None:
-                        self.window.update_camera_frame(frame)
+                        self.window.update_camera_frame(self._annotate_person_preview(frame))
             time.sleep(0.066)
 
     # ==========================================================================

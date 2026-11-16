@@ -7,6 +7,7 @@ bounding-box cropping with full-frame fallback and JPEG compression per SUMMARY.
 from __future__ import annotations
 
 import logging
+import threading
 import time
 from typing import Any
 
@@ -41,6 +42,7 @@ class VisionDetector:
 
         self._model: YOLO | None = None
         self._last_inference_time_ms: float = 0.0
+        self._predict_lock = threading.Lock()
 
     @property
     def last_inference_time_ms(self) -> float:
@@ -81,17 +83,18 @@ class VisionDetector:
         Returns:
             (is_person_detected, highest_confidence, list_of_bounding_boxes)
         """
-        model = self.load_model()
-        t0 = time.time()
+        with self._predict_lock:
+            model = self.load_model()
+            t0 = time.time()
 
-        # Run inference filtering for person class only (class 0)
-        raw_results = model.predict(
-            source=frame,
-            classes=[PERSON_CLASS_ID],
-            conf=self.person_conf_threshold,
-            verbose=False,
-        )
-        self._last_inference_time_ms = (time.time() - t0) * 1000
+            # Run inference filtering for person class only (class 0)
+            raw_results = model.predict(
+                source=frame,
+                classes=[PERSON_CLASS_ID],
+                conf=self.person_conf_threshold,
+                verbose=False,
+            )
+            self._last_inference_time_ms = (time.time() - t0) * 1000
 
         boxes: list[tuple[int, int, int, int]] = []
         max_conf = 0.0
@@ -127,16 +130,17 @@ class VisionDetector:
         Returns:
             (jpeg_bytes, is_cropped, confidence, bounding_box_xyxy_or_none)
         """
-        model = self.load_model()
-        t0 = time.time()
+        with self._predict_lock:
+            model = self.load_model()
+            t0 = time.time()
 
-        # Run general object detection
-        raw_results = model.predict(
-            source=frame,
-            conf=0.25,  # Low initial threshold to inspect candidates
-            verbose=False,
-        )
-        self._last_inference_time_ms = (time.time() - t0) * 1000
+            # Run general object detection
+            raw_results = model.predict(
+                source=frame,
+                conf=0.25,  # Low initial threshold to inspect candidates
+                verbose=False,
+            )
+            self._last_inference_time_ms = (time.time() - t0) * 1000
 
         best_bbox: tuple[int, int, int, int] | None = None
         best_conf = 0.0
