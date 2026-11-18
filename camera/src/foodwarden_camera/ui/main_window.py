@@ -11,9 +11,10 @@ from collections.abc import Callable
 from typing import Any
 
 from PyQt6.QtCore import Qt, QThread, pyqtSignal
-from PyQt6.QtGui import QKeyEvent, QMouseEvent, QResizeEvent
+from PyQt6.QtGui import QColor, QKeyEvent, QMouseEvent, QPainter, QPaintEvent, QResizeEvent
 from PyQt6.QtWidgets import (
     QApplication,
+    QFrame,
     QLabel,
     QMainWindow,
     QStackedWidget,
@@ -37,7 +38,7 @@ from foodwarden_camera.ui.styles import (
 logger = logging.getLogger(__name__)
 
 
-class _SleepOverlay(QWidget):
+class _SleepOverlay(QFrame):
     """Pure-black sleep cover keeping the HDMI/DP video link alive (avoids No-Signal blue screen)."""
 
     def __init__(
@@ -47,8 +48,10 @@ class _SleepOverlay(QWidget):
     ) -> None:
         super().__init__(parent)
         self._on_wake_requested = on_wake_requested
+        self.setObjectName("SleepOverlay")
+        self.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
         self.setAutoFillBackground(True)
-        self.setStyleSheet("background-color: #000000;")
+        self.setStyleSheet("#SleepOverlay { background-color: #000000; border: none; }")
 
         layout = QVBoxLayout(self)
         layout.setContentsMargins(20, 20, 20, 20)
@@ -60,9 +63,14 @@ class _SleepOverlay(QWidget):
             self,
         )
         hint.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        hint.setStyleSheet("color: #1F2937; font-size: 12px; background-color: transparent;")
+        hint.setStyleSheet("color: #1F2937; font-size: 12px; background-color: #000000;")
         layout.addWidget(hint)
         self.hide()
+
+    def paintEvent(self, event: QPaintEvent | None) -> None:
+        painter = QPainter(self)
+        painter.fillRect(self.rect(), QColor("#000000"))
+        super().paintEvent(event)
 
     def mousePressEvent(self, event: QMouseEvent | None) -> None:
         if self._on_wake_requested is not None:
@@ -273,11 +281,13 @@ class FoodWardenMainWindow(QMainWindow):
     def _apply_display_sleep(self, sleeping: bool) -> None:
         self._is_display_sleeping = sleeping
         if sleeping:
+            self.stack.hide()
             self._sleep_overlay.setGeometry(self.rect())
             self._sleep_overlay.show()
             self._sleep_overlay.raise_()
         else:
             self._sleep_overlay.hide()
+            self.stack.show()
 
     # ==========================================================================
     # Window & Runtime Controls

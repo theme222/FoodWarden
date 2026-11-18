@@ -297,12 +297,20 @@ def test_node_connection_badges_and_display_sleep_overlay(
     assert "Off 25s" in window.idle_screen.pill_node_d.text()
     assert "#7F1D1D" in window.idle_screen.pill_node_d.styleSheet()
 
-    # Sleep overlay wakes on physical button press without accidentally triggering check-in
+    # Sleep overlay renders solid black #000000 and wakes cleanly on button press
+    window.show()
     window.set_display_sleep(True)
+    qapp.processEvents()
     assert window.is_display_sleeping is True
+    assert window.stack.isVisible() is False
+    assert window.grab().toImage().pixelColor(400, 200).name() == "#000000"
+
     button_ctrl.emit_button_press(ButtonType.SELECT)
+    qapp.processEvents()
     assert window.is_display_sleeping is False
+    assert window.stack.isVisible() is True
     assert checkin_calls == 0
+    window.close()
 
     # Door close alert banner
     window.show_door_closing_alert()
