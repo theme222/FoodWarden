@@ -11,6 +11,8 @@
 #include <stdint.h>
 #include <stdio.h>
 #include <string.h>
+#include <sys/time.h>
+#include <time.h>
 
 #include "config.h"
 #include "controllers.h"
@@ -86,7 +88,37 @@ inline uint32_t nextBackoffMs(uint32_t current_ms) {
              : doubled;
 }
 
-inline bool connectMqttWithTls(PubSubClient& mqtt) {
+inline bool connectMqttWithTls(WiFiClientSecure& tls_client, PubSubClient& mqtt) {
+  // Ensure ESP32 POSIX clock is past the CA cert's notBefore (Nov 10 2026)
+  // before mbedtls validates X.509 dates (cold boot starts at 1970-01-01).
+  if (time(nullptr) < 1794800000L) {
+    struct timeval tv;
+    tv.tv_sec  = 1794800000L;  // 2026-11-16 baseline for TLS cert date check
+    tv.tv_usec = 0;
+    settimeofday(&tv, nullptr);
+  }
+
+  if (door_config::MQTT_TLS_SERVER_CN != nullptr) {
+    IPAddress broker_ip;
+    if (!WiFi.hostByName(MQTT_BROKER_HOST, broker_ip)) {
+      Serial.printf("[MQTTS] Failed to resolve broker host '%s'\n",
+                    MQTT_BROKER_HOST);
+      return false;
+    }
+    tls_client.stop();
+    if (!tls_client.connect(broker_ip, MQTT_BROKER_PORT,
+                            door_config::MQTT_TLS_SERVER_CN, MQTT_TLS_CA_CERT,
+                            nullptr, nullptr)) {
+      char err_buf[128] = {0};
+      const int err_code = tls_client.lastError(err_buf, sizeof(err_buf));
+      Serial.printf("[MQTTS] TLS handshake failed (CN=%s, code=%d: %s)\n",
+                    door_config::MQTT_TLS_SERVER_CN, err_code, err_buf);
+      return false;
+    }
+    Serial.printf("[MQTTS] TLS verified (host=%s, CN=%s)\n", MQTT_BROKER_HOST,
+                  door_config::MQTT_TLS_SERVER_CN);
+  }
+
   char lwt_buf[128];
   door_protocol::serializeStatusJson(DOOR_NODE_ID, false, 0, lwt_buf,
                                      sizeof(lwt_buf));
@@ -208,7 +240,7 @@ inline void vMqttCommTask(void* pvParameters) {
       if (static_cast<int32_t>(now_ms - next_mqtt_try_ms) >= 0) {
         Serial.printf("[MQTTS] Connecting to %s:%u...\n", MQTT_BROKER_HOST,
                       static_cast<unsigned int>(MQTT_BROKER_PORT));
-        if (connectMqttWithTls(mqtt)) {
+        if (connectMqttWithTls(tls_client, mqtt)) {
           Serial.println(
               "[MQTTS] Connected! Published ONLINE & subscribed to cmd/time");
           mqtt_backoff_ms  = door_config::RECONNECT_BACKOFF_MIN_MS;

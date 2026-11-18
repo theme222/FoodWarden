@@ -151,6 +151,10 @@ constexpr uint32_t TIME_RESYNC_INTERVAL_S  = 604800UL;  // 7 days in seconds
 constexpr uint32_t RECONNECT_BACKOFF_MIN_MS = 1000;     // 1s initial backoff
 constexpr uint32_t RECONNECT_BACKOFF_MAX_MS = 16000;    // 16s max exponential cap
 
+// Expected DNS SAN / Common Name inside Mosquitto's server.crt for TLS verification.
+// Matches `DNS:foodwarden-gateway.local` in server.crt even when connecting by IP.
+constexpr const char* MQTT_TLS_SERVER_CN = "foodwarden-gateway.local";
+
 }  // namespace door_config
 
 #endif  // DOOR_CONFIG_H_
