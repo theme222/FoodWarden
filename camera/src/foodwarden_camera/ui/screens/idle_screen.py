@@ -21,6 +21,52 @@ from PyQt6.QtWidgets import (
 )
 
 
+def _format_elapsed_short(age_s: float) -> str:
+    """Formats elapsed seconds compactly (e.g. '3s', '1m05s', '2h+')."""
+    secs = max(0, int(age_s))
+    if secs < 60:
+        return f"{secs}s"
+    mins, rem_s = divmod(secs, 60)
+    if mins < 60:
+        return f"{mins}m{rem_s:02d}s"
+    return f"{mins // 60}h+"
+
+
+# Freshness windows (seconds) per node type: F0 wakes on 30s batch; D0 streams 1 Hz telemetry
+_NODE_BADGE_THRESHOLDS: dict[str, tuple[float, float]] = {
+    "F0": (45.0, 120.0),
+    "D0": (5.0, 20.0),
+}
+
+
+def format_node_badge(
+    node_id: str,
+    age_s: float | None,
+    *,
+    is_connected: bool = False,
+    is_offline: bool = False,
+) -> tuple[str, str, str, str]:
+    """Returns (pill_text, detail_text, bg_hex, fg_hex) progressing Gray->Green->Yellow->Red."""
+    green_max_s, yellow_max_s = _NODE_BADGE_THRESHOLDS.get(node_id, (45.0, 120.0))
+
+    if age_s is None and not is_connected:
+        return f"● {node_id}: Wait", f"{node_id}: รอเชื่อมต่อ", "#374151", "#D1D5DB"
+
+    elapsed = _format_elapsed_short(0.0 if age_s is None else age_s)
+
+    if is_offline:
+        return f"● {node_id}: Off {elapsed}", f"{node_id}: หลุด ({elapsed})", "#7F1D1D", "#FCA5A5"
+
+    if is_connected or (age_s is not None and age_s <= green_max_s):
+        state_txt = "LIVE" if is_connected and (age_s is None or age_s < 2.0) else elapsed
+        return f"● {node_id}: {state_txt}", f"{node_id}: ปกติ ({state_txt})", "#064E3B", "#34D399"
+
+    if age_s is not None and age_s <= yellow_max_s:
+        return f"● {node_id}: {elapsed}", f"{node_id}: นิ่ง ({elapsed})", "#78350F", "#FBBF24"
+
+    return f"● {node_id}: {elapsed}!", f"{node_id}: ขาดติดต่อ ({elapsed})", "#7F1D1D", "#FCA5A5"
+
+
 def _create_header_button(
     text: str,
     bg_color: str,
@@ -69,6 +115,7 @@ class IdleScreen(QWidget):
         self._on_minimize = on_minimize
         self._on_toggle_fullscreen = on_toggle_fullscreen
         self._on_quit = on_quit
+        self._node_details: dict[str, str] = {"F0": "F0: รอเชื่อมต่อ", "D0": "D0: รอเชื่อมต่อ"}
         self._init_ui()
 
     def _init_ui(self) -> None:
@@ -127,31 +174,26 @@ class IdleScreen(QWidget):
 
         # 1b. System Status Pills Row
         status_layout = QHBoxLayout()
-        status_layout.setSpacing(8)
+        status_layout.setSpacing(5)
 
+        pill_pad = "font-size: 11px; font-weight: bold; padding: 4px 6px; border-radius: 4px;"
         self.pill_wifi = QLabel("Wi-Fi: OK", self)
-        self.pill_wifi.setStyleSheet(
-            "background-color: #064E3B; color: #34D399; font-size: 11px; font-weight: bold; padding: 4px 8px; border-radius: 4px;"
-        )
-        self.pill_ble = QLabel("Sensor: F0", self)
-        self.pill_ble.setStyleSheet(
-            "background-color: #064E3B; color: #34D399; font-size: 11px; font-weight: bold; padding: 4px 8px; border-radius: 4px;"
-        )
+        self.pill_wifi.setStyleSheet(f"background-color: #064E3B; color: #34D399; {pill_pad}")
+        self.pill_node_f = QLabel("● F0: Wait", self)
+        self.pill_node_f.setStyleSheet(f"background-color: #374151; color: #D1D5DB; {pill_pad}")
+        self.pill_ble = self.pill_node_f
+        self.pill_node_d = QLabel("● D0: Wait", self)
+        self.pill_node_d.setStyleSheet(f"background-color: #374151; color: #D1D5DB; {pill_pad}")
         self.pill_door = QLabel("Door: Closed", self)
-        self.pill_door.setStyleSheet(
-            "background-color: #1E3A8A; color: #60A5FA; font-size: 11px; font-weight: bold; padding: 4px 8px; border-radius: 4px;"
-        )
+        self.pill_door.setStyleSheet(f"background-color: #1E3A8A; color: #60A5FA; {pill_pad}")
         self.pill_motion = QLabel("Motion: None (0s)", self)
-        self.pill_motion.setStyleSheet(
-            "background-color: #1F2937; color: #9CA3AF; font-size: 11px; font-weight: bold; padding: 4px 8px; border-radius: 4px;"
-        )
+        self.pill_motion.setStyleSheet(f"background-color: #1F2937; color: #9CA3AF; {pill_pad}")
         self.pill_person = QLabel("YOLO: Wait", self)
-        self.pill_person.setStyleSheet(
-            "background-color: #1F2937; color: #9CA3AF; font-size: 11px; font-weight: bold; padding: 4px 8px; border-radius: 4px;"
-        )
+        self.pill_person.setStyleSheet(f"background-color: #1F2937; color: #9CA3AF; {pill_pad}")
 
         status_layout.addWidget(self.pill_wifi)
-        status_layout.addWidget(self.pill_ble)
+        status_layout.addWidget(self.pill_node_f)
+        status_layout.addWidget(self.pill_node_d)
         status_layout.addWidget(self.pill_door)
         status_layout.addWidget(self.pill_motion)
         status_layout.addWidget(self.pill_person)
@@ -205,6 +247,12 @@ class IdleScreen(QWidget):
         self.door_label = QLabel("สถานะประตู: ปิดสนิท (Closed)", diag_card)
         self.door_label.setStyleSheet("font-size: 14px; color: #E5E7EB;")
         diag_layout.addWidget(self.door_label)
+
+        # Peer Node Connection Summary (F0 BLE & D0 MQTTS)
+        self.nodes_label = QLabel("โหนด (Nodes): F0: รอเชื่อมต่อ | D0: รอเชื่อมต่อ", diag_card)
+        self.nodes_label.setWordWrap(True)
+        self.nodes_label.setStyleSheet("font-size: 13px; color: #9CA3AF;")
+        diag_layout.addWidget(self.nodes_label)
 
         # Motion Sensor (PIR) debug state
         self.motion_label = QLabel(
@@ -328,13 +376,37 @@ class IdleScreen(QWidget):
         if is_online:
             self.pill_wifi.setText("Wi-Fi: OK")
             self.pill_wifi.setStyleSheet(
-                "background-color: #064E3B; color: #34D399; font-size: 11px; font-weight: bold; padding: 4px 8px; border-radius: 4px;"
+                "background-color: #064E3B; color: #34D399; font-size: 11px; font-weight: bold; padding: 4px 6px; border-radius: 4px;"
             )
         else:
             self.pill_wifi.setText("Wi-Fi: Offline")
             self.pill_wifi.setStyleSheet(
-                "background-color: #7F1D1D; color: #FCA5A5; font-size: 11px; font-weight: bold; padding: 4px 8px; border-radius: 4px;"
+                "background-color: #7F1D1D; color: #FCA5A5; font-size: 11px; font-weight: bold; padding: 4px 6px; border-radius: 4px;"
             )
+
+    def update_node_status(
+        self,
+        node_id: str,
+        age_s: float | None,
+        is_connected: bool = False,
+        is_offline: bool = False,
+    ) -> None:
+        """Updates Gray->Green->Yellow->Red connection indicator for Node 'F' or 'D'."""
+        pill_text, detail_text, bg_hex, fg_hex = format_node_badge(
+            node_id,
+            age_s,
+            is_connected=is_connected,
+            is_offline=is_offline,
+        )
+        target_pill = self.pill_node_d if node_id == "D0" else self.pill_node_f
+        target_pill.setText(pill_text)
+        target_pill.setStyleSheet(
+            f"background-color: {bg_hex}; color: {fg_hex}; font-size: 11px; font-weight: bold; padding: 4px 6px; border-radius: 4px;"
+        )
+        self._node_details[node_id] = detail_text
+        self.nodes_label.setText(
+            f"โหนด (Nodes): {self._node_details['F0']} | {self._node_details['D0']}"
+        )
 
     def update_motion_state(
         self,

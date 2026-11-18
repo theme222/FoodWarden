@@ -101,6 +101,10 @@ class GatewaySettings(BaseModel):
         default=int(os.getenv("SLEEP_TIMEOUT_S", "600")),
         description="Seconds of inactivity before screen and camera turn off",
     )
+    door_close_timeout_s: int = Field(
+        default=int(os.getenv("DOOR_CLOSE_TIMEOUT_S", "60")),
+        description="Seconds door remains open with no human before sending CLOSE_DOOR",
+    )
 
     @property
     def aes_key(self) -> bytes:
@@ -113,6 +117,7 @@ class GatewaySettings(BaseModel):
         autocomplete_timeout_s: int,
         sleep_timeout_s: int,
         pir_gpio_pin: int | None = None,
+        door_close_timeout_s: int | None = None,
         target_env_path: Path | None = None,
     ) -> None:
         """Updates runtime settings in memory and persists them to the .env file."""
@@ -121,6 +126,8 @@ class GatewaySettings(BaseModel):
         self.sleep_timeout_s = sleep_timeout_s
         if pir_gpio_pin is not None:
             self.pir_gpio_pin = pir_gpio_pin
+        if door_close_timeout_s is not None:
+            self.door_close_timeout_s = max(3, door_close_timeout_s)
 
         resolved_path = target_env_path or env_path
         resolved_path.parent.mkdir(parents=True, exist_ok=True)
@@ -132,6 +139,8 @@ class GatewaySettings(BaseModel):
         set_key(str(resolved_path), "SLEEP_TIMEOUT_S", str(sleep_timeout_s))
         if pir_gpio_pin is not None:
             set_key(str(resolved_path), "PIR_GPIO_PIN", str(pir_gpio_pin))
+        if door_close_timeout_s is not None:
+            set_key(str(resolved_path), "DOOR_CLOSE_TIMEOUT_S", str(self.door_close_timeout_s))
 
 
 settings = GatewaySettings()

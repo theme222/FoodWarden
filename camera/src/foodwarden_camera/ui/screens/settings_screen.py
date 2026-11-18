@@ -50,10 +50,12 @@ class SettingsScreen(QWidget):
         on_toggle_fullscreen: Callable[[], None] | None = None,
         on_quit: Callable[[], None] | None = None,
         on_save_pir_pin: Callable[[int], None] | None = None,
+        on_save_door_close_timeout: Callable[[int], None] | None = None,
         initial_token: str = "",
         initial_autocomplete_s: int = 5,
         initial_sleep_s: int = 600,
         initial_pir_gpio_pin: int = 22,
+        initial_door_close_s: int = 60,
         parent: QWidget | None = None,
     ) -> None:
         super().__init__(parent)
@@ -63,11 +65,13 @@ class SettingsScreen(QWidget):
         self._on_toggle_fullscreen = on_toggle_fullscreen
         self._on_quit = on_quit
         self._on_save_pir_pin = on_save_pir_pin
+        self._on_save_door_close_timeout = on_save_door_close_timeout
 
         self._initial_token = initial_token
         self._initial_autocomplete_s = initial_autocomplete_s
         self._initial_sleep_s = sleep_timeout_clamp(initial_sleep_s)
         self._initial_pir_gpio_pin = initial_pir_gpio_pin
+        self._initial_door_close_s = door_close_timeout_clamp(initial_door_close_s)
 
         self._init_ui()
         self.load_values(
@@ -75,6 +79,7 @@ class SettingsScreen(QWidget):
             initial_autocomplete_s,
             initial_sleep_s,
             initial_pir_gpio_pin,
+            initial_door_close_s,
         )
 
     def _init_ui(self) -> None:
@@ -171,12 +176,12 @@ class SettingsScreen(QWidget):
         token_layout.addLayout(token_row)
         main_layout.addWidget(token_card)
 
-        # 3. Timeouts Card (Autocomplete & Sleep)
+        # 3. Timeouts Card (Autocomplete & Sleep & Door Closure)
         timeout_card = QFrame(self)
         timeout_card.setStyleSheet(card_style)
         timeout_layout = QVBoxLayout(timeout_card)
-        timeout_layout.setContentsMargins(12, 8, 12, 8)
-        timeout_layout.setSpacing(8)
+        timeout_layout.setContentsMargins(12, 6, 12, 6)
+        timeout_layout.setSpacing(6)
 
         # 3a. Autocomplete delay
         auto_row = QHBoxLayout()
@@ -297,6 +302,52 @@ class SettingsScreen(QWidget):
         )
         timeout_layout.addLayout(pir_row)
 
+        # 3d. Automatic Door Closure Delay (Scene 4 configurable seconds)
+        door_row = QHBoxLayout()
+        door_row.setSpacing(6)
+        door_label_box = QVBoxLayout()
+        door_th = QLabel("เวลาปิดประตูอัตโนมัติ (Auto Door Close Delay)", timeout_card)
+        door_th.setStyleSheet("font-size: 13px; font-weight: bold; color: #E5E7EB; border: none;")
+        door_en = QLabel(
+            "Seconds door stays open with no human before sending CLOSE_DOOR",
+            timeout_card,
+        )
+        door_en.setStyleSheet("font-size: 11px; color: #9CA3AF; border: none;")
+        door_label_box.addWidget(door_th)
+        door_label_box.addWidget(door_en)
+        door_row.addLayout(door_label_box)
+        door_row.addStretch()
+
+        self.door_close_spin = QSpinBox(timeout_card)
+        self.door_close_spin.setFocusPolicy(Qt.FocusPolicy.ClickFocus)
+        self.door_close_spin.setRange(3, 600)
+        self.door_close_spin.setSuffix(" s")
+        self.door_close_spin.setFixedWidth(84)
+        self.door_close_spin.setStyleSheet(spin_style)
+
+        door_row.addWidget(
+            _make_mouse_button(
+                "-10s", btn_step_style, timeout_card, lambda: self._adjust_door_close(-10)
+            )
+        )
+        door_row.addWidget(
+            _make_mouse_button(
+                "-1s", btn_step_style, timeout_card, lambda: self._adjust_door_close(-1)
+            )
+        )
+        door_row.addWidget(self.door_close_spin)
+        door_row.addWidget(
+            _make_mouse_button(
+                "+1s", btn_step_style, timeout_card, lambda: self._adjust_door_close(1)
+            )
+        )
+        door_row.addWidget(
+            _make_mouse_button(
+                "+10s", btn_step_style, timeout_card, lambda: self._adjust_door_close(10)
+            )
+        )
+        timeout_layout.addLayout(door_row)
+
         main_layout.addWidget(timeout_card)
 
         # 4. Window & App Controls Card
@@ -367,12 +418,15 @@ class SettingsScreen(QWidget):
         autocomplete_s: int,
         sleep_s: int,
         pir_gpio_pin: int = 22,
+        door_close_s: int | None = None,
     ) -> None:
         """Populates controls with current runtime settings."""
         self.token_input.setText(token)
         self.autocomplete_spin.setValue(max(1, min(120, autocomplete_s)))
         self.sleep_spin.setValue(sleep_timeout_clamp(sleep_s))
         self.pir_pin_spin.setValue(max(-1, min(27, pir_gpio_pin)))
+        if door_close_s is not None:
+            self.door_close_spin.setValue(door_close_timeout_clamp(door_close_s))
 
     def _toggle_token_visibility(self) -> None:
         if self.token_input.echoMode() == QLineEdit.EchoMode.Password:
@@ -393,6 +447,9 @@ class SettingsScreen(QWidget):
     def _adjust_sleep(self, delta: int) -> None:
         self.sleep_spin.setValue(self.sleep_spin.value() + delta)
 
+    def _adjust_door_close(self, delta: int) -> None:
+        self.door_close_spin.setValue(self.door_close_spin.value() + delta)
+
     def _handle_back(self) -> None:
         if self._on_back is not None:
             self._on_back()
@@ -402,10 +459,13 @@ class SettingsScreen(QWidget):
         autocomplete_s = int(self.autocomplete_spin.value())
         sleep_s = int(self.sleep_spin.value())
         pir_pin = int(self.pir_pin_spin.value())
+        door_close_s = int(self.door_close_spin.value())
         if self._on_save_settings is not None:
             self._on_save_settings(token, autocomplete_s, sleep_s)
         if self._on_save_pir_pin is not None:
             self._on_save_pir_pin(pir_pin)
+        if self._on_save_door_close_timeout is not None:
+            self._on_save_door_close_timeout(door_close_s)
         if self._on_back is not None:
             self._on_back()
 
@@ -413,3 +473,8 @@ class SettingsScreen(QWidget):
 def sleep_timeout_clamp(value: int) -> int:
     """Clamps sleep timeout into the spinbox range [5, 7200]."""
     return max(5, min(7200, value))
+
+
+def door_close_timeout_clamp(value: int) -> int:
+    """Clamps auto door closure delay into the spinbox range [3, 600]."""
+    return max(3, min(600, value))

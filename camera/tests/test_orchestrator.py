@@ -176,12 +176,86 @@ def test_ir_light_mismatch_alert(test_orchestrator: GatewayOrchestrator) -> None
     assert call_kwargs["details"]["ldr_light"] == 250
 
 
-def test_pir_sleep_and_wake_controls_camera(test_orchestrator: GatewayOrchestrator) -> None:
+def test_pir_sleep_and_wake_controls_camera(
+    test_orchestrator: GatewayOrchestrator,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    invoked_cmds: list[list[str]] = []
+    monkeypatch.setattr(
+        test_orchestrator,
+        "_run_x11_commands",
+        lambda cmds: invoked_cmds.extend(cmds),
+    )
+
     test_orchestrator._on_pir_sleep()
     test_orchestrator.camera.stop.assert_called_once()
+    assert test_orchestrator.window.is_display_sleeping is True
+    assert all("off" not in cmd for cmd in invoked_cmds)
 
     test_orchestrator._on_pir_wake()
     test_orchestrator.camera.start.assert_called_once()
+    assert test_orchestrator.window.is_display_sleeping is False
+
+
+def test_dark_box_ble_does_not_reset_active_door_ir_and_indicators_update(
+    test_orchestrator: GatewayOrchestrator,
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    monkeypatch.setattr(config_module, "env_path", tmp_path / ".env")
+    test_orchestrator.apply_door_close_timeout(8)
+    assert test_orchestrator.settings.door_close_timeout_s == 8
+
+    now = time.time()
+    test_orchestrator.ble.last_contact_time = now - 2.0
+    test_orchestrator.mqtt.last_contact_time = {"D0": now - 1.0}
+    test_orchestrator.mqtt.node_online = {"D0": True}
+    test_orchestrator.mqtt.is_door_open = True
+    test_orchestrator.mqtt.door_ajar_duration_s = 12.0
+    test_orchestrator.sync_manager.is_online = True
+
+    # Node 'F' inside a dark box (light < 100) must NOT clear open door state while 'D0' is active
+    dark_sample = SensorSample.from_raw(int(now), 350, 100, 15)
+    packet = SensorPacket(
+        header=TelemetryHeader(version=1, node_id="F0", session_salt=b"12345678", counter=1),
+        samples=[dark_sample],
+    )
+    test_orchestrator._on_ble_telemetry(packet)
+
+    test_orchestrator.mqtt.set_door_state.assert_not_called()
+    assert "#064E3B" in test_orchestrator.window.idle_screen.pill_node_f.styleSheet()
+    assert "#064E3B" in test_orchestrator.window.idle_screen.pill_node_d.styleSheet()
+    assert "Wi-Fi: OK" == test_orchestrator.window.idle_screen.pill_wifi.text()
+    assert "Door: Open (12s)" == test_orchestrator.window.idle_screen.pill_door.text()
+
+
+def test_configurable_door_close_timeout_and_abort_cooldown(
+    test_orchestrator: GatewayOrchestrator,
+) -> None:
+    test_orchestrator.settings.door_close_timeout_s = 5
+    test_orchestrator._last_abort_at = None
+    test_orchestrator.mqtt.is_door_open = True
+    test_orchestrator.mqtt.door_ajar_duration_s = 5.5
+    test_orchestrator._is_door_closing = False
+    test_orchestrator.detector.detect_person.return_value = (False, 0.0, [])
+
+    # Elapsed >= 5s with clear camera -> sends CLOSE_DOOR
+    test_orchestrator._evaluate_safety_step()
+    test_orchestrator.mqtt.send_close_door.assert_called_once_with(node_id="D0", timeout_s=30)
+    assert test_orchestrator._is_door_closing is True
+    assert "CLOSE_DOOR" in test_orchestrator.window.alert_banner.label_en.text()
+
+    # Person steps into frame while closing -> sends ABORT immediately
+    test_orchestrator.detector.detect_person.return_value = (True, 0.91, [(10, 10, 100, 200)])
+    test_orchestrator._evaluate_safety_step()
+    test_orchestrator.mqtt.send_abort.assert_called_once_with(node_id="D0", reason="HUMAN_APPROACH")
+    assert test_orchestrator._is_door_closing is False
+    assert "ตรวจพบบุคคล" in test_orchestrator.window.alert_banner.label_th.text()
+
+    # Immediate next check while inside 5s cooldown must NOT immediately re-fire CLOSE_DOOR
+    test_orchestrator.detector.detect_person.return_value = (False, 0.0, [])
+    test_orchestrator._evaluate_safety_step()
+    assert test_orchestrator.mqtt.send_close_door.call_count == 1
 
 
 def test_apply_settings_updates_runtime_subsystems(

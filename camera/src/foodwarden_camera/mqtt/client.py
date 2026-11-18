@@ -72,6 +72,8 @@ class DoorMQTTClient:
         self._is_door_open: bool = False
         self._last_state: str = "UNKNOWN"
         self.last_seen_by_node: dict[str, int] = {}
+        self.last_contact_time: dict[str, float] = {}
+        self.node_online: dict[str, bool] = {}
 
         # Initialize paho-mqtt client with Protocol version 5 / 3.1.1
         self._client = mqtt.Client(
@@ -204,14 +206,24 @@ class DoorMQTTClient:
         elif topic == STATUS_TOPIC:
             self._handle_door_status(data)
 
+    def _record_contact(
+        self, node_id: str, *, online: bool = True, notify_seen: bool = False
+    ) -> int:
+        """Records wall-clock contact time and online status for a peer MQTT node."""
+        now_f = time.time()
+        now_s = int(now_f)
+        self.last_seen_by_node[node_id] = now_s
+        self.last_contact_time[node_id] = now_f
+        self.node_online[node_id] = online
+        if notify_seen and self.on_node_seen:
+            self.on_node_seen(node_id, now_s)
+        return now_s
+
     def _handle_time_req(self, data: dict[str, Any]) -> None:
         """Handles RTC time synchronization requests from Node 'D'."""
         try:
             req = TimeSyncRequest.model_validate(data)
-            now_s = int(time.time())
-            self.last_seen_by_node[req.node_id] = now_s
-            if self.on_node_seen:
-                self.on_node_seen(req.node_id, now_s)
+            now_s = self._record_contact(req.node_id, online=True, notify_seen=True)
             res = TimeSyncResponse(node_id=req.node_id, timestamp=now_s)
             self._client.publish(
                 TIME_RES_TOPIC,
@@ -228,7 +240,7 @@ class DoorMQTTClient:
         """Parses and handles discrete actuation events."""
         try:
             envelope = DoorEventEnvelope.model_validate(data)
-            self.last_seen_by_node[envelope.node_id] = int(time.time())
+            self._record_contact(envelope.node_id, online=True)
             logger.info("Received door event from %s: %s", envelope.node_id, envelope.event.type)
 
             if envelope.event.type == "SUCCESS":
@@ -245,7 +257,7 @@ class DoorMQTTClient:
         """Parses 1 Hz periodic telemetry from Node 'D'."""
         try:
             telem = DoorTelemetryPayload.model_validate(data)
-            self.last_seen_by_node[telem.node_id] = int(time.time())
+            self._record_contact(telem.node_id, online=True)
             self._last_state = telem.state
 
             # If IR sensor says closed -> not open
@@ -261,11 +273,11 @@ class DoorMQTTClient:
         """Tracks online / offline status of Node 'D'."""
         state = str(data.get("state") or data.get("status", "unknown"))
         node_id = str(data.get("node_id", "D0"))
-        if state.upper() == "ONLINE":
-            now_s = int(time.time())
-            self.last_seen_by_node[node_id] = now_s
-            if self.on_node_seen:
-                self.on_node_seen(node_id, now_s)
+        is_online = state.upper() == "ONLINE"
+        if is_online:
+            self._record_contact(node_id, online=True, notify_seen=True)
+        else:
+            self.node_online[node_id] = False
         logger.info("Node '%s' status update: %s", node_id, state)
 
     def set_door_state(self, is_open: bool) -> None:

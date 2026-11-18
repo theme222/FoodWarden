@@ -78,6 +78,15 @@ class AlertBanner(QFrame):
             duration_ms=6000,
         )
 
+    def show_door_closing_alert(self) -> None:
+        """Informational alert when automatic door closure command is issued."""
+        self.show_alert(
+            message_th="ประตูเปิดค้าง — กำลังส่งคำสั่งปิดประตูอัตโนมัติ",
+            message_en="Door left open — Sending CLOSE_DOOR command to Node 'D'",
+            is_critical=False,
+            duration_ms=4000,
+        )
+
     def show_offline_warning(self) -> None:
         """Standard warning when internet/cloud connection is lost."""
         self.show_alert(

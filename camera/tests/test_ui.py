@@ -261,6 +261,67 @@ def test_configurable_countdown_timers(qapp: QApplication) -> None:
     window.checkout_screen.handle_cancel()
 
 
+def test_node_connection_badges_and_display_sleep_overlay(
+    qapp: QApplication,
+    tmp_path: Path,
+) -> None:
+    button_ctrl = ButtonController()
+    checkin_calls = 0
+    door_close_saved: list[int] = []
+
+    def on_checkin() -> None:
+        nonlocal checkin_calls
+        checkin_calls += 1
+
+    window = FoodWardenMainWindow(
+        button_controller=button_ctrl,
+        on_trigger_checkin_capture=on_checkin,
+        on_save_door_close_timeout=door_close_saved.append,
+        initial_door_close_timeout_s=15,
+    )
+
+    # Gray -> Green -> Yellow -> Red progression for Node 'F' and Node 'D'
+    window.update_node_status("F0", None)
+    assert "Wait" in window.idle_screen.pill_node_f.text()
+    assert "#374151" in window.idle_screen.pill_node_f.styleSheet()
+
+    window.update_node_status("F0", 1.0, is_connected=True)
+    assert "LIVE" in window.idle_screen.pill_node_f.text()
+    assert "#064E3B" in window.idle_screen.pill_node_f.styleSheet()
+
+    window.update_node_status("F0", 75.0)
+    assert "1m15s" in window.idle_screen.pill_node_f.text()
+    assert "#78350F" in window.idle_screen.pill_node_f.styleSheet()
+
+    window.update_node_status("D0", 25.0, is_offline=True)
+    assert "Off 25s" in window.idle_screen.pill_node_d.text()
+    assert "#7F1D1D" in window.idle_screen.pill_node_d.styleSheet()
+
+    # Sleep overlay wakes on physical button press without accidentally triggering check-in
+    window.set_display_sleep(True)
+    assert window.is_display_sleeping is True
+    button_ctrl.emit_button_press(ButtonType.SELECT)
+    assert window.is_display_sleeping is False
+    assert checkin_calls == 0
+
+    # Door close alert banner
+    window.show_door_closing_alert()
+    assert "CLOSE_DOOR" in window.alert_banner.label_en.text()
+
+    # Door close delay editable on Settings screen and saved to .env
+    window.idle_screen.btn_settings.click()
+    assert window.settings_screen.door_close_spin.value() == 15
+    window.settings_screen.door_close_spin.setValue(8)
+    window.settings_screen.btn_save.click()
+    assert door_close_saved == [8]
+
+    env_file = tmp_path / ".env"
+    cfg = GatewaySettings()
+    cfg.save_runtime_settings("tok", 5, 600, door_close_timeout_s=8, target_env_path=env_file)
+    content = env_file.read_text(encoding="utf-8")
+    assert "DOOR_CLOSE_TIMEOUT_S='8'" in content or "DOOR_CLOSE_TIMEOUT_S=8" in content
+
+
 def test_window_controls_and_motion_debug_ui(
     qapp: QApplication, monkeypatch: pytest.MonkeyPatch
 ) -> None:

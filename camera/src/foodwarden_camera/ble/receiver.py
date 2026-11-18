@@ -107,6 +107,7 @@ class BLEReceiver:
         self._running: bool = False
         self._connected: bool = False
         self._thread: threading.Thread | None = None
+        self.last_contact_time: float | None = None
 
     @property
     def is_connected(self) -> bool:
@@ -135,6 +136,7 @@ class BLEReceiver:
             return None
 
         is_new_session = reason == "new_session"
+        self.last_contact_time = time.time()
         self.pdr_tracker.record_received(
             packet.header.node_id, packet.header.counter, is_new_session
         )
@@ -224,6 +226,7 @@ class BLEReceiver:
         ) as client:
             self._client = client
             self._connected = True
+            self.last_contact_time = time.time()
             logger.info("Connected to Node 'F' at %s", device.address)
             try:
                 # 1. Synchronize 64-bit Unix RTC time on FFF2 first per FUC.md §6

@@ -103,14 +103,18 @@ class GatewayOrchestrator:
             on_commit_checkout=self.handle_commit_checkout,
             on_save_settings=self.apply_settings,
             on_save_pir_pin=self.apply_pir_pin,
+            on_save_door_close_timeout=self.apply_door_close_timeout,
+            on_wake_requested=self.pir.wake,
             initial_token=settings.gateway_token,
             autocomplete_timeout_s=settings.autocomplete_timeout_s,
             sleep_timeout_s=settings.sleep_timeout_s,
             initial_pir_gpio_pin=settings.pir_gpio_pin,
+            initial_door_close_timeout_s=settings.door_close_timeout_s,
         )
 
         # Safety & State Tracking
         self._is_door_closing: bool = False
+        self._last_abort_at: float | None = None
         self._latest_ldr_light: int | None = None
         self._last_person_detected: bool = False
         self._last_person_conf: float = 0.0
@@ -131,6 +135,7 @@ class GatewayOrchestrator:
             return
         self._running = True
         logger.info("Starting FoodWarden Gateway Orchestrator...")
+        self._configure_x11_keep_display_signal()
 
         # Start Camera & PIR (0.25s poll keeps quick SEN0018 motion pulses responsive)
         self.camera.start()
@@ -142,6 +147,7 @@ class GatewayOrchestrator:
         # Start Local MQTT Broker Client & BLE GATT Receiver
         self.mqtt.start()
         self.ble.start()
+        self.refresh_connection_indicators()
 
         # Start Safety Loop Thread
         self._safety_thread = threading.Thread(
@@ -198,11 +204,17 @@ class GatewayOrchestrator:
             latest_sample.light_ldr,
         )
 
-        # Update door open tracking if light sensor reports lit (LDR >= 100)
+        # Update door open tracking if light sensor reports lit (LDR >= 100), without
+        # clearing an active Node 'D' IR-open timer when 'F' stays inside a dark box.
         if latest_sample.light_ldr is not None:
             self._latest_ldr_light = latest_sample.light_ldr
             is_door_light_on = latest_sample.light_ldr >= 100
-            self.mqtt.set_door_state(is_door_light_on)
+            last_d_seen = self._safe_contact_time(self.mqtt, "D0")
+            d_recently_active = last_d_seen is not None and (time.time() - last_d_seen) <= 10.0
+            if is_door_light_on or not d_recently_active:
+                self.mqtt.set_door_state(is_door_light_on)
+
+        self.refresh_connection_indicators()
 
         # Forward all packet samples or single sample (preserving single-sample test hook)
         if len(packet.samples) > 1:
@@ -239,6 +251,7 @@ class GatewayOrchestrator:
             timestamp=envelope.timestamp,
             details=details,
         )
+        self.refresh_connection_indicators()
 
     def _on_door_telemetry(self, telem: DoorTelemetryPayload) -> None:
         """Triggered upon 1 Hz periodic telemetry from Node 'D'."""
@@ -247,6 +260,7 @@ class GatewayOrchestrator:
             is_open=self.mqtt.is_door_open,
             ajar_duration_s=self.mqtt.door_ajar_duration_s,
         )
+        self.refresh_connection_indicators()
 
         # IR vs. Light Sensor Mismatch check (GOAL.md §3):
         # If Node 'D' IR sensor thinks door is closed (ir_closed=True) while
@@ -275,35 +289,94 @@ class GatewayOrchestrator:
     def _on_mqtt_connection_change(self, connected: bool) -> None:
         logger.info("Mosquitto broker connection changed: %s", connected)
 
+    def _run_x11_commands(self, commands: list[list[str]]) -> None:
+        """Runs best-effort X11 display utility commands on Linux without raising."""
+        if not sys.platform.startswith("linux"):
+            return
+        for cmd in commands:
+            try:
+                subprocess.run(
+                    cmd,
+                    check=False,
+                    timeout=3.0,
+                    stdout=subprocess.DEVNULL,
+                    stderr=subprocess.DEVNULL,
+                )
+            except (OSError, subprocess.SubprocessError) as exc:
+                logger.debug("Could not invoke %s: %s", " ".join(cmd), exc)
+
+    def _configure_x11_keep_display_signal(self) -> None:
+        """Prevents OS X11 DPMS/screensaver from cutting HDMI signal to a No-Signal screen."""
+        self._run_x11_commands(
+            [
+                ["xset", "s", "off"],
+                ["xset", "-dpms"],
+                ["xset", "s", "noblank"],
+                ["xset", "dpms", "force", "on"],
+                ["xset", "s", "reset"],
+            ]
+        )
+
     def _on_pir_wake(self) -> None:
         logger.info("PIR detected human: waking display and starting camera")
+        self.window.set_display_sleep(False)
         self.camera.start()
-        if sys.platform.startswith("linux"):
-            try:
-                subprocess.run(
-                    ["xset", "dpms", "force", "on"],
-                    check=False,
-                    timeout=3.0,
-                    stdout=subprocess.DEVNULL,
-                    stderr=subprocess.DEVNULL,
-                )
-            except (OSError, subprocess.SubprocessError) as exc:
-                logger.debug("Could not invoke xset dpms force on: %s", exc)
+        self._run_x11_commands(
+            [
+                ["xset", "s", "reset"],
+                ["xset", "dpms", "force", "on"],
+            ]
+        )
 
     def _on_pir_sleep(self) -> None:
-        logger.info("PIR timeout reached: putting display and camera to sleep")
+        logger.info("PIR timeout reached: blanking display via UI sleep cover and stopping camera")
         self.camera.stop()
-        if sys.platform.startswith("linux"):
-            try:
-                subprocess.run(
-                    ["xset", "dpms", "force", "off"],
-                    check=False,
-                    timeout=3.0,
-                    stdout=subprocess.DEVNULL,
-                    stderr=subprocess.DEVNULL,
-                )
-            except (OSError, subprocess.SubprocessError) as exc:
-                logger.debug("Could not invoke xset dpms force off: %s", exc)
+        # Blank via pure-black PyQt overlay rather than `xset dpms force off`, which causes the
+        # Pi-top LCD to drop video sync into a blue "No Signal" screen that ignores wake calls.
+        self.window.set_display_sleep(True)
+
+    @staticmethod
+    def _safe_contact_time(source: Any, node_id: str | None = None) -> float | None:
+        if node_id is None:
+            val = getattr(source, "last_contact_time", None)
+        else:
+            mapping = getattr(source, "last_contact_time", None)
+            val = mapping.get(node_id) if isinstance(mapping, dict) else None
+            if not isinstance(val, (int, float)):
+                fallback = getattr(source, "last_seen_by_node", None)
+                val = fallback.get(node_id) if isinstance(fallback, dict) else None
+        return float(val) if isinstance(val, (int, float)) else None
+
+    def refresh_connection_indicators(self) -> None:
+        """Updates UI badges for Wi-Fi/Cloud, Node 'F' (F0), Node 'D' (D0), and door timer."""
+        now = time.time()
+
+        last_f = self._safe_contact_time(self.ble)
+        age_f = max(0.0, now - last_f) if last_f is not None else None
+        ble_connected = getattr(self.ble, "is_connected", False) is True
+        self.window.update_node_status("F0", age_f, is_connected=ble_connected)
+
+        last_d = self._safe_contact_time(self.mqtt, "D0")
+        age_d = max(0.0, now - last_d) if last_d is not None else None
+        online_map = getattr(self.mqtt, "node_online", None)
+        d_explicit_state = online_map.get("D0") if isinstance(online_map, dict) else None
+        d_is_offline = d_explicit_state is False
+        d_is_connected = d_explicit_state is True and age_d is not None and age_d <= 5.0
+        self.window.update_node_status(
+            "D0",
+            age_d,
+            is_connected=d_is_connected,
+            is_offline=d_is_offline,
+        )
+
+        is_online = getattr(self.sync_manager, "is_online", True)
+        if isinstance(is_online, bool):
+            self.window.update_wifi_status(is_online)
+
+        is_door_open = getattr(self.mqtt, "is_door_open", False)
+        ajar_s = getattr(self.mqtt, "door_ajar_duration_s", 0.0)
+        if isinstance(is_door_open, bool) and isinstance(ajar_s, (int, float)):
+            self.window.update_door_state(is_door_open, float(ajar_s))
 
     def _on_pir_motion_change(self, has_motion: bool, idle_duration_s: float) -> None:
         self.window.update_motion_state(
@@ -348,6 +421,17 @@ class GatewayOrchestrator:
             self.pir.hardware_status_text,
         )
         logger.info("Applied PIR GPIO pin: %d (%s)", pir_gpio_pin, self.pir.hardware_status_text)
+
+    def apply_door_close_timeout(self, door_close_timeout_s: int) -> None:
+        """Updates automatic door closure delay at runtime and persists to .env."""
+        clamped = max(3, min(600, int(door_close_timeout_s)))
+        self.settings.save_runtime_settings(
+            gateway_token=self.settings.gateway_token,
+            autocomplete_timeout_s=self.settings.autocomplete_timeout_s,
+            sleep_timeout_s=self.settings.sleep_timeout_s,
+            door_close_timeout_s=clamped,
+        )
+        logger.info("Applied automatic door close delay: %ds", clamped)
 
     # ==========================================================================
     # Door Safety Reflex Loop
@@ -394,49 +478,67 @@ class GatewayOrchestrator:
             )
         return annotated
 
+    def _evaluate_safety_step(self) -> None:
+        """Executes one door-ajar and human-obstruction safety evaluation pass."""
+        close_timeout_s = max(3.0, float(self.settings.door_close_timeout_s))
+        abort_cooldown_ok = (
+            self._last_abort_at is None or (time.monotonic() - self._last_abort_at) >= 5.0
+        )
+        need_ajar_close_check = (
+            self.mqtt.door_ajar_duration_s >= close_timeout_s
+            and not self._is_door_closing
+            and abort_cooldown_ok
+        )
+        need_closing_abort_check = self._is_door_closing
+        need_debug_check = (
+            self.pir.is_display_awake
+            and not self.window.isMinimized()
+            and self.window.stack.currentIndex() == 0
+            and (time.monotonic() - self._last_person_checked_at >= 1.5)
+        )
+
+        if not (need_ajar_close_check or need_closing_abort_check or need_debug_check):
+            return
+
+        has_frame, frame = self.camera.get_latest_frame()
+        if not has_frame or frame is None:
+            return
+
+        is_person, conf, _ = self._run_person_safety_check(frame)
+
+        # 1. Door-Ajar Automated Closure Check (Goal.md §1 & §2)
+        if need_ajar_close_check:
+            if not is_person:
+                logger.info(
+                    "Door open for %.1fs (>= %.1fs) with no human present. Issuing CLOSE_DOOR.",
+                    self.mqtt.door_ajar_duration_s,
+                    close_timeout_s,
+                )
+                self._is_door_closing = True
+                self.mqtt.send_close_door(node_id="D0", timeout_s=30)
+                self.window.show_door_closing_alert()
+            else:
+                logger.debug(
+                    "Door ajar >= %.1fs, but human is present in front of fridge. Holding door open.",
+                    close_timeout_s,
+                )
+
+        # 2. Reflexive Human Abort While Closing
+        if need_closing_abort_check and is_person:
+            logger.warning(
+                "Human entered camera frame during door closure (conf=%.2f)! Dispatching instant ABORT.",
+                conf,
+            )
+            self._is_door_closing = False
+            self._last_abort_at = time.monotonic()
+            self.mqtt.send_abort(node_id="D0", reason="HUMAN_APPROACH")
+            self.window.show_person_abort_alert()
+
     def _safety_loop(self) -> None:
         """Continuous safety loop monitoring door ajar and human obstruction reflex."""
         while self._running:
             try:
-                need_ajar_close_check = (
-                    self.mqtt.door_ajar_duration_s >= 60.0 and not self._is_door_closing
-                )
-                need_closing_abort_check = self._is_door_closing
-                need_debug_check = (
-                    self.pir.is_display_awake
-                    and self.window.stack.currentIndex() == 0
-                    and (time.monotonic() - self._last_person_checked_at >= 1.5)
-                )
-
-                if need_ajar_close_check or need_closing_abort_check or need_debug_check:
-                    has_frame, frame = self.camera.get_latest_frame()
-                    if has_frame and frame is not None:
-                        is_person, conf, _ = self._run_person_safety_check(frame)
-
-                        # 1. Door-Ajar Automated Closure Check (Goal.md §1 & §2)
-                        if need_ajar_close_check:
-                            if not is_person:
-                                logger.info(
-                                    "Door open for %.1fs with no human present. Issuing CLOSE_DOOR.",
-                                    self.mqtt.door_ajar_duration_s,
-                                )
-                                self._is_door_closing = True
-                                self.mqtt.send_close_door(node_id="D0", timeout_s=30)
-                            else:
-                                logger.debug(
-                                    "Door ajar > 60s, but human is present in front of fridge. Holding door open."
-                                )
-
-                        # 2. Reflexive Human Abort While Closing
-                        if need_closing_abort_check and is_person:
-                            logger.warning(
-                                "Human entered camera frame during door closure (conf=%.2f)! Dispatching instant ABORT.",
-                                conf,
-                            )
-                            self._is_door_closing = False
-                            self.mqtt.send_abort(node_id="D0", reason="HUMAN_APPROACH")
-                            self.window.show_person_abort_alert()
-
+                self._evaluate_safety_step()
             except Exception as exc:  # noqa: BLE001
                 logger.error("Error in door safety loop: %s", exc)
 
@@ -444,14 +546,19 @@ class GatewayOrchestrator:
 
     def _viewfinder_stream_loop(self) -> None:
         """Streams webcam frames to Idle screen preview at ~15 FPS."""
+        last_status_refresh_at = 0.0
         while self._running:
-            if self.window.stack.currentIndex() == 0:
-                self.window.update_motion_state(
-                    self.pir.is_motion_detected,
-                    self.pir.idle_duration_s,
-                    self.pir.hardware_status_text,
-                )
-                if self.pir.is_display_awake:
+            now_mono = time.monotonic()
+            if self.window.stack.currentIndex() == 0 and self.pir.is_display_awake:
+                if now_mono - last_status_refresh_at >= 1.0:
+                    last_status_refresh_at = now_mono
+                    self.window.update_motion_state(
+                        self.pir.is_motion_detected,
+                        self.pir.idle_duration_s,
+                        self.pir.hardware_status_text,
+                    )
+                    self.refresh_connection_indicators()
+                if not self.window.isMinimized():
                     has_frame, frame = self.camera.get_latest_frame()
                     if has_frame and frame is not None:
                         self.window.update_camera_frame(self._annotate_person_preview(frame))
