@@ -1,6 +1,7 @@
 #include "tasks.h"
 
 #include <Arduino.h>
+#include <driver/gpio.h>
 #include <driver/rtc_io.h>
 #include <esp_sleep.h>
 #include <freertos/FreeRTOS.h>
@@ -19,6 +20,11 @@
 // Pins (ARCHITECTURE.md §1.B)
 #define PIN_BUTTON_S1 16 // not an RTC GPIO on the ESP32: cannot wake from deep sleep
 #define PIN_BUTTON_S2 14 // RTC_GPIO16: ext0 wake source
+#define PIN_LED_WIFI 2   // onboard Wi-Fi LED, RTC-capable pad, kept off
+// KidBright32 status LEDs are active-LOW (cathode to the GPIO): HIGH = off.
+#ifndef FRIDGE_LED_OFF_LEVEL
+#define FRIDGE_LED_OFF_LEVEL 1
+#endif
 
 static const uint32_t BLE_ADVERTISING_TIMEOUT_MS = 5000; // GOAL.md: 5 s then give up
 static const uint32_t BLE_STARTUP_MARGIN_MS = 2000;      // NimBLE init + encryption, generous
@@ -129,6 +135,21 @@ static void vDisplayTask(void *) {
   }
 }
 
+// --- Onboard Wi-Fi LED ------------------------------------------------------
+// Node F never uses Wi-Fi, so the Wi-Fi LED must stay dark. The pad is latched
+// at the "off" level before deep sleep (RTC hold) so it does not float and
+// glow while asleep; the hold is released on wake and re-applied before sleep.
+static void wifiLedOff() {
+  gpio_hold_dis((gpio_num_t)PIN_LED_WIFI);
+  pinMode(PIN_LED_WIFI, OUTPUT);
+  digitalWrite(PIN_LED_WIFI, FRIDGE_LED_OFF_LEVEL);
+}
+
+static void wifiLedHoldOffInSleep() {
+  digitalWrite(PIN_LED_WIFI, FRIDGE_LED_OFF_LEVEL);
+  gpio_hold_en((gpio_num_t)PIN_LED_WIFI);
+}
+
 // --- Sensor task: orchestrates one wake cycle then sleeps -----------------
 
 static void goToSleep(uint32_t awake_ms) {
@@ -142,6 +163,7 @@ static void goToSleep(uint32_t awake_ms) {
   esp_sleep_enable_ext0_wakeup((gpio_num_t)PIN_BUTTON_S2, 0); // wake on press (LOW)
   rtc_gpio_pullup_en((gpio_num_t)PIN_BUTTON_S2);
   rtc_gpio_pulldown_dis((gpio_num_t)PIN_BUTTON_S2);
+  wifiLedHoldOffInSleep();
   esp_deep_sleep_start();
 }
 
@@ -149,6 +171,7 @@ static void vSensorTask(void *) {
   const uint32_t start_ms = millis();
   NodeState &node = *g_state;
 
+  wifiLedOff();
   sensorsInit(node.voc);                       // algorithm state lives in RTC memory
   matrixShareBus(sensorsShareMatrixBus());     // before any S1 readout can touch Wire
   const SensorReading reading = sensorsRead(); // always feeds the VOC algorithm

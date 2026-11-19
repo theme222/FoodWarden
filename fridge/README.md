@@ -89,8 +89,8 @@ This runs the Unity suites in `test/`, a simulation of the real Sensirion VOC al
 | `-DFRIDGE_LDR_THRESHOLD=<n>` | Door-open LDR threshold (default `350` on the 0–1000 light scale, placeholder) |
 | `-DFRIDGE_LDR_DARK=<n>` | Inverted LDR reading treated as fully dark, light 0 (default `3095`; see `src/ldr_scale.h`) |
 | `-DFRIDGE_LDR_OPEN_IS_LOW=1` | "Door open" means the LDR reading is **below** the threshold |
-| `-DFRIDGE_SGP40_HEATER_OFF` | Turn the SGP40 heater off after each reading to save power (check accuracy) |
 | `-DFRIDGE_LOG_PACKETS` | Print each encrypted packet as `packet=<hex>` |
+| `-DFRIDGE_LED_OFF_LEVEL=0` | Wi-Fi LED (`GPIO 2`) "off" level, if the board's LED is active-HIGH (default `1`) |
 | `-DMATRIX_RAM_LAYOUT=1` / `2` | Alternative LED matrix RAM mappings (default `3`, KidBright32) |
 
 ### Debugging the encrypted packet

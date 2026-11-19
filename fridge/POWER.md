@@ -12,7 +12,7 @@
 | Phase | When | Radio | Notes |
 |---|---|---|---|
 | Deep sleep | Most of every 5 s | Off | `esp_deep_sleep_start()`, RTC memory kept, timer + S2 (`GPIO 14`) wake |
-| Sample wake | Every 5 s | Off | Boot, read SHT31 + SGP40 + LDR (about 100 to 150 ms), append to RTC buffer, back to sleep |
+| Sample wake | Every 5 s | Off | Boot, read SHT31 + SGP40 + LDR (about 300 ms, including the 170 ms SGP40 heat-up), append to RTC buffer, back to sleep |
 | BLE session | Every 6th wake (30 s), every wake while the door is open, on door close, on S2 | On | Advertise up to 5 s, connect, time sync, send; ends as soon as the Gateway disconnects |
 | LED matrix readout | Only when S1 is held at wake | Off | Scroll about 4 s, then display and oscillator off |
 
@@ -23,8 +23,8 @@ Inputs (each is an assumption to verify):
 | Quantity | Assumed value | Source |
 |---|---|---|
 | Sleep current | 15 µA | `interface/FUC.md` target; a dev board with USB bridge and LEDs will draw far more |
-| Sample wake: current | 50 mA | ESP32 CPU active, radio off, SGP40 heater on |
-| Sample wake: duration | 0.20 s | Boot plus sensor reads, to be measured |
+| Sample wake: current | 50 mA | ESP32 CPU active, radio off, SGP40 heater on for ~0.2 s then off |
+| Sample wake: duration | 0.35 s | Boot plus sensor reads, to be measured |
 | BLE session: current | 100 mA | `interface/FUC.md` (80 to 120 mA) |
 | BLE session: duration | 1.5 s | Assumed Gateway connects quickly; up to 5 s if it does not |
 | BLE sessions | 1 per 30 s | 6 wakes x 5 s |
@@ -33,21 +33,21 @@ Inputs (each is an assumption to verify):
 Average current per 30 s block (6 sample wakes + 1 BLE session):
 
 ```text
-sample wakes : 6 x 0.20 s x 50 mA        =  60.0 mA·s
+sample wakes : 6 x 0.35 s x 50 mA        = 105.0 mA·s
 BLE session  : 1 x 1.5 s  x 100 mA       = 150.0 mA·s
-sleep        : (30 - 1.2 - 1.5) s x 0.015 mA = 0.4 mA·s
-total        : 210.4 mA·s per 30 s       = 7.0 mA average
-runtime      : (7000 mAh x 0.8) / 7.0 mA = about 800 h = about 33 days
+sleep        : (30 - 2.1 - 1.5) s x 0.015 mA = 0.4 mA·s
+total        : 255.4 mA·s per 30 s       = 8.5 mA average
+runtime      : (7000 mAh x 0.8) / 8.5 mA = about 660 h = about 27 days
 ```
 
 That is with the door closed. While the door is open every 5 s wake also runs a BLE session:
 
 ```text
-door open, Gateway present : (0.20 s x 50 mA + 1.5 s x 100 mA) / 5 s = 32 mA
-door open, Gateway absent  : (0.20 s x 50 mA + 5.0 s x 100 mA) / 5 s = 102 mA
+door open, Gateway present : (0.35 s x 50 mA + 1.5 s x 100 mA) / 5 s = 34 mA
+door open, Gateway absent  : (0.35 s x 50 mA + 5.0 s x 100 mA) / 5 s = 104 mA
 ```
 
-For example, the door open 10 minutes a day (Gateway present) adds 32 mA x 10/1440 = 0.22 mA, so the average becomes about 7.2 mA and runtime about 32 days. A door left open with the Gateway down would empty the 5600 mAh usable in about 55 h.
+For example, the door open 10 minutes a day (Gateway present) adds 34 mA x 10/1440 = 0.24 mA, so the average becomes about 8.7 mA and runtime about 27 days. A door left open with the Gateway down would empty the 5600 mAh usable in about 55 h.
 
 If the Gateway never connects, each BLE attempt costs 5 s x 100 mA = 500 mA·s, which is the worst case the 6-sample hold-off in `src/node_state.h` limits to once per 30 s.
 
@@ -59,7 +59,7 @@ The sample wakes dominate the budget, so the biggest savings come from shortenin
 2. **Sleep current:** let the node reach deep sleep and read the steady current between wakes. Remove the USB cable first, since USB-powered readings include the bridge chip.
 3. **Sample wake:** record current and duration of a wake that does not send (serial log lines `t=...` mark each wake).
 4. **BLE session:** record a session with the Gateway present (log line `ble outcome=0`) and one with the Gateway off (outcome 2, 5 s timeout).
-5. Repeat the sleep measurement with `-DFRIDGE_SGP40_HEATER_OFF` in `build_flags` to see how much the SGP40 heater costs, and compare the VOC readings of both builds.
+5. The SGP40 heater is always turned off before sleep: confirm the sleep current shows no milliamp-level SGP40 draw, and check the VOC readings stay sensible.
 6. Enter the results in the table below and recompute the average and runtime with the formula in section 2.
 7. For battery runtime, discharge test at the measured average load, or divide usable capacity by the average current.
 

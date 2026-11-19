@@ -18,6 +18,8 @@ static const int PIN_I2C0_SCL_SCAN = 22;
 // SGP40 default compensation ticks (50 %RH, 25 degC), used when the SHT31 fails.
 static const uint16_t SGP40_DEFAULT_RH_TICKS = 0x8000;
 static const uint16_t SGP40_DEFAULT_T_TICKS = 0x6666;
+// Hot-plate heat-up time between the warm-up and the real measurement.
+static const uint32_t SGP40_HEATUP_MS = 170;
 
 static SensirionI2cSht3x sht31;
 static SensirionI2CSgp40 sgp40;
@@ -125,22 +127,29 @@ SensorReading sensorsRead() {
   // 3. SGP40: always feed the Gas Index Algorithm, whatever the door state, so
   //    its moving baseline sees an uninterrupted stream. Compensate with the
   //    real SHT31 humidity and temperature when available.
-  if (vocState != nullptr && i2cDevicePresent(SGP40_I2C_ADDRESS)) {
-    uint16_t sraw = 0;
-    const uint16_t err = sgp40.measureRawSignal(rh_ticks, t_ticks, sraw);
-    reading.sgp40_err = (int16_t)err;
-    reading.voc_sraw = sraw;
-    if (err == 0) {
-      int32_t voc = vocAlgorithmProcess(*vocState, (int32_t)sraw);
-      if (voc >= 0 && voc <= 500) {
-        reading.voc_index = (uint16_t)voc;
+  //    The heater is off between wakes (see below), so first run one
+  //    throwaway measurement to heat the hot plate, wait 170 ms, then take the
+  //    real one: Sensirion's low-power sequence for the SGP40.
+  if (i2cDevicePresent(SGP40_I2C_ADDRESS)) {
+    if (vocState != nullptr) {
+      uint16_t sraw = 0;
+      uint16_t err = sgp40.measureRawSignal(rh_ticks, t_ticks, sraw); // warm-up, ignored
+      if (err == 0) {
+        delay(SGP40_HEATUP_MS);
+        err = sgp40.measureRawSignal(rh_ticks, t_ticks, sraw);
+      }
+      reading.sgp40_err = (int16_t)err;
+      reading.voc_sraw = sraw;
+      if (err == 0) {
+        int32_t voc = vocAlgorithmProcess(*vocState, (int32_t)sraw);
+        if (voc >= 0 && voc <= 500) {
+          reading.voc_index = (uint16_t)voc;
+        }
       }
     }
-#ifdef FRIDGE_SGP40_HEATER_OFF
-    // Opt-in power saving: the heater otherwise stays on through deep sleep.
-    // Whether the VOC index stays accurate this way must be checked on hardware.
+    // Always put the SGP40 in idle mode (heater off) before deep sleep: the
+    // heater would otherwise keep drawing milliamps through the whole sleep.
     sgp40.turnHeaterOff();
-#endif
   }
 
   return reading;
