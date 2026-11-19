@@ -115,11 +115,12 @@ class GatewayOrchestrator:
         # Safety & State Tracking
         self._is_door_closing: bool = False
         self._last_abort_at: float | None = None
+        self._last_person_seen_at: float | None = None
         self._latest_ldr_light: int | None = None
         self._last_person_detected: bool = False
         self._last_person_conf: float = 0.0
         self._last_person_boxes: list[tuple[int, int, int, int]] = []
-        self._last_person_checked_at: float = 0.0
+        self._last_person_checked_at: float = -1000.0
         self._person_state_lock = threading.Lock()
         self._running: bool = False
         self._safety_thread: threading.Thread | None = None
@@ -480,24 +481,43 @@ class GatewayOrchestrator:
 
     def _evaluate_safety_step(self) -> None:
         """Executes one door-ajar and human-obstruction safety evaluation pass."""
+        now_mono = time.monotonic()
+        raw_ajar = getattr(self.mqtt, "door_ajar_duration_s", 0.0)
+        ajar_s = float(raw_ajar) if isinstance(raw_ajar, (int, float)) else 0.0
+        door_is_open = (getattr(self.mqtt, "is_door_open", False) is True) or ajar_s > 0.0
+
+        if not door_is_open and not self._is_door_closing:
+            self._last_person_seen_at = None
+
         close_timeout_s = max(3.0, float(self.settings.door_close_timeout_s))
-        abort_cooldown_ok = (
-            self._last_abort_at is None or (time.monotonic() - self._last_abort_at) >= 5.0
+        abort_cooldown_ok = self._last_abort_at is None or (now_mono - self._last_abort_at) >= 5.0
+        person_clear_ok = (
+            self._last_person_seen_at is None
+            or (now_mono - self._last_person_seen_at) >= close_timeout_s
         )
         need_ajar_close_check = (
-            self.mqtt.door_ajar_duration_s >= close_timeout_s
+            ajar_s >= close_timeout_s
+            and person_clear_ok
             and not self._is_door_closing
             and abort_cooldown_ok
         )
         need_closing_abort_check = self._is_door_closing
+        need_open_door_person_check = (
+            door_is_open and (now_mono - self._last_person_checked_at) >= 0.5
+        )
         need_debug_check = (
             self.pir.is_display_awake
             and not self.window.isMinimized()
             and self.window.stack.currentIndex() == 0
-            and (time.monotonic() - self._last_person_checked_at >= 1.5)
+            and (now_mono - self._last_person_checked_at >= 1.5)
         )
 
-        if not (need_ajar_close_check or need_closing_abort_check or need_debug_check):
+        if not (
+            need_ajar_close_check
+            or need_closing_abort_check
+            or need_open_door_person_check
+            or need_debug_check
+        ):
             return
 
         has_frame, frame = self.camera.get_latest_frame()
@@ -506,12 +526,21 @@ class GatewayOrchestrator:
 
         is_person, conf, _ = self._run_person_safety_check(frame)
 
+        # Reset the door-ajar close timer whenever a person is present while the door is open,
+        # so a full unattended timeout must elapse after the person leaves frame.
+        if is_person and (door_is_open or self._is_door_closing):
+            self._last_person_seen_at = time.monotonic()
+            reset_fn = getattr(self.mqtt, "reset_door_ajar_timer", None)
+            if callable(reset_fn):
+                reset_fn()
+            self.window.update_door_state(is_open=True, ajar_duration_s=0.0)
+
         # 1. Door-Ajar Automated Closure Check (Goal.md §1 & §2)
         if need_ajar_close_check:
             if not is_person:
                 logger.info(
                     "Door open for %.1fs (>= %.1fs) with no human present. Issuing CLOSE_DOOR.",
-                    self.mqtt.door_ajar_duration_s,
+                    ajar_s,
                     close_timeout_s,
                 )
                 self._is_door_closing = True
@@ -519,7 +548,7 @@ class GatewayOrchestrator:
                 self.window.show_door_closing_alert()
             else:
                 logger.debug(
-                    "Door ajar >= %.1fs, but human is present in front of fridge. Holding door open.",
+                    "Door ajar >= %.1fs, but human is present in front of fridge. Timer reset.",
                     close_timeout_s,
                 )
 

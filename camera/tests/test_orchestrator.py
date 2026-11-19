@@ -258,6 +258,35 @@ def test_configurable_door_close_timeout_and_abort_cooldown(
     assert test_orchestrator.mqtt.send_close_door.call_count == 1
 
 
+def test_human_presence_resets_door_ajar_timer(
+    test_orchestrator: GatewayOrchestrator,
+) -> None:
+    test_orchestrator.settings.door_close_timeout_s = 5
+    test_orchestrator._last_abort_at = None
+    test_orchestrator._last_person_seen_at = None
+    test_orchestrator._last_person_checked_at = -1000.0
+    test_orchestrator.mqtt.is_door_open = True
+    test_orchestrator.mqtt.door_ajar_duration_s = 12.0
+    test_orchestrator._is_door_closing = False
+
+    # Person present while door is open -> resets timer and does NOT close door
+    test_orchestrator.detector.detect_person.return_value = (True, 0.90, [(10, 10, 100, 200)])
+    test_orchestrator._evaluate_safety_step()
+    test_orchestrator.mqtt.reset_door_ajar_timer.assert_called_once()
+    test_orchestrator.mqtt.send_close_door.assert_not_called()
+    assert test_orchestrator.window.idle_screen.pill_door.text() == "Door: Open (0s)"
+
+    # Person just stepped out -> must NOT close immediately (full 5s clear window required)
+    test_orchestrator.detector.detect_person.return_value = (False, 0.0, [])
+    test_orchestrator._evaluate_safety_step()
+    test_orchestrator.mqtt.send_close_door.assert_not_called()
+
+    # Once >= 5s has elapsed with no person seen -> closes door
+    test_orchestrator._last_person_seen_at = time.monotonic() - 6.0
+    test_orchestrator._evaluate_safety_step()
+    test_orchestrator.mqtt.send_close_door.assert_called_once_with(node_id="D0", timeout_s=30)
+
+
 def test_apply_settings_updates_runtime_subsystems(
     test_orchestrator: GatewayOrchestrator,
     monkeypatch: pytest.MonkeyPatch,

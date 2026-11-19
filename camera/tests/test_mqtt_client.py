@@ -110,6 +110,11 @@ def test_mqtt_door_telemetry_and_ajar_duration() -> None:
     client._door_opened_at = time.time() - 65.0
     assert client.door_ajar_duration_s >= 60.0
 
+    # Resetting ajar timer clears duration back to ~0 while keeping door open
+    client.reset_door_ajar_timer()
+    assert client.is_door_open is True
+    assert client.door_ajar_duration_s < 1.0
+
     # Door closed telemetry (ir_closed == True)
     closed_data = {
         "node_id": "D0",

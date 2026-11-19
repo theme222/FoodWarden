@@ -292,6 +292,11 @@ class DoorMQTTClient:
             self._door_opened_at = None
             logger.info("Door closed after %.1f seconds", duration)
 
+    def reset_door_ajar_timer(self) -> None:
+        """Resets the open-door countdown when human presence is detected."""
+        if self._is_door_open:
+            self._door_opened_at = time.time()
+
     def send_close_door(self, node_id: str = "D0", timeout_s: int = 30) -> CloseDoorCommand:
         """Publishes CLOSE_DOOR command (QoS 1) to fridge/door/cmd."""
         cmd = CloseDoorCommand(node_id=node_id, timeout_s=timeout_s)
