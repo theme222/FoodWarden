@@ -102,7 +102,7 @@ One wake cycle:
 ```text
 timer / S2 wake -> boot -> vSensorTask: read sensors, feed VOC algorithm, apply door mask,
                    append sample to RTC buffer
-                -> send? (batch of 6 ready, door just opened, or S2 held)
+                -> send? (batch of 6 ready, door open or just closed, or S2 held)
                      yes -> vBleGattTask: advertise <= 5 s, Gateway connects, writes time,
                             node encrypts + notifies/serves packet, Gateway disconnects
                             (node forces it after 1.5 s)
@@ -119,8 +119,9 @@ These are firmware behaviours the interface documents leave open. They are inter
 * **Transport:** the `FUC.md` design (connectable GATT server, batches of 1 to 6 samples) is used. A "22-byte advertisement every 5 seconds" description appeared in a separate issue text and is **not** implemented.
 * **Time sync:** when the Gateway writes a new time to `0000FFF2...`, buffered sample timestamps are shifted by the same delta, so samples taken before the first sync end up with correct Unix times. Before any sync, timestamps count from 1970.
 * **Counter:** `counter` is consumed only when a connected session builds a packet, starting at 1 for each session salt.
-* **No-connection retry:** if the Gateway does not connect within 5 s, the batch is kept and the next attempt waits for a whole new batch of 6 samples (oldest overwritten). A door-open event or `S2` still sends immediately. If a connection was made but the exchange failed, the batch is discarded.
-* **Door-open send:** triggered by the closed-to-open edge only, not on every wake while the door stays open.
+* **No-connection retry:** if the Gateway does not connect within 5 s, the batch is kept and the next attempt waits for a whole new batch of 6 samples (oldest overwritten). A door change or `S2` still sends immediately. If a connection was made but the exchange failed, the batch is discarded.
+* **Door-change send (no waiting for the batch):** when the light crosses `LDR_DOOR_OPEN_THRESHOLD` in either direction (closed → open, or open → closed), the current buffer is sent on that same wake instead of waiting for 6 samples. Close is sent too so the Gateway's 60 s door-ajar timer stops as soon as the door shuts. While the door stays open, every wake (5 s) is sent, not just the first one, so the Gateway gets live readings for as long as the light is on.
+* **Door-close retry:** if the close send does not reach the Gateway (no connection or a failed exchange), it is retried on each following wake, ignoring the no-connection hold-off, for up to `NODE_DOOR_ALERT_ATTEMPTS` = 3 attempts (≤ 15 s). After that the normal batch schedule takes over, so a Gateway that is down cannot keep the radio busy. Logic in [`src/node_state.h`](src/node_state.h); the serial log shows `door=` and `alert=` (attempts left) every wake.
 * **LDR fault:** an invalid LDR reading counts as "door closed" (no new cooldown), so a dead LDR cannot hide VOC forever.
 * **`0xFFFF` for VOC** means both "sensor error" and "withheld during door-open/cooldown"; the Gateway cannot tell them apart.
 * **BLE device name** is `FoodWarden-Fridge`; the documents only define the service UUID.

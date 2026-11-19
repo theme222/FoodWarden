@@ -10,6 +10,12 @@
 // Samples collected before a transmission (6 wakes x 5 s = 30 s).
 #define NODE_BATCH_SIZE 6
 
+// While the door is open (light above the threshold) every wake is sent at once,
+// without waiting for a full batch. A door close is also sent at once; if the
+// Gateway is not reached it is retried on each following wake, up to this many
+// attempts in total (3 x 5 s = 15 s), after which the batch schedule takes over.
+#define NODE_DOOR_ALERT_ATTEMPTS 3
+
 // State kept in RTC_DATA_ATTR memory so it survives deep sleep. Wiped on a cold
 // boot (power loss / brown-out / battery change), which also re-seeds the salt.
 // Pure logic, no Arduino dependencies, so it can be unit tested on a host.
@@ -18,7 +24,8 @@ struct NodeState {
   uint8_t session_salt[8]; // Random per cold boot (hardware TRNG)
   uint32_t counter;        // Monotonic, incremented once per transmission attempt
   uint8_t cooldown_packets_remaining;
-  bool door_was_open;       // Door state on the previous wake (detects door-open edge)
+  bool door_was_open;       // Door state on the previous wake (detects door edges)
+  uint8_t door_alert_attempts; // Immediate-send attempts left for the last door change
   uint8_t retry_holdoff;    // Wakes to wait before retrying a failed-to-connect send
   VocAlgorithmState voc;
   uint8_t sample_count;
@@ -58,14 +65,23 @@ static inline void nodeStateTickHoldoff(NodeState &s) {
   if (s.retry_holdoff > 0) s.retry_holdoff--;
 }
 
-// Decide whether to open a BLE session this wake: on a full batch (unless a
-// failed attempt is still holding off), or immediately on a door-open edge.
-// `force` is a manual request (button S2).
-static inline bool nodeStateShouldSend(const NodeState &s, bool door_open_now, bool force) {
+// Record this wake's door state. A change (closed -> open or open -> closed)
+// arms an immediate send so the Gateway learns about it without waiting for the
+// batch. Call once per wake, after appending the sample, before deciding to send.
+static inline void nodeStateNoteDoor(NodeState &s, bool door_open_now) {
+  if (door_open_now != s.door_was_open) s.door_alert_attempts = NODE_DOOR_ALERT_ATTEMPTS;
+  s.door_was_open = door_open_now;
+}
+
+// Decide whether to open a BLE session this wake: on every wake while the door
+// is open, immediately while a door change is still undelivered, on a full batch
+// (unless a failed attempt is still holding off), or on a manual request `force`
+// (button S2). Uses the door state recorded by nodeStateNoteDoor() this wake.
+static inline bool nodeStateShouldSend(const NodeState &s, bool force) {
   if (s.sample_count == 0) return false;
-  const bool door_edge = door_open_now && !s.door_was_open;
+  const bool door_alert = s.door_was_open || s.door_alert_attempts > 0;
   const bool batch_ready = s.sample_count >= NODE_BATCH_SIZE && s.retry_holdoff == 0;
-  return force || door_edge || batch_ready;
+  return force || door_alert || batch_ready;
 }
 
 // Apply a send result. A real exchange (ok or failed) discards the batch and the
@@ -73,7 +89,14 @@ static inline bool nodeStateShouldSend(const NodeState &s, bool door_open_now, b
 // discarded). If the Gateway never connected the batch is retained, and the
 // next attempt is held off for a whole new batch so the radio is not kept busy
 // every cycle; the oldest samples are overwritten as new ones arrive.
+// A pending door alert is cleared on success; otherwise one attempt is used up
+// and it is retried next wake (ignoring the hold-off) while attempts remain.
 static inline void nodeStateOnSendResult(NodeState &s, SendOutcome outcome) {
+  if (outcome == SEND_OK) {
+    s.door_alert_attempts = 0;
+  } else if (s.door_alert_attempts > 0) {
+    s.door_alert_attempts--;
+  }
   if (outcome == SEND_NO_CONNECTION) {
     s.retry_holdoff = NODE_BATCH_SIZE;
   } else {

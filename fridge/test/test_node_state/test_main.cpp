@@ -81,34 +81,103 @@ static void fill(NodeState &s, int n) {
 void test_no_send_with_empty_buffer_even_if_forced() {
   NodeState s;
   nodeStateColdBoot(s, SALT);
-  TEST_ASSERT_FALSE(nodeStateShouldSend(s, true, true));
+  TEST_ASSERT_FALSE(nodeStateShouldSend(s, true));
 }
 
 void test_send_when_batch_full() {
   NodeState s;
   nodeStateColdBoot(s, SALT);
   fill(s, NODE_BATCH_SIZE - 1);
-  TEST_ASSERT_FALSE(nodeStateShouldSend(s, false, false));
+  TEST_ASSERT_FALSE(nodeStateShouldSend(s, false));
   fill(s, 1);
-  TEST_ASSERT_TRUE(nodeStateShouldSend(s, false, false));
+  TEST_ASSERT_TRUE(nodeStateShouldSend(s, false));
 }
 
-void test_door_open_edge_sends_partial_buffer_once() {
+void test_door_open_sends_every_wake_while_open() {
   NodeState s;
   nodeStateColdBoot(s, SALT);
   fill(s, 2);
-  TEST_ASSERT_TRUE(nodeStateShouldSend(s, true, false));  // closed -> open
+  nodeStateNoteDoor(s, true);                 // light above threshold: closed -> open
+  TEST_ASSERT_TRUE(nodeStateShouldSend(s, false));
+  nodeStateOnSendResult(s, SEND_OK);
+  for (int i = 0; i < 2 * NODE_BATCH_SIZE; i++) {
+    fill(s, 1);
+    nodeStateNoteDoor(s, true);               // still open: send again
+    TEST_ASSERT_TRUE(nodeStateShouldSend(s, false));
+    nodeStateOnSendResult(s, SEND_OK);
+  }
+}
+
+void test_door_open_keeps_sending_when_gateway_absent() {
+  NodeState s;
+  nodeStateColdBoot(s, SALT);
+  for (int i = 0; i < 2 * NODE_BATCH_SIZE; i++) {
+    nodeStateTickHoldoff(s);
+    fill(s, 1);
+    nodeStateNoteDoor(s, true);
+    TEST_ASSERT_TRUE(nodeStateShouldSend(s, false)); // ignores hold-off and attempts
+    nodeStateOnSendResult(s, SEND_NO_CONNECTION);
+  }
+}
+
+void test_door_close_also_sends_immediately() {
+  NodeState s;
+  nodeStateColdBoot(s, SALT);
+  fill(s, 1);
+  nodeStateNoteDoor(s, true);
+  nodeStateOnSendResult(s, SEND_OK);
+  fill(s, 1);
+  nodeStateNoteDoor(s, false);                // open -> closed
+  TEST_ASSERT_TRUE(nodeStateShouldSend(s, false));
+}
+
+void test_steady_door_does_not_send_partial_buffer() {
+  NodeState s;
+  nodeStateColdBoot(s, SALT);
+  for (int i = 0; i < NODE_BATCH_SIZE - 1; i++) {
+    fill(s, 1);
+    nodeStateNoteDoor(s, false);
+    TEST_ASSERT_FALSE(nodeStateShouldSend(s, false));
+  }
+}
+
+void test_undelivered_door_close_retries_each_wake_then_gives_up() {
+  NodeState s;
+  nodeStateColdBoot(s, SALT);
   s.door_was_open = true;
-  TEST_ASSERT_FALSE(nodeStateShouldSend(s, true, false)); // still open: no repeat
-  s.door_was_open = false;
-  TEST_ASSERT_TRUE(nodeStateShouldSend(s, true, false));  // opens again
+  fill(s, 1);
+  nodeStateNoteDoor(s, false);                // open -> closed
+  for (int i = 0; i < NODE_DOOR_ALERT_ATTEMPTS; i++) {
+    nodeStateTickHoldoff(s);
+    if (i > 0) fill(s, 1);
+    nodeStateNoteDoor(s, false);
+    TEST_ASSERT_TRUE(nodeStateShouldSend(s, false)); // ignores the no-connection hold-off
+    nodeStateOnSendResult(s, SEND_NO_CONNECTION);
+  }
+  nodeStateTickHoldoff(s);
+  fill(s, 1);
+  nodeStateNoteDoor(s, false);
+  TEST_ASSERT_FALSE(nodeStateShouldSend(s, false));  // back to the batch schedule
+  TEST_ASSERT_EQUAL_UINT8(NODE_DOOR_ALERT_ATTEMPTS + 1, s.sample_count); // samples kept
+}
+
+void test_failed_exchange_retries_door_alert_next_wake() {
+  NodeState s;
+  nodeStateColdBoot(s, SALT);
+  fill(s, 1);
+  nodeStateNoteDoor(s, true);
+  nodeStateOnSendResult(s, SEND_FAILED);
+  TEST_ASSERT_EQUAL_UINT8(0, s.sample_count);
+  fill(s, 1);
+  nodeStateNoteDoor(s, true);
+  TEST_ASSERT_TRUE(nodeStateShouldSend(s, false));
 }
 
 void test_force_sends_partial_buffer() {
   NodeState s;
   nodeStateColdBoot(s, SALT);
   fill(s, 1);
-  TEST_ASSERT_TRUE(nodeStateShouldSend(s, false, true));
+  TEST_ASSERT_TRUE(nodeStateShouldSend(s, true));
 }
 
 void test_ok_and_failed_results_discard_buffer() {
@@ -133,7 +202,7 @@ void test_no_connection_retains_buffer_and_holds_off_a_full_batch() {
     nodeStateTickHoldoff(s);
     nodeStateAppend(s, makeSample(100 + i));
     bool expect_send = (i == NODE_BATCH_SIZE - 1);
-    TEST_ASSERT_EQUAL(expect_send, nodeStateShouldSend(s, false, false));
+    TEST_ASSERT_EQUAL(expect_send, nodeStateShouldSend(s, false));
   }
   TEST_ASSERT_EQUAL_UINT8(NODE_BATCH_SIZE, s.sample_count); // oldest were overwritten
 }
@@ -143,7 +212,8 @@ void test_door_open_edge_ignores_holdoff() {
   nodeStateColdBoot(s, SALT);
   fill(s, NODE_BATCH_SIZE);
   nodeStateOnSendResult(s, SEND_NO_CONNECTION);
-  TEST_ASSERT_TRUE(nodeStateShouldSend(s, true, false));
+  nodeStateNoteDoor(s, true);
+  TEST_ASSERT_TRUE(nodeStateShouldSend(s, false));
 }
 
 void setup() {
@@ -156,7 +226,12 @@ void setup() {
   RUN_TEST(test_counter_is_strictly_increasing_from_one);
   RUN_TEST(test_no_send_with_empty_buffer_even_if_forced);
   RUN_TEST(test_send_when_batch_full);
-  RUN_TEST(test_door_open_edge_sends_partial_buffer_once);
+  RUN_TEST(test_door_open_sends_every_wake_while_open);
+  RUN_TEST(test_door_open_keeps_sending_when_gateway_absent);
+  RUN_TEST(test_door_close_also_sends_immediately);
+  RUN_TEST(test_steady_door_does_not_send_partial_buffer);
+  RUN_TEST(test_undelivered_door_close_retries_each_wake_then_gives_up);
+  RUN_TEST(test_failed_exchange_retries_door_alert_next_wake);
   RUN_TEST(test_force_sends_partial_buffer);
   RUN_TEST(test_ok_and_failed_results_discard_buffer);
   RUN_TEST(test_no_connection_retains_buffer_and_holds_off_a_full_batch);

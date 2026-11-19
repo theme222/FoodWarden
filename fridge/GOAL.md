@@ -9,7 +9,7 @@
 
 ## Status (read this first)
 
-**All code for the features below is written and compiles (`pio run`, `pio check` clean). No box is ticked because nothing has been verified on real hardware yet.** Verified on a PC with `tools/host_test/run_host_tests.sh`: the door/VOC filter, the buffer and send rules, and the display text logic (26 Unity tests), a simulation of the Sensirion VOC algorithm, and the packet built by `src/crypto.cpp` (size, header, AAD, IV, every sample field, tamper rejection), decrypted by an independent AES-GCM implementation. **Not verified:** the same packet produced by the ESP32's own mbedtls, every sensor read, the BLE exchange with Gateway `'C'`, the LED matrix, sleep current, and sensor accuracy. Deviations from this checklist are listed in [`ARCHITECTURE.md`](ARCHITECTURE.md) §5 and §6 (notably: `S1` cannot wake the chip from deep sleep).
+**All code for the features below is written and compiles (`pio run`, `pio check` clean). No box is ticked because nothing has been verified on real hardware yet.** Verified on a PC with `tools/host_test/run_host_tests.sh`: the door/VOC filter, the LDR scaling, the buffer and send rules (including the immediate door-change send and its retry), and the display text logic (35 Unity tests), a simulation of the Sensirion VOC algorithm, and the packet built by `src/crypto.cpp` (size, header, AAD, IV, every sample field, tamper rejection), decrypted by an independent AES-GCM implementation. **Not verified:** the same packet produced by the ESP32's own mbedtls, every sensor read, the BLE exchange with Gateway `'C'`, the LED matrix, sleep current, and sensor accuracy. Deviations from this checklist are listed in [`ARCHITECTURE.md`](ARCHITECTURE.md) §5 and §6 (notably: `S1` cannot wake the chip from deep sleep).
 
 ---
 
@@ -26,7 +26,7 @@
 ## 2. Use Cases
 - [ ] **Cyclic Low-Power Telemetry:** Wake from deep sleep every 5 seconds → sample Light, VOC, Temp. Store all data into a local buffer (size 6) and go back to sleep.
 - [ ] **Periodic Telemetry Broadcast:** After accumulating 6 samples in the RTC buffer (6 wakes × 5 s = 30 seconds), connect via BLE GATT and transfer the batched payload to Gateway `'C'`.
-- [ ] **Door-Open Immediate Wake/Alert:** During telemetry, if the light sensor signals that the fridge door is opened, broadcast an immediate update to Gateway `'C'` with the current buffer.
+- [ ] **Door-Open Immediate Wake/Alert:** During telemetry, if the light sensor signals that the fridge door is opened, broadcast an immediate update to Gateway `'C'` with the current buffer. *(Implemented in `src/node_state.h`: while light is above `LDR_DOOR_OPEN_THRESHOLD` every wake is sent without waiting for the batch; door close is also sent at once and retried for up to 3 wakes if undelivered. Unit tested; threshold calibration and on-hardware check pending.)*
 - [ ] **Manual Diagnostic Inspection:** User presses and holds `S1` (`GPIO 16`, polled once per 5-second wake because it cannot wake the chip) → LED matrix scrolls current temperature (`°C`), light level and VOC index, then powers down the display to conserve battery.
 
 ---

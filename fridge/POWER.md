@@ -13,7 +13,7 @@
 |---|---|---|---|
 | Deep sleep | Most of every 5 s | Off | `esp_deep_sleep_start()`, RTC memory kept, timer + S2 (`GPIO 14`) wake |
 | Sample wake | Every 5 s | Off | Boot, read SHT31 + SGP40 + LDR (about 100 to 150 ms), append to RTC buffer, back to sleep |
-| BLE session | Every 6th wake (30 s), on door-open, on S2 | On | Advertise up to 5 s, connect, time sync, send; ends as soon as the Gateway disconnects |
+| BLE session | Every 6th wake (30 s), every wake while the door is open, on door close, on S2 | On | Advertise up to 5 s, connect, time sync, send; ends as soon as the Gateway disconnects |
 | LED matrix readout | Only when S1 is held at wake | Off | Scroll about 4 s, then display and oscillator off |
 
 ## 2. Estimate (replace with measurements)
@@ -28,7 +28,7 @@ Inputs (each is an assumption to verify):
 | BLE session: current | 100 mA | `interface/FUC.md` (80 to 120 mA) |
 | BLE session: duration | 1.5 s | Assumed Gateway connects quickly; up to 5 s if it does not |
 | BLE sessions | 1 per 30 s | 6 wakes x 5 s |
-| Battery | 18650, 2600 mAh nominal, 80% usable | Cell datasheet; DW01A cutoff reduces usable capacity |
+| Battery | 2 x 18650, 3500 mAh each, assumed in parallel = 7000 mAh, 80% usable | Cell label; DW01A cutoff reduces usable capacity. If wired in series instead, use 3500 mAh at twice the voltage (runtime then depends on the regulator) |
 
 Average current per 30 s block (6 sample wakes + 1 BLE session):
 
@@ -37,8 +37,17 @@ sample wakes : 6 x 0.20 s x 50 mA        =  60.0 mA·s
 BLE session  : 1 x 1.5 s  x 100 mA       = 150.0 mA·s
 sleep        : (30 - 1.2 - 1.5) s x 0.015 mA = 0.4 mA·s
 total        : 210.4 mA·s per 30 s       = 7.0 mA average
-runtime      : (2600 mAh x 0.8) / 7.0 mA = about 297 h = about 12 days
+runtime      : (7000 mAh x 0.8) / 7.0 mA = about 800 h = about 33 days
 ```
+
+That is with the door closed. While the door is open every 5 s wake also runs a BLE session:
+
+```text
+door open, Gateway present : (0.20 s x 50 mA + 1.5 s x 100 mA) / 5 s = 32 mA
+door open, Gateway absent  : (0.20 s x 50 mA + 5.0 s x 100 mA) / 5 s = 102 mA
+```
+
+For example, the door open 10 minutes a day (Gateway present) adds 32 mA x 10/1440 = 0.22 mA, so the average becomes about 7.2 mA and runtime about 32 days. A door left open with the Gateway down would empty the 5600 mAh usable in about 55 h.
 
 If the Gateway never connects, each BLE attempt costs 5 s x 100 mA = 500 mA·s, which is the worst case the 6-sample hold-off in `src/node_state.h` limits to once per 30 s.
 

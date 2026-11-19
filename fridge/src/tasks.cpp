@@ -166,12 +166,13 @@ static void vSensorTask(void *) {
 
   nodeStateTickHoldoff(node);
   nodeStateAppend(node, sample);
+  nodeStateNoteDoor(node, door_open); // light crossed the threshold -> send now
 
-  Serial.printf("t=%llu temp_cdeg=%d rh=%.1f sraw=%u sgp_err=%d voc_raw=%u voc_tx=%u light=%u "
+  Serial.printf("t=%llu temp_cdeg=%d rh=%.1f sraw=%u sgp_err=%d voc_raw=%u voc_tx=%u light=%u door=%d alert=%u "
                 "cooldown=%u buf=%u\n",
                 (unsigned long long)sample.timestamp_s, sample.temp_cdeg, reading.humidity_rh,
                 reading.voc_sraw, reading.sgp40_err, reading.voc_index, sample.voc_index,
-                sample.light_ldr,
+                sample.light_ldr, (int)door_open, node.door_alert_attempts,
                 node.cooldown_packets_remaining, node.sample_count);
 
   // Give the display task a moment to publish a manual S2 request.
@@ -179,7 +180,7 @@ static void vSensorTask(void *) {
       (xEventGroupWaitBits(g_events, EVT_FORCE_BLE, pdFALSE, pdFALSE, pdMS_TO_TICKS(20)) &
        EVT_FORCE_BLE) != 0;
 
-  if (nodeStateShouldSend(node, door_open, force)) {
+  if (nodeStateShouldSend(node, force)) {
     BleRequest request = {true};
     xEventGroupClearBits(g_events, EVT_BLE_DONE);
     xQueueSend(g_bleRequests, &request, portMAX_DELAY);
@@ -194,7 +195,6 @@ static void vSensorTask(void *) {
     Serial.printf("ble outcome=%d counter=%lu buf=%u\n", (int)outcome,
                   (unsigned long)node.counter, node.sample_count);
   }
-  node.door_was_open = door_open;
 
   // Do not sleep while a button press is being handled.
   xEventGroupWaitBits(g_events, EVT_DISPLAY_DONE, pdFALSE, pdFALSE, pdMS_TO_TICKS(DISPLAY_SLEEP_GATE_MS));
