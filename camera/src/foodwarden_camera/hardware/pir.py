@@ -29,9 +29,11 @@ class PIRController:
         on_wake: Callable[[], None] | None = None,
         on_sleep: Callable[[], None] | None = None,
         on_motion_change: Callable[[bool, float], None] | None = None,
+        min_motion_duration_s: float = 1.0,
     ) -> None:
         self.gpio_pin = gpio_pin
         self.inactivity_timeout_s = inactivity_timeout_s
+        self.min_motion_duration_s = max(0.0, float(min_motion_duration_s))
         self.on_wake = on_wake
         self.on_sleep = on_sleep
         self.on_motion_change = on_motion_change
@@ -39,6 +41,7 @@ class PIRController:
         self._is_motion_detected: bool = False
         self._is_display_awake: bool = True
         self._last_motion_time: float = time.time()
+        self._motion_high_since: float | None = None
         self.is_hardware_available: bool = False
         self._pir_device: Any = None
         self._use_pinctrl: bool = False
@@ -104,12 +107,11 @@ class PIRController:
             from gpiozero import DigitalInputDevice  # type: ignore[import-not-found]
 
             self._pir_device = DigitalInputDevice(self.gpio_pin, pull_up=False)
-            self._pir_device.when_activated = lambda: self.record_motion(True)
-            self._pir_device.when_deactivated = lambda: self.record_motion(False)
+            self._pir_device.when_activated = lambda: self.update_raw_motion(True)
+            self._pir_device.when_deactivated = lambda: self.update_raw_motion(False)
             self.is_hardware_available = True
             if bool(self._pir_device.value):
-                self._is_motion_detected = True
-                self._last_motion_time = time.time()
+                self.update_raw_motion(True)
             logger.info("Bound PIR sensor to GPIO %d via gpiozero", self.gpio_pin)
             return
         except Exception as exc:  # noqa: BLE001
@@ -143,6 +145,7 @@ class PIRController:
         with self._lock:
             self.gpio_pin = new_gpio_pin
             self._is_motion_detected = False
+            self._motion_high_since = None
             self._last_motion_time = time.time()
             self._init_hardware()
             motion_state = self._is_motion_detected
@@ -174,6 +177,25 @@ class PIRController:
                 return "| hi" in res.stdout.lower()
 
         return None
+
+    def update_raw_motion(self, raw_high: bool, now_monotonic: float | None = None) -> None:
+        """Filters raw PIR GPIO samples, confirming motion only after min_motion_duration_s."""
+        now_m = time.monotonic() if now_monotonic is None else now_monotonic
+        confirmed_state: bool | None = None
+
+        with self._lock:
+            if raw_high:
+                if self._motion_high_since is None:
+                    self._motion_high_since = now_m
+                if (now_m - self._motion_high_since) >= self.min_motion_duration_s:
+                    confirmed_state = True
+            else:
+                self._motion_high_since = None
+                if self._is_motion_detected:
+                    confirmed_state = False
+
+        if confirmed_state is not None:
+            self.record_motion(confirmed_state)
 
     def record_motion(self, has_motion: bool) -> None:
         """Called upon sensor reading changes or simulation events."""
@@ -290,10 +312,8 @@ class PIRController:
             if self.is_hardware_available:
                 try:
                     current_val = self._read_hardware_pin()
-                    if current_val is not None and (
-                        current_val != self._is_motion_detected or current_val
-                    ):
-                        self.record_motion(current_val)
+                    if current_val is not None:
+                        self.update_raw_motion(current_val)
                 except Exception:
                     logger.exception("Error polling PIR hardware state")
 

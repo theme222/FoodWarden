@@ -169,3 +169,42 @@ def test_pir_pinctrl_fallback_and_reconfigure(monkeypatch: pytest.MonkeyPatch) -
     controller.reconfigure_pin(-1)
     assert controller.is_hardware_available is False
     assert controller.hardware_status_text == "PIR Disabled"
+
+
+def test_pir_requires_one_second_continuous_detection() -> None:
+    wake_events: list[str] = []
+    controller = PIRController(
+        inactivity_timeout_s=5.0,
+        min_motion_duration_s=1.0,
+        on_wake=lambda: wake_events.append("WAKE"),
+    )
+    controller._last_motion_time = time.time() - 10.0
+    controller.sleep()
+    assert controller.is_display_awake is False
+
+    # Brief < 1.0s HIGH glitch must NOT confirm motion or wake the display
+    controller.update_raw_motion(True, now_monotonic=100.0)
+    assert controller.is_motion_detected is False
+    assert controller.is_display_awake is False
+
+    controller.update_raw_motion(True, now_monotonic=100.8)
+    assert controller.is_motion_detected is False
+    assert controller.is_display_awake is False
+
+    controller.update_raw_motion(False, now_monotonic=100.9)
+    assert controller.is_motion_detected is False
+    assert controller.is_display_awake is False
+    assert wake_events == []
+
+    # Continuous >= 1.0s HIGH detection MUST confirm motion and wake the display
+    controller.update_raw_motion(True, now_monotonic=200.0)
+    controller.update_raw_motion(True, now_monotonic=200.5)
+    assert controller.is_motion_detected is False
+    controller.update_raw_motion(True, now_monotonic=201.0)
+    assert controller.is_motion_detected is True
+    assert controller.is_display_awake is True
+    assert wake_events == ["WAKE"]
+
+    # Dropping LOW clears confirmed motion
+    controller.update_raw_motion(False, now_monotonic=201.3)
+    assert controller.is_motion_detected is False
