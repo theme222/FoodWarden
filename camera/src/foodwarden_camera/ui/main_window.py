@@ -97,6 +97,12 @@ class FoodWardenMainWindow(QMainWindow):
     _sig_person_abort_alert = pyqtSignal()
     _sig_door_closing_alert = pyqtSignal()
     _sig_offline_warning = pyqtSignal()
+    _sig_show_alert = pyqtSignal(str, str, bool, int)
+    _sig_show_idle_screen = pyqtSignal()
+    _sig_show_checkin_loading = pyqtSignal(bytes)
+    _sig_show_checkin_draft = pyqtSignal(object, bytes)
+    _sig_show_checkout_loading = pyqtSignal(bytes)
+    _sig_show_checkout_candidates = pyqtSignal(object, bytes)
     _sig_set_display_sleep = pyqtSignal(bool)
 
     def __init__(
@@ -106,6 +112,7 @@ class FoodWardenMainWindow(QMainWindow):
         on_trigger_checkout_capture: Callable[[], None] | None = None,
         on_commit_checkin: Callable[[CheckInDraftResult, str], None] | None = None,
         on_commit_checkout: Callable[[CheckOutCandidate], None] | None = None,
+        on_cancel_capture: Callable[[], None] | None = None,
         on_save_settings: Callable[[str, int, int], None] | None = None,
         on_save_pir_pin: Callable[[int], None] | None = None,
         on_save_door_close_timeout: Callable[[int], None] | None = None,
@@ -122,6 +129,7 @@ class FoodWardenMainWindow(QMainWindow):
         self.on_trigger_checkout_capture = on_trigger_checkout_capture
         self.on_commit_checkin = on_commit_checkin
         self.on_commit_checkout = on_commit_checkout
+        self.on_cancel_capture = on_cancel_capture
         self.on_save_settings = on_save_settings
         self.on_save_pir_pin = on_save_pir_pin
         self.on_save_door_close_timeout = on_save_door_close_timeout
@@ -170,7 +178,7 @@ class FoodWardenMainWindow(QMainWindow):
         # Screen 1: Check-In Screen
         self.checkin_screen = CheckInScreen(
             on_confirm_callback=self._handle_checkin_confirmed,
-            on_cancel_callback=self.show_idle_screen,
+            on_cancel_callback=self._handle_workflow_cancelled,
             autocomplete_timeout_s=self._current_autocomplete_s,
             parent=self.stack,
         )
@@ -179,7 +187,7 @@ class FoodWardenMainWindow(QMainWindow):
         # Screen 2: Check-Out Screen
         self.checkout_screen = CheckOutScreen(
             on_confirm_callback=self._handle_checkout_confirmed,
-            on_cancel_callback=self.show_idle_screen,
+            on_cancel_callback=self._handle_workflow_cancelled,
             autocomplete_timeout_s=self._current_autocomplete_s,
             parent=self.stack,
         )
@@ -226,6 +234,12 @@ class FoodWardenMainWindow(QMainWindow):
         self._sig_person_abort_alert.connect(self.alert_banner.show_person_abort_alert)
         self._sig_door_closing_alert.connect(self.alert_banner.show_door_closing_alert)
         self._sig_offline_warning.connect(self.alert_banner.show_offline_warning)
+        self._sig_show_alert.connect(self._apply_show_alert)
+        self._sig_show_idle_screen.connect(self._apply_show_idle_screen)
+        self._sig_show_checkin_loading.connect(self._apply_show_checkin_loading)
+        self._sig_show_checkin_draft.connect(self._apply_show_checkin_draft)
+        self._sig_show_checkout_loading.connect(self._apply_show_checkout_loading)
+        self._sig_show_checkout_candidates.connect(self._apply_show_checkout_candidates)
         self._sig_set_display_sleep.connect(self._apply_display_sleep)
 
         self.button_controller.register_callback(ButtonType.UP, self._on_button_up)
@@ -240,22 +254,73 @@ class FoodWardenMainWindow(QMainWindow):
     # Screen Transitions
     # ==========================================================================
 
-    def show_idle_screen(self) -> None:
-        """Transitions to Idle home screen."""
+    def _apply_show_idle_screen(self) -> None:
         self.stack.setCurrentIndex(0)
         logger.info("Transitioned to Idle screen")
 
-    def show_checkin_draft(self, draft: CheckInDraftResult, image_bytes: bytes) -> None:
-        """Transitions to Check-In screen with loaded AI metadata."""
+    def show_idle_screen(self) -> None:
+        """Transitions to Idle home screen (safe across threads)."""
+        if self._is_gui_thread():
+            self._apply_show_idle_screen()
+        else:
+            self._sig_show_idle_screen.emit()
+
+    def _apply_show_checkin_loading(self, image_bytes: bytes) -> None:
+        self.checkin_screen.load_loading(image_bytes)
+        self.stack.setCurrentIndex(1)
+        logger.info("Transitioned to Check-In loading screen")
+
+    def show_checkin_loading(self, image_bytes: bytes = b"") -> None:
+        """Immediately shows captured photo in Check-In loading state (thread-safe)."""
+        if self._is_gui_thread():
+            self._apply_show_checkin_loading(image_bytes)
+        else:
+            self._sig_show_checkin_loading.emit(image_bytes)
+
+    def _apply_show_checkin_draft(self, draft: CheckInDraftResult, image_bytes: bytes) -> None:
         self.checkin_screen.load_draft(draft, image_bytes)
         self.stack.setCurrentIndex(1)
         logger.info("Transitioned to Check-In screen for '%s'", draft.name_en)
 
-    def show_checkout_candidates(self, candidates: list[CheckOutCandidate]) -> None:
-        """Transitions to Check-Out screen with FEFO candidate matches."""
-        self.checkout_screen.load_candidates(candidates)
+    def show_checkin_draft(self, draft: CheckInDraftResult, image_bytes: bytes) -> None:
+        """Transitions to Check-In screen with loaded AI metadata (thread-safe)."""
+        if self._is_gui_thread():
+            self._apply_show_checkin_draft(draft, image_bytes)
+        else:
+            self._sig_show_checkin_draft.emit(draft, image_bytes)
+
+    def _apply_show_checkout_loading(self, image_bytes: bytes) -> None:
+        self.checkout_screen.load_loading(image_bytes)
+        self.stack.setCurrentIndex(2)
+        logger.info("Transitioned to Check-Out loading screen")
+
+    def show_checkout_loading(self, image_bytes: bytes = b"") -> None:
+        """Immediately shows captured photo in Check-Out loading state (thread-safe)."""
+        if self._is_gui_thread():
+            self._apply_show_checkout_loading(image_bytes)
+        else:
+            self._sig_show_checkout_loading.emit(image_bytes)
+
+    def _apply_show_checkout_candidates(
+        self, candidates: list[CheckOutCandidate], image_bytes: bytes = b""
+    ) -> None:
+        self.checkout_screen.load_candidates(candidates, image_bytes)
         self.stack.setCurrentIndex(2)
         logger.info("Transitioned to Check-Out screen with %d candidates", len(candidates))
+
+    def show_checkout_candidates(
+        self, candidates: list[CheckOutCandidate], image_bytes: bytes = b""
+    ) -> None:
+        """Transitions to Check-Out screen with FEFO candidate matches (thread-safe)."""
+        if self._is_gui_thread():
+            self._apply_show_checkout_candidates(candidates, image_bytes)
+        else:
+            self._sig_show_checkout_candidates.emit(candidates, image_bytes)
+
+    def _handle_workflow_cancelled(self) -> None:
+        if self.on_cancel_capture is not None:
+            self.on_cancel_capture()
+        self.show_idle_screen()
 
     def show_settings_screen(self) -> None:
         """Transitions to mouse-only Settings screen."""
@@ -576,6 +641,34 @@ class FoodWardenMainWindow(QMainWindow):
             self.alert_banner.show_door_closing_alert()
         else:
             self._sig_door_closing_alert.emit()
+
+    def _apply_show_alert(
+        self,
+        message_th: str,
+        message_en: str,
+        is_critical: bool,
+        duration_ms: int,
+    ) -> None:
+        self.alert_banner.show_alert(
+            message_th,
+            message_en,
+            is_critical=is_critical,
+            duration_ms=duration_ms,
+        )
+
+    def show_alert(
+        self,
+        message_th: str,
+        message_en: str,
+        *,
+        is_critical: bool = True,
+        duration_ms: int = 5000,
+    ) -> None:
+        """Displays a bilingual alert banner safely across threads."""
+        if self._is_gui_thread():
+            self._apply_show_alert(message_th, message_en, is_critical, duration_ms)
+        else:
+            self._sig_show_alert.emit(message_th, message_en, is_critical, duration_ms)
 
     def show_offline_warning(self) -> None:
         if self._is_gui_thread():

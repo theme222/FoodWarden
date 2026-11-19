@@ -1,6 +1,7 @@
 """Integration tests for GatewayOrchestrator and Safety Loop Reflex."""
 
 import os
+import threading
 import time
 from collections.abc import Generator
 from pathlib import Path
@@ -12,8 +13,13 @@ from PyQt6.QtWidgets import QApplication
 
 import foodwarden_camera.config as config_module
 from foodwarden_camera.config import GatewaySettings
+from foodwarden_camera.hardware.buttons import ButtonType
 from foodwarden_camera.models.ble_fuc import SensorPacket, SensorSample, TelemetryHeader
-from foodwarden_camera.models.cloud_cbs import CheckInDraftResult
+from foodwarden_camera.models.cloud_cbs import (
+    CheckInDraftResult,
+    CheckOutCandidate,
+    CheckOutDraftResult,
+)
 from foodwarden_camera.models.mqtt_cbd import (
     ClosingEventData,
     DoorEventEnvelope,
@@ -93,7 +99,15 @@ def test_safety_reflex_human_abort_during_closing(test_orchestrator: GatewayOrch
     test_orchestrator.mqtt.send_abort.assert_called_once_with(node_id="D0", reason="HUMAN_APPROACH")
 
 
-def test_checkin_capture_and_draft_presentation(test_orchestrator: GatewayOrchestrator) -> None:
+def _flush_workers(orch: GatewayOrchestrator, qapp: QApplication) -> None:
+    orch.wait_for_workers(timeout_s=5.0)
+    qapp.processEvents()
+
+
+def test_checkin_capture_and_draft_presentation(
+    test_orchestrator: GatewayOrchestrator,
+    qapp: QApplication,
+) -> None:
     draft = CheckInDraftResult(
         name_th="น้ำส้มคั้นสด",
         name_en="Fresh Orange Juice",
@@ -110,10 +124,89 @@ def test_checkin_capture_and_draft_presentation(test_orchestrator: GatewayOrches
 
     # Trigger Check-In capture
     test_orchestrator.handle_checkin_capture()
+    _flush_workers(test_orchestrator, qapp)
 
     # UI must transition to Check-In screen showing draft name
     assert test_orchestrator.window.stack.currentIndex() == 1
     assert test_orchestrator.window.checkin_screen.name_th.text() == "น้ำส้มคั้นสด"
+
+
+def test_nonblocking_capture_shows_loading_and_supports_cancel(
+    test_orchestrator: GatewayOrchestrator,
+    qapp: QApplication,
+) -> None:
+    gate = threading.Event()
+    started = threading.Event()
+    draft = CheckInDraftResult(
+        name_th="นมจืด",
+        name_en="Plain Milk",
+        category="Dairy",
+        category_th="นม",
+        estimated_shelf_life_days=7,
+        estimated_expiry_date="2026-11-26",
+        storage_recommendation_th="แช่เย็น",
+        storage_recommendation_en="Refrigerate",
+        image_storage_path="milk.jpg",
+        confidence=0.95,
+    )
+
+    def blocked_draft(*_args: object, **_kwargs: object) -> tuple[bool, CheckInDraftResult, str]:
+        started.set()
+        gate.wait(timeout=3.0)
+        return True, draft, ""
+
+    test_orchestrator.cloud_client.checkin_draft.side_effect = blocked_draft
+
+    t0 = time.monotonic()
+    test_orchestrator.handle_checkin_capture()
+    elapsed = time.monotonic() - t0
+    assert elapsed < 0.5
+    assert started.wait(timeout=2.0)
+
+    # Loading UI + captured preview appear immediately while Gemini HTTP call is still blocked
+    assert test_orchestrator.window.stack.currentIndex() == 1
+    assert "กำลังวิเคราะห์" in test_orchestrator.window.checkin_screen.name_th.text()
+    assert test_orchestrator.window.checkin_screen.image_label.pixmap() is not None
+
+    # User cancels mid-request -> returns immediately to Idle and discards late AI response
+    test_orchestrator.buttons.emit_button_press(ButtonType.CANCEL)
+    qapp.processEvents()
+    assert test_orchestrator.window.stack.currentIndex() == 0
+
+    gate.set()
+    _flush_workers(test_orchestrator, qapp)
+    assert test_orchestrator.window.stack.currentIndex() == 0
+
+    # Check-Out shows immediate loading screen, then transitions to FEFO candidates when ready
+    cand = CheckOutCandidate(
+        item_id="c1",
+        name_th="นมจืด",
+        name_en="Plain Milk",
+        category="Dairy",
+        category_th="นม",
+        expiry_date="2026-11-26",
+        confidence=0.9,
+    )
+    checkout_gate = threading.Event()
+    checkout_started = threading.Event()
+
+    def blocked_checkout(
+        *_args: object, **_kwargs: object
+    ) -> tuple[bool, CheckOutDraftResult, str]:
+        checkout_started.set()
+        checkout_gate.wait(timeout=3.0)
+        return True, CheckOutDraftResult(candidates=[cand]), ""
+
+    test_orchestrator.cloud_client.checkout_draft.side_effect = blocked_checkout
+    test_orchestrator.handle_checkout_capture()
+    assert checkout_started.wait(timeout=2.0)
+    assert test_orchestrator.window.stack.currentIndex() == 2
+    assert "Loading" in test_orchestrator.window.checkout_screen.countdown_label.text()
+
+    checkout_gate.set()
+    _flush_workers(test_orchestrator, qapp)
+    assert test_orchestrator.window.stack.currentIndex() == 2
+    assert test_orchestrator.window.checkout_screen.list_widget.count() == 1
 
 
 def test_door_event_state_handling(test_orchestrator: GatewayOrchestrator) -> None:
@@ -343,14 +436,16 @@ def test_door_fault_lockout_clears_closing_state(test_orchestrator: GatewayOrche
 
 def test_checkin_and_checkout_422_shows_unidentifiable_not_offline(
     test_orchestrator: GatewayOrchestrator,
+    qapp: QApplication,
 ) -> None:
-    # 1. Check-in HTTP 422 must stay on Idle screen and NOT enqueue offline capture
+    # 1. Check-in HTTP 422 must return to Idle screen and NOT enqueue offline capture
     test_orchestrator.cloud_client.checkin_draft.return_value = (
         False,
         None,
         "HTTP 422 UNIDENTIFIABLE: Item could not be reliably identified.",
     )
     test_orchestrator.handle_checkin_capture()
+    _flush_workers(test_orchestrator, qapp)
 
     assert test_orchestrator.window.stack.currentIndex() == 0
     test_orchestrator.sync_manager.enqueue_offline_checkin.assert_not_called()
@@ -363,7 +458,9 @@ def test_checkin_and_checkout_422_shows_unidentifiable_not_offline(
         "Check-out draft error: HTTP 422 - UNIDENTIFIABLE",
     )
     test_orchestrator.handle_checkout_capture()
+    _flush_workers(test_orchestrator, qapp)
 
+    assert test_orchestrator.window.stack.currentIndex() == 0
     assert "ไม่พบอาหาร" in test_orchestrator.window.alert_banner.label_th.text()
     assert "ไม่มีสัญญาณอินเทอร์เน็ต" not in test_orchestrator.window.alert_banner.label_th.text()
 
@@ -374,6 +471,7 @@ def test_checkin_and_checkout_422_shows_unidentifiable_not_offline(
         "Network connection error during check-in draft: timed out",
     )
     test_orchestrator.handle_checkin_capture()
+    _flush_workers(test_orchestrator, qapp)
 
     test_orchestrator.sync_manager.enqueue_offline_checkin.assert_called_once()
     assert test_orchestrator.window.stack.currentIndex() == 1

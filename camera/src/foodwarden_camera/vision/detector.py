@@ -25,6 +25,15 @@ COCO_FOOD_CLASSES = {39, 40, 41, 45, 46, 47, 48, 49, 50, 51, 52, 53, 54, 55}
 PERSON_CLASS_ID = 0
 
 
+def encode_bgr_to_jpeg(frame: np.ndarray, quality: int = 85) -> bytes:
+    """Encodes a BGR numpy frame to JPEG bytes."""
+    encode_params = [int(cv2.IMWRITE_JPEG_QUALITY), quality]
+    success, encoded_img = cv2.imencode(".jpg", frame, encode_params)
+    if not success:
+        raise RuntimeError("Failed to encode frame to JPEG format")
+    return bytes(encoded_img.tobytes())
+
+
 class VisionDetector:
     """Manages YOLO26n inference for grocery cropping and human safety checks."""
 
@@ -69,11 +78,7 @@ class VisionDetector:
     def compress_frame_to_jpeg(self, frame: np.ndarray, quality: int | None = None) -> bytes:
         """Encodes BGR numpy image to JPEG byte buffer."""
         q = self.jpeg_quality if quality is None else quality
-        encode_params = [int(cv2.IMWRITE_JPEG_QUALITY), q]
-        success, encoded_img = cv2.imencode(".jpg", frame, encode_params)
-        if not success:
-            raise RuntimeError("Failed to encode frame to JPEG format")
-        return bytes(encoded_img.tobytes())
+        return encode_bgr_to_jpeg(frame, quality=q)
 
     def detect_person(
         self, frame: np.ndarray

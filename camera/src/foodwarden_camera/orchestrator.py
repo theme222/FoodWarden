@@ -36,7 +36,7 @@ from foodwarden_camera.mqtt.client import DoorMQTTClient
 from foodwarden_camera.storage.offline_queue import OfflineQueue
 from foodwarden_camera.ui.main_window import FoodWardenMainWindow
 from foodwarden_camera.vision.camera import WebcamCapture
-from foodwarden_camera.vision.detector import VisionDetector
+from foodwarden_camera.vision.detector import VisionDetector, encode_bgr_to_jpeg
 
 logger = logging.getLogger(__name__)
 
@@ -101,6 +101,7 @@ class GatewayOrchestrator:
             on_trigger_checkout_capture=self.handle_checkout_capture,
             on_commit_checkin=self.handle_commit_checkin,
             on_commit_checkout=self.handle_commit_checkout,
+            on_cancel_capture=self.cancel_pending_capture,
             on_save_settings=self.apply_settings,
             on_save_pir_pin=self.apply_pir_pin,
             on_save_door_close_timeout=self.apply_door_close_timeout,
@@ -122,6 +123,11 @@ class GatewayOrchestrator:
         self._last_person_boxes: list[tuple[int, int, int, int]] = []
         self._last_person_checked_at: float = -1000.0
         self._person_state_lock = threading.Lock()
+        self._capture_lock = threading.Lock()
+        self._capture_generation: int = 0
+        self._capture_in_flight: bool = False
+        self._capture_worker_thread: threading.Thread | None = None
+        self._commit_worker_thread: threading.Thread | None = None
         self._running: bool = False
         self._safety_thread: threading.Thread | None = None
         self._ui_stream_thread: threading.Thread | None = None
@@ -183,6 +189,7 @@ class GatewayOrchestrator:
             self._safety_thread.join(timeout=2.0)
         if self._ui_stream_thread is not None and self._ui_stream_thread.is_alive():
             self._ui_stream_thread.join(timeout=2.0)
+        self.wait_for_workers(timeout_s=2.0)
 
         logger.info("FoodWarden Gateway Orchestrator stopped")
 
@@ -629,38 +636,115 @@ class GatewayOrchestrator:
         }
         if err_kind in alerts:
             msg_th, msg_en, critical = alerts[err_kind]
-            self.window.alert_banner.show_alert(msg_th, msg_en, is_critical=critical)
+            self.window.show_alert(msg_th, msg_en, is_critical=critical)
         else:
             self.window.show_offline_warning()
 
-    def handle_checkin_capture(self) -> None:
-        """Triggered when user presses 'O' from Idle screen to check in food."""
+    @staticmethod
+    def _encode_preview_jpeg(frame: Any) -> bytes:
+        """Quickly encodes raw frame to JPEG bytes for immediate loading preview."""
+        try:
+            return encode_bgr_to_jpeg(frame)
+        except Exception:  # noqa: BLE001
+            return b""
+
+    def _begin_capture_session(self, *, action_label: str) -> tuple[int, Any, bytes] | None:
+        """Captures snapshot immediately and reserves an async AI draft generation ID."""
         has_frame, frame = self.camera.get_latest_frame()
         if not has_frame or frame is None:
-            logger.warning("No camera frame available for check-in capture")
-            self.window.alert_banner.show_alert(
+            logger.warning("No camera frame available for %s capture", action_label)
+            self.window.show_alert(
                 "ไม่สามารถจับภาพจากกล้องได้",
                 "Camera capture failed: check webcam connection",
                 is_critical=True,
             )
+            return None
+
+        snapshot = frame.copy() if hasattr(frame, "copy") else frame
+        preview_bytes = self._encode_preview_jpeg(snapshot)
+
+        with self._capture_lock:
+            if self._capture_in_flight:
+                return None
+            self._capture_in_flight = True
+            self._capture_generation += 1
+            generation = self._capture_generation
+
+        return generation, snapshot, preview_bytes
+
+    def _complete_capture_session(self, generation: int) -> bool:
+        """Releases in-flight lock and reports whether the request wasn't cancelled."""
+        with self._capture_lock:
+            is_current = generation == self._capture_generation
+            if is_current:
+                self._capture_in_flight = False
+            return is_current
+
+    def cancel_pending_capture(self) -> None:
+        """Cancels any active AI draft lookup so user isn't stalled returning to Idle."""
+        with self._capture_lock:
+            self._capture_generation += 1
+            self._capture_in_flight = False
+
+    def wait_for_workers(self, timeout_s: float = 5.0) -> None:
+        """Waits for active background capture or commit worker threads to finish."""
+        for worker in (self._capture_worker_thread, self._commit_worker_thread):
+            if worker is not None and worker.is_alive():
+                worker.join(timeout=timeout_s)
+
+    def handle_checkin_capture(self) -> None:
+        """Immediately shows captured photo + loading state, then fetches Gemini draft."""
+        started = self._begin_capture_session(action_label="check-in")
+        if started is None:
+            return
+        generation, snapshot, preview_bytes = started
+
+        self.window.show_checkin_loading(preview_bytes)
+        worker = threading.Thread(
+            target=self._run_checkin_capture_worker,
+            args=(generation, snapshot, preview_bytes),
+            daemon=True,
+            name="CheckInDraftWorker",
+        )
+        self._capture_worker_thread = worker
+        worker.start()
+
+    def _run_checkin_capture_worker(
+        self,
+        generation: int,
+        frame: Any,
+        preview_bytes: bytes,
+    ) -> None:
+        try:
+            # Crop grocery item with YOLO26n (fallback to full-frame if conf < 0.60)
+            jpeg_bytes, _, _, _ = self.detector.crop_grocery(frame)
+            display_bytes = jpeg_bytes or preview_bytes
+
+            # Request AI draft from Cloud with persistent UUID v4 Idempotency-Key
+            draft_key = str(uuid.uuid4())
+            ok, draft, err_msg = self.cloud_client.checkin_draft(
+                jpeg_bytes,
+                idempotency_key=draft_key,
+            )
+        except Exception:
+            logger.exception("Unexpected error in check-in draft worker")
+            if self._complete_capture_session(generation):
+                self.window.show_idle_screen()
+                self.window.show_offline_warning()
             return
 
-        # Crop grocery item with YOLO26n (fallback to full-frame if conf < 0.60)
-        jpeg_bytes, _, _, _ = self.detector.crop_grocery(frame)
+        if not self._complete_capture_session(generation):
+            logger.debug("Discarding cancelled check-in draft result (gen=%d)", generation)
+            return
 
-        # Request AI draft from Cloud with persistent UUID v4 Idempotency-Key
-        draft_key = str(uuid.uuid4())
-        ok, draft, err_msg = self.cloud_client.checkin_draft(
-            jpeg_bytes,
-            idempotency_key=draft_key,
-        )
         if ok and draft is not None:
-            self.window.show_checkin_draft(draft, jpeg_bytes)
+            self.window.show_checkin_draft(draft, display_bytes)
             return
 
         err_kind = classify_cloud_error(err_msg)
         if err_kind in ("unidentifiable", "auth", "rejected"):
             logger.warning("Check-in draft declined (%s): %s", err_kind, err_msg)
+            self.window.show_idle_screen()
             self._show_cloud_error_alert(
                 err_kind,
                 action_th="ตรวจรับเข้า",
@@ -696,10 +780,10 @@ class GatewayOrchestrator:
             image_storage_path="local_offline",
             confidence=0.0,
         )
-        self.window.show_checkin_draft(offline_draft, jpeg_bytes)
+        self.window.show_checkin_draft(offline_draft, display_bytes)
 
     def handle_commit_checkin(self, draft: CheckInDraftResult, expiry_date: str) -> None:
-        """Triggered when user confirms check-in item on LCD (or 5s countdown elapses)."""
+        """Commits confirmed check-in item in background so UI stays responsive."""
         if draft.image_storage_path == "local_offline":
             logger.info("Offline check-in already buffered for background draft/commit")
             return
@@ -717,6 +801,16 @@ class GatewayOrchestrator:
             confidence=draft.confidence,
         )
         commit_key = str(uuid.uuid4())
+        worker = threading.Thread(
+            target=self._run_commit_checkin_worker,
+            args=(payload, commit_key),
+            daemon=True,
+            name="CheckInCommitWorker",
+        )
+        self._commit_worker_thread = worker
+        worker.start()
+
+    def _run_commit_checkin_worker(self, payload: CheckInCommitPayload, commit_key: str) -> None:
         ok, res, err = self.cloud_client.checkin_commit(payload, idempotency_key=commit_key)
         if ok and res is not None:
             logger.info("Successfully committed check-in: %s", res.item_id)
@@ -732,22 +826,52 @@ class GatewayOrchestrator:
             )
 
     def handle_checkout_capture(self) -> None:
-        """Triggered when user presses 'X' from Idle screen to check out food."""
-        has_frame, frame = self.camera.get_latest_frame()
-        if not has_frame or frame is None:
-            logger.warning("No camera frame available for checkout capture")
+        """Immediately shows captured photo + loading state, then fetches FEFO candidates."""
+        started = self._begin_capture_session(action_label="check-out")
+        if started is None:
+            return
+        generation, snapshot, preview_bytes = started
+
+        self.window.show_checkout_loading(preview_bytes)
+        worker = threading.Thread(
+            target=self._run_checkout_capture_worker,
+            args=(generation, snapshot, preview_bytes),
+            daemon=True,
+            name="CheckOutDraftWorker",
+        )
+        self._capture_worker_thread = worker
+        worker.start()
+
+    def _run_checkout_capture_worker(
+        self,
+        generation: int,
+        frame: Any,
+        preview_bytes: bytes,
+    ) -> None:
+        try:
+            jpeg_bytes, _, _, _ = self.detector.crop_grocery(frame)
+            display_bytes = jpeg_bytes or preview_bytes
+            ok, result, err = self.cloud_client.checkout_draft(
+                jpeg_bytes,
+                idempotency_key=str(uuid.uuid4()),
+            )
+        except Exception:
+            logger.exception("Unexpected error in check-out draft worker")
+            if self._complete_capture_session(generation):
+                self.window.show_idle_screen()
+                self.window.show_offline_warning()
             return
 
-        jpeg_bytes, _, _, _ = self.detector.crop_grocery(frame)
-        ok, result, err = self.cloud_client.checkout_draft(
-            jpeg_bytes,
-            idempotency_key=str(uuid.uuid4()),
-        )
+        if not self._complete_capture_session(generation):
+            logger.debug("Discarding cancelled check-out draft result (gen=%d)", generation)
+            return
+
         if ok and result is not None:
-            self.window.show_checkout_candidates(result.candidates)
+            self.window.show_checkout_candidates(result.candidates, display_bytes)
         else:
             err_kind = classify_cloud_error(err)
             logger.warning("Check-out draft failed (%s): %s", err_kind, err)
+            self.window.show_idle_screen()
             self._show_cloud_error_alert(
                 err_kind,
                 action_th="นำอาหารออก",
@@ -755,8 +879,18 @@ class GatewayOrchestrator:
             )
 
     def handle_commit_checkout(self, candidate: CheckOutCandidate) -> None:
-        """Triggered when user confirms item removal on LCD."""
+        """Commits confirmed item removal in background so UI stays responsive."""
         payload = CheckOutCommitPayload(item_id=candidate.item_id)
+        worker = threading.Thread(
+            target=self._run_commit_checkout_worker,
+            args=(payload,),
+            daemon=True,
+            name="CheckOutCommitWorker",
+        )
+        self._commit_worker_thread = worker
+        worker.start()
+
+    def _run_commit_checkout_worker(self, payload: CheckOutCommitPayload) -> None:
         ok, res, err = self.cloud_client.checkout_commit(payload)
         if ok and res is not None:
             logger.info("Successfully checked out item: %s", res.item_id)

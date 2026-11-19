@@ -379,3 +379,45 @@ def test_window_controls_and_motion_debug_ui(
     window.quit_application()
     assert window.isVisible() is False
     quit_mock.assert_called_once()
+
+
+def test_loading_states_ignore_select_until_ai_responds(qapp: QApplication) -> None:
+    button_ctrl = ButtonController()
+    commit_calls = 0
+    cancel_calls = 0
+
+    def on_commit(_draft: CheckInDraftResult, _date_str: str) -> None:
+        nonlocal commit_calls
+        commit_calls += 1
+
+    def on_cancel() -> None:
+        nonlocal cancel_calls
+        cancel_calls += 1
+
+    window = FoodWardenMainWindow(
+        button_controller=button_ctrl,
+        on_commit_checkin=on_commit,
+        on_cancel_capture=on_cancel,
+    )
+
+    # Check-In loading state shows immediately and blocks SELECT / UP / DOWN until draft arrives
+    window.show_checkin_loading(b"")
+    assert window.stack.currentIndex() == 1
+    assert "กำลังวิเคราะห์" in window.checkin_screen.name_th.text()
+    button_ctrl.emit_button_press(ButtonType.SELECT)
+    assert commit_calls == 0
+
+    # Cancelling during loading returns to Idle immediately and fires on_cancel_capture
+    button_ctrl.emit_button_press(ButtonType.CANCEL)
+    assert window.stack.currentIndex() == 0
+    assert cancel_calls == 1
+
+    # Check-Out loading state shows immediately and locks SELECT until candidates load
+    window.show_checkout_loading(b"")
+    assert window.stack.currentIndex() == 2
+    assert "Loading" in window.checkout_screen.countdown_label.text()
+    button_ctrl.emit_button_press(ButtonType.SELECT)
+    assert window.stack.currentIndex() == 2
+    button_ctrl.emit_button_press(ButtonType.CANCEL)
+    assert window.stack.currentIndex() == 0
+    assert cancel_calls == 2

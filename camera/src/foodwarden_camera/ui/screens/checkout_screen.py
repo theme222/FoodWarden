@@ -9,6 +9,7 @@ from __future__ import annotations
 from collections.abc import Callable
 
 from PyQt6.QtCore import Qt, QTimer
+from PyQt6.QtGui import QImage, QPixmap
 from PyQt6.QtWidgets import (
     QFrame,
     QHBoxLayout,
@@ -38,6 +39,7 @@ class CheckOutScreen(QWidget):
         self.autocomplete_timeout_s = max(1, autocomplete_timeout_s)
 
         self._candidates: list[CheckOutCandidate] = []
+        self._is_loading: bool = False
         self._countdown_seconds = self.autocomplete_timeout_s
 
         self._countdown_timer = QTimer(self)
@@ -73,7 +75,23 @@ class CheckOutScreen(QWidget):
         header.addWidget(self.countdown_label)
         main_layout.addLayout(header)
 
-        # 2. Candidate Selection List
+        # 2. Content: Captured Photo on Left + Candidate Selection List on Right
+        content_layout = QHBoxLayout()
+        content_layout.setSpacing(12)
+
+        self.img_frame = QFrame(self)
+        self.img_frame.setStyleSheet(
+            "background-color: #000000; border: 1px solid #333333; border-radius: 6px;"
+        )
+        self.img_frame.setFixedSize(220, 240)
+        img_inner = QVBoxLayout(self.img_frame)
+        img_inner.setContentsMargins(0, 0, 0, 0)
+        self.image_label = QLabel("กำลังเตรียมภาพ...", self.img_frame)
+        self.image_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.image_label.setStyleSheet("color: #6B7280; font-size: 12px;")
+        img_inner.addWidget(self.image_label)
+        content_layout.addWidget(self.img_frame)
+
         list_container = QFrame(self)
         list_container.setStyleSheet(
             "background-color: #1E1E1E; border: 1px solid #2D2D2D; border-radius: 6px;"
@@ -82,15 +100,17 @@ class CheckOutScreen(QWidget):
         list_layout.setContentsMargins(12, 10, 12, 10)
         list_layout.setSpacing(6)
 
-        hint_label = QLabel("เลือกรายการที่ต้องการนำออก (เรียงตามวันหมดอายุ FEFO):", list_container)
-        hint_label.setStyleSheet("font-size: 13px; font-weight: bold; color: #9CA3AF;")
-        list_layout.addWidget(hint_label)
+        self.hint_label = QLabel("เลือกรายการที่ต้องการนำออก (เรียงตามวันหมดอายุ FEFO):", list_container)
+        self.hint_label.setStyleSheet("font-size: 13px; font-weight: bold; color: #9CA3AF;")
+        list_layout.addWidget(self.hint_label)
 
         self.list_widget = QListWidget(list_container)
-        self.list_widget.setFixedHeight(230)
+        self.list_widget.setWordWrap(True)
+        self.list_widget.setFixedHeight(210)
         list_layout.addWidget(self.list_widget)
 
-        main_layout.addWidget(list_container)
+        content_layout.addWidget(list_container, stretch=1)
+        main_layout.addLayout(content_layout)
 
         # 3. Bottom Action Hints
         action_layout = QHBoxLayout()
@@ -132,9 +152,51 @@ class CheckOutScreen(QWidget):
             f"ยืนยันอัตโนมัติใน: {self._countdown_seconds} วินาที (Auto: {self._countdown_seconds}s)"
         )
 
-    def load_candidates(self, candidates: list[CheckOutCandidate]) -> None:
+    def _set_preview_image(self, image_bytes: bytes) -> None:
+        if not image_bytes:
+            self.image_label.clear()
+            self.image_label.setText("ภาพสินค้า\nItem Snapshot")
+            return
+        qimg = QImage.fromData(image_bytes)
+        if not qimg.isNull():
+            pixmap = QPixmap.fromImage(qimg).scaled(
+                self.img_frame.width(),
+                self.img_frame.height(),
+                Qt.AspectRatioMode.KeepAspectRatio,
+                Qt.TransformationMode.SmoothTransformation,
+            )
+            self.image_label.setText("")
+            self.image_label.setPixmap(pixmap)
+
+    def load_loading(self, image_bytes: bytes = b"") -> None:
+        """Immediately shows captured photo while AI identifies FEFO candidates."""
+        self._countdown_timer.stop()
+        self._is_loading = True
+        self._candidates = []
+        self._set_preview_image(image_bytes)
+
+        self.countdown_label.setText("กำลังรอผลจาก AI... (Loading)")
+        self.hint_label.setText("กำลังวิเคราะห์สินค้าและค้นหาในตู้เย็น (Loading FEFO)...")
+        self.hint_label.setStyleSheet("font-size: 13px; font-weight: bold; color: #F59E0B;")
+
+        self.list_widget.clear()
+        loading_item = QListWidgetItem(
+            "กำลังส่งภาพให้ AI วิเคราะห์รายการในตู้เย็น...\n"
+            "Analyzing item with Gemini — please wait or press [X] to cancel"
+        )
+        loading_item.setFlags(Qt.ItemFlag.NoItemFlags)
+        self.list_widget.addItem(loading_item)
+
+    def load_candidates(
+        self, candidates: list[CheckOutCandidate], image_bytes: bytes = b""
+    ) -> None:
         """Populates candidates sorted by FEFO and initiates countdown."""
+        self._is_loading = False
         self._candidates = candidates
+        if image_bytes:
+            self._set_preview_image(image_bytes)
+        self.hint_label.setText("เลือกรายการที่ต้องการนำออก (เรียงตามวันหมดอายุ FEFO):")
+        self.hint_label.setStyleSheet("font-size: 13px; font-weight: bold; color: #9CA3AF;")
         self.list_widget.clear()
 
         if not candidates:
@@ -162,6 +224,8 @@ class CheckOutScreen(QWidget):
 
     def handle_up(self) -> None:
         """Selects previous candidate item in list."""
+        if self._is_loading:
+            return
         current_row = self.list_widget.currentRow()
         if current_row > 0:
             self.list_widget.setCurrentRow(current_row - 1)
@@ -169,6 +233,8 @@ class CheckOutScreen(QWidget):
 
     def handle_down(self) -> None:
         """Selects next candidate item in list."""
+        if self._is_loading:
+            return
         current_row = self.list_widget.currentRow()
         if current_row < self.list_widget.count() - 1:
             self.list_widget.setCurrentRow(current_row + 1)
@@ -176,10 +242,13 @@ class CheckOutScreen(QWidget):
 
     def handle_select(self) -> None:
         """Confirms removal of currently highlighted item."""
+        if self._is_loading:
+            return
         self._commit()
 
     def handle_cancel(self) -> None:
         """Cancels checkout without committing."""
+        self._is_loading = False
         self._countdown_timer.stop()
         self.on_cancel()
 

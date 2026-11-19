@@ -38,6 +38,7 @@ class CheckInScreen(QWidget):
         self.autocomplete_timeout_s = max(1, autocomplete_timeout_s)
 
         self._draft: CheckInDraftResult | None = None
+        self._is_loading: bool = False
         self._current_date = datetime.now() + timedelta(days=7)
         self._selected_segment = 0  # 0: Day, 1: Month, 2: Year
         self._countdown_seconds = self.autocomplete_timeout_s
@@ -192,11 +193,11 @@ class CheckInScreen(QWidget):
             f"ยืนยันอัตโนมัติใน: {self._countdown_seconds} วินาที (Auto: {self._countdown_seconds}s)"
         )
 
-    def load_draft(self, draft: CheckInDraftResult, image_bytes: bytes) -> None:
-        """Loads AI metadata and starts auto-confirm countdown."""
-        self._draft = draft
-
-        # Load image
+    def _set_preview_image(self, image_bytes: bytes) -> None:
+        if not image_bytes:
+            self.image_label.clear()
+            self.image_label.setText("กำลังเตรียมภาพ...\nPreparing image...")
+            return
         qimg = QImage.fromData(image_bytes)
         if not qimg.isNull():
             pixmap = QPixmap.fromImage(qimg).scaled(
@@ -205,10 +206,44 @@ class CheckInScreen(QWidget):
                 Qt.AspectRatioMode.KeepAspectRatio,
                 Qt.TransformationMode.SmoothTransformation,
             )
+            self.image_label.setText("")
             self.image_label.setPixmap(pixmap)
+
+    def load_loading(self, image_bytes: bytes) -> None:
+        """Immediately shows captured photo while AI metadata is still loading."""
+        self._countdown_timer.stop()
+        self._is_loading = True
+        self._draft = None
+        self._set_preview_image(image_bytes)
+
+        self.countdown_label.setText("กำลังรอผลจาก AI... (Loading)")
+        self.name_th.setText("กำลังวิเคราะห์อาหารด้วย AI...")
+        self.name_th.setStyleSheet("font-size: 20px; font-weight: bold; color: #F59E0B;")
+        self.name_en.setText("Analyzing item with Gemini... Please wait")
+        self.category_label.setText("หมวดหมู่: กำลังโหลด... (Loading...)")
+        self.storage_label.setText("คำแนะนำ: กำลังโหลด... (Loading...)")
+
+        muted_style = (
+            "font-size: 18px; font-weight: bold; color: #6B7280; "
+            "background-color: #262626; border: 1px solid #3D3D3D; border-radius: 4px;"
+        )
+        self.day_label.setText("--")
+        self.month_label.setText("--")
+        self.year_label.setText("----")
+        for lbl in (self.day_label, self.month_label, self.year_label):
+            lbl.setStyleSheet(muted_style)
+
+    def load_draft(self, draft: CheckInDraftResult, image_bytes: bytes) -> None:
+        """Loads AI metadata and starts auto-confirm countdown."""
+        self._is_loading = False
+        self._draft = draft
+
+        if image_bytes:
+            self._set_preview_image(image_bytes)
 
         # Populate labels
         self.name_th.setText(draft.name_th)
+        self.name_th.setStyleSheet("font-size: 20px; font-weight: bold; color: #10B981;")
         self.name_en.setText(f"{draft.name_en} ({draft.confidence * 100:.0f}%)")
         self.category_label.setText(f"หมวดหมู่: {draft.category_th} ({draft.category})")
         self.storage_label.setText(f"คำแนะนำ: {draft.storage_recommendation_th}")
@@ -247,6 +282,8 @@ class CheckInScreen(QWidget):
 
     def handle_up(self) -> None:
         """Increments highlighted date segment."""
+        if self._is_loading:
+            return
         self._reset_countdown_display()  # Reset countdown on user adjustment
         if self._selected_segment == 0:
             self._current_date += timedelta(days=1)
@@ -265,6 +302,8 @@ class CheckInScreen(QWidget):
 
     def handle_down(self) -> None:
         """Decrements highlighted date segment."""
+        if self._is_loading:
+            return
         self._reset_countdown_display()
         if self._selected_segment == 0:
             self._current_date = max(datetime.now(), self._current_date - timedelta(days=1))
@@ -285,6 +324,8 @@ class CheckInScreen(QWidget):
 
     def handle_select(self) -> None:
         """Advances date segment or commits on final segment."""
+        if self._is_loading:
+            return
         if self._selected_segment < 2:
             self._selected_segment += 1
             self._reset_countdown_display()
@@ -294,6 +335,7 @@ class CheckInScreen(QWidget):
 
     def handle_cancel(self) -> None:
         """Cancels check-in without committing."""
+        self._is_loading = False
         self._countdown_timer.stop()
         self.on_cancel()
 
