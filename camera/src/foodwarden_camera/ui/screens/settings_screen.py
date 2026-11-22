@@ -1,9 +1,4 @@
-"""Mouse-only Settings Screen for FoodWarden 5-inch LCD (800x480).
-
-Allows adjusting GATEWAY_TOKEN, action autocomplete timeout, screen/camera sleep
-timeout, and window controls (minimize, unfullscreen/fullscreen, quit) strictly
-via mouse/pointer input without physical Pi-top button triggers.
-"""
+"""Mouse-Only Settings & Window Control Screen aligned with Web Prototype theme."""
 
 from __future__ import annotations
 
@@ -13,6 +8,7 @@ from PyQt6.QtCore import Qt
 from PyQt6.QtWidgets import (
     QApplication,
     QFrame,
+    QGridLayout,
     QHBoxLayout,
     QLabel,
     QLineEdit,
@@ -22,25 +18,63 @@ from PyQt6.QtWidgets import (
     QWidget,
 )
 
+from foodwarden_camera.ui.styles import (
+    COLOR_BAD,
+    COLOR_DARK,
+    COLOR_FRESH,
+    COLOR_INK,
+    COLOR_LIME_INK,
+    COLOR_LIME_SOFT,
+    COLOR_MUTED,
+    COLOR_ON_BAD,
+    COLOR_ON_DARK,
+    COLOR_ON_FRESH,
+    COLOR_RULE,
+    COLOR_SURFACE,
+    COLOR_SURFACE_2,
+    card_style,
+    pill_style,
+)
+
 
 def _make_mouse_button(
     text: str,
-    style: str,
+    bg_color: str,
+    hover_color: str,
+    fg_color: str,
     parent: QWidget,
-    callback: Callable[[], None] | None = None,
+    callback: Callable[[], None] | None,
+    *,
+    min_width: int = 44,
+    min_height: int = 38,
+    font_px: int = 15,
+    border_color: str = COLOR_RULE,
 ) -> QPushButton:
-    """Creates a mouse-clickable button that ignores physical button focus."""
+    """Builds a touch-sized button disabled from hardware key focus."""
     btn = QPushButton(text, parent)
     btn.setFocusPolicy(Qt.FocusPolicy.NoFocus)
-    btn.setCursor(Qt.CursorShape.PointingHandCursor)
-    btn.setStyleSheet(style)
+    btn.setMinimumSize(min_width, min_height)
+    btn.setStyleSheet(
+        f"""
+        QPushButton {{
+            background-color: {bg_color};
+            color: {fg_color};
+            border: 1.5px solid {border_color};
+            border-radius: 10px;
+            font-size: {font_px}px;
+            font-weight: bold;
+            padding: 4px 12px;
+        }}
+        QPushButton:hover {{ background-color: {hover_color}; }}
+        """
+    )
     if callback is not None:
         btn.clicked.connect(callback)
     return btn
 
 
 class SettingsScreen(QWidget):
-    """Mouse-controlled system settings and window management screen."""
+    """Touch/mouse-controlled settings and window management screen."""
 
     def __init__(
         self,
@@ -69,9 +103,9 @@ class SettingsScreen(QWidget):
 
         self._initial_token = initial_token
         self._initial_autocomplete_s = initial_autocomplete_s
-        self._initial_sleep_s = sleep_timeout_clamp(initial_sleep_s)
+        self._initial_sleep_s = initial_sleep_s
         self._initial_pir_gpio_pin = initial_pir_gpio_pin
-        self._initial_door_close_s = door_close_timeout_clamp(initial_door_close_s)
+        self._initial_door_close_s = initial_door_close_s
 
         self._init_ui()
         self.load_values(
@@ -82,335 +116,269 @@ class SettingsScreen(QWidget):
             initial_door_close_s,
         )
 
+    def _build_stepper_card(
+        self,
+        object_name: str,
+        title_text: str,
+        spin: QSpinBox,
+        on_minus: Callable[[], None],
+        on_plus: Callable[[], None],
+        spin_width: int = 100,
+    ) -> QFrame:
+        card = QFrame(self)
+        card.setObjectName(object_name)
+        card.setStyleSheet(card_style(object_name, bg=COLOR_SURFACE, border=COLOR_RULE, radius=14))
+        col = QVBoxLayout(card)
+        col.setContentsMargins(12, 10, 12, 10)
+        col.setSpacing(8)
+
+        lbl = QLabel(title_text, card)
+        lbl.setStyleSheet(f"font-size: 14px; font-weight: bold; color: {COLOR_MUTED};")
+
+        row = QHBoxLayout()
+        row.setSpacing(8)
+        spin.setButtonSymbols(QSpinBox.ButtonSymbols.NoButtons)
+        spin.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        spin.setFixedSize(spin_width, 40)
+        spin.setStyleSheet(
+            f"background-color: {COLOR_SURFACE_2}; color: {COLOR_INK}; "
+            f"border: 1.5px solid {COLOR_RULE}; border-radius: 10px; "
+            "font-size: 18px; font-weight: bold;"
+        )
+
+        btn_minus = _make_mouse_button(
+            "−",
+            COLOR_SURFACE_2,
+            COLOR_LIME_SOFT,
+            COLOR_INK,
+            card,
+            on_minus,
+            min_width=48,
+            font_px=18,
+        )
+        btn_plus = _make_mouse_button(
+            "+",
+            COLOR_SURFACE_2,
+            COLOR_LIME_SOFT,
+            COLOR_INK,
+            card,
+            on_plus,
+            min_width=48,
+            font_px=18,
+        )
+
+        row.addWidget(btn_minus)
+        row.addWidget(spin, stretch=1)
+        row.addWidget(btn_plus)
+        col.addWidget(lbl)
+        col.addLayout(row)
+        return card
+
     def _init_ui(self) -> None:
-        main_layout = QVBoxLayout(self)
-        main_layout.setContentsMargins(16, 10, 16, 10)
-        main_layout.setSpacing(8)
+        root_layout = QVBoxLayout(self)
+        root_layout.setContentsMargins(14, 10, 14, 10)
+        root_layout.setSpacing(8)
 
-        # 1. Header Bar
+        # 1. Header
         header = QHBoxLayout()
-        title_box = QVBoxLayout()
-        title_th = QLabel("ตั้งค่าระบบ (Settings)", self)
-        title_th.setStyleSheet("font-size: 18px; font-weight: bold; color: #FFFFFF;")
-        title_en = QLabel(
-            "Mouse-Only Configuration (Pi-top physical buttons are disabled on this page)",
+        title = QLabel("ตั้งค่าระบบ", self)
+        title.setStyleSheet(f"font-size: 22px; font-weight: bold; color: {COLOR_INK};")
+
+        mouse_badge = QLabel("Mouse / Touch", self)
+        mouse_badge.setStyleSheet(pill_style(COLOR_LIME_SOFT, COLOR_LIME_INK, font_px=12))
+
+        self.btn_back = _make_mouse_button(
+            "ย้อนกลับ",
+            COLOR_SURFACE,
+            COLOR_SURFACE_2,
+            COLOR_INK,
             self,
+            self._handle_back,
+            min_width=96,
+            min_height=36,
+            font_px=14,
         )
-        title_en.setStyleSheet("font-size: 11px; color: #9CA3AF;")
-        title_box.addWidget(title_th)
-        title_box.addWidget(title_en)
-        header.addLayout(title_box)
-        header.addStretch()
 
-        mouse_badge = QLabel("🖱 Mouse Only", self)
-        mouse_badge.setStyleSheet(
-            "background-color: #1E3A8A; color: #93C5FD; font-size: 11px; "
-            "font-weight: bold; padding: 4px 10px; border-radius: 4px;"
-        )
+        header.addWidget(title)
         header.addWidget(mouse_badge)
-        main_layout.addLayout(header)
+        header.addStretch()
+        header.addWidget(self.btn_back)
+        root_layout.addLayout(header)
 
-        card_style = "background-color: #1E1E1E; border: 1px solid #2D2D2D; border-radius: 6px;"
-        btn_neutral_style = (
-            "QPushButton { background-color: #374151; color: #FFFFFF; font-size: 12px; "
-            "font-weight: bold; padding: 6px 10px; border-radius: 5px; border: 1px solid #4B5563; } "
-            "QPushButton:hover { background-color: #4B5563; }"
-        )
-        btn_step_style = (
-            "QPushButton { background-color: #1F2937; color: #E5E7EB; font-size: 12px; "
-            "font-weight: bold; padding: 5px 9px; border-radius: 4px; border: 1px solid #374151; } "
-            "QPushButton:hover { background-color: #374151; }"
-        )
-        spin_style = (
-            "QSpinBox { background-color: #111827; color: #FFFFFF; font-size: 14px; "
-            "font-weight: bold; padding: 4px 8px; border: 1px solid #3B82F6; border-radius: 4px; }"
-        )
-
-        # 2. Authentication Token Card
+        # 2. Gateway Token Card
         token_card = QFrame(self)
-        token_card.setStyleSheet(card_style)
-        token_layout = QVBoxLayout(token_card)
-        token_layout.setContentsMargins(12, 8, 12, 8)
-        token_layout.setSpacing(6)
-
-        token_lbl = QLabel(
-            "โทเคนยืนยันตัวตน / Authentication Token (GATEWAY_TOKEN):",
-            token_card,
+        token_card.setObjectName("TokenCard")
+        token_card.setStyleSheet(
+            card_style("TokenCard", bg=COLOR_SURFACE, border=COLOR_RULE, radius=14)
         )
-        token_lbl.setStyleSheet("font-size: 13px; font-weight: bold; color: #E5E7EB; border: none;")
-        token_layout.addWidget(token_lbl)
+        token_col = QVBoxLayout(token_card)
+        token_col.setContentsMargins(12, 8, 12, 8)
+        token_col.setSpacing(6)
+
+        token_lbl = QLabel("Gateway Token", token_card)
+        token_lbl.setStyleSheet(f"font-size: 14px; font-weight: bold; color: {COLOR_MUTED};")
 
         token_row = QHBoxLayout()
         token_row.setSpacing(6)
         self.token_input = QLineEdit(token_card)
-        self.token_input.setFocusPolicy(Qt.FocusPolicy.ClickFocus)
         self.token_input.setEchoMode(QLineEdit.EchoMode.Password)
-        self.token_input.setPlaceholderText("กรอกหรือวาง GATEWAY_TOKEN / Enter Gateway Token")
+        self.token_input.setPlaceholderText("GATEWAY_TOKEN")
+        self.token_input.setFixedHeight(38)
         self.token_input.setStyleSheet(
-            "QLineEdit { background-color: #111827; color: #FFFFFF; font-size: 13px; "
-            "padding: 6px 8px; border: 1px solid #4B5563; border-radius: 4px; }"
+            f"background-color: {COLOR_SURFACE_2}; color: {COLOR_INK}; "
+            f"border: 1.5px solid {COLOR_RULE}; border-radius: 10px; "
+            "padding: 4px 10px; font-size: 15px; font-weight: bold;"
         )
-        token_row.addWidget(self.token_input, stretch=1)
 
         self.btn_toggle_echo = _make_mouse_button(
-            "แสดง/ซ่อน (Show/Hide)",
-            btn_neutral_style,
+            "แสดง",
+            COLOR_SURFACE_2,
+            COLOR_LIME_SOFT,
+            COLOR_INK,
             token_card,
             self._toggle_token_visibility,
+            min_width=64,
         )
         self.btn_paste_token = _make_mouse_button(
-            "วาง (Paste)",
-            btn_neutral_style,
+            "วาง",
+            COLOR_DARK,
+            "#2B3322",
+            COLOR_ON_DARK,
             token_card,
             self._paste_token_from_clipboard,
+            min_width=58,
+            border_color=COLOR_DARK,
         )
         self.btn_clear_token = _make_mouse_button(
-            "ล้าง (Clear)",
-            btn_neutral_style,
+            "ล้าง",
+            COLOR_BAD,
+            "#B91C1C",
+            COLOR_ON_BAD,
             token_card,
-            self.token_input.clear,
+            lambda: self.token_input.clear(),
+            min_width=58,
+            border_color=COLOR_BAD,
         )
+
+        token_row.addWidget(self.token_input, stretch=1)
         token_row.addWidget(self.btn_toggle_echo)
         token_row.addWidget(self.btn_paste_token)
         token_row.addWidget(self.btn_clear_token)
-        token_layout.addLayout(token_row)
-        main_layout.addWidget(token_card)
+        token_col.addWidget(token_lbl)
+        token_col.addLayout(token_row)
+        root_layout.addWidget(token_card)
 
-        # 3. Timeouts Card (Autocomplete & Sleep & Door Closure)
-        timeout_card = QFrame(self)
-        timeout_card.setStyleSheet(card_style)
-        timeout_layout = QVBoxLayout(timeout_card)
-        timeout_layout.setContentsMargins(12, 6, 12, 6)
-        timeout_layout.setSpacing(6)
+        # 3. 2x2 Numeric Settings Grid
+        grid = QGridLayout()
+        grid.setSpacing(8)
 
-        # 3a. Autocomplete delay
-        auto_row = QHBoxLayout()
-        auto_row.setSpacing(6)
-        auto_label_box = QVBoxLayout()
-        auto_th = QLabel("เวลายืนยันคำสั่งอัตโนมัติ (Autocomplete Delay)", timeout_card)
-        auto_th.setStyleSheet("font-size: 13px; font-weight: bold; color: #E5E7EB; border: none;")
-        auto_en = QLabel("Seconds before Check-In / Check-Out auto-confirms", timeout_card)
-        auto_en.setStyleSheet("font-size: 11px; color: #9CA3AF; border: none;")
-        auto_label_box.addWidget(auto_th)
-        auto_label_box.addWidget(auto_en)
-        auto_row.addLayout(auto_label_box)
-        auto_row.addStretch()
-
-        self.autocomplete_spin = QSpinBox(timeout_card)
-        self.autocomplete_spin.setFocusPolicy(Qt.FocusPolicy.ClickFocus)
+        self.autocomplete_spin = QSpinBox(self)
         self.autocomplete_spin.setRange(1, 120)
         self.autocomplete_spin.setSuffix(" s")
-        self.autocomplete_spin.setFixedWidth(84)
-        self.autocomplete_spin.setStyleSheet(spin_style)
 
-        auto_row.addWidget(
-            _make_mouse_button(
-                "-5s", btn_step_style, timeout_card, lambda: self._adjust_autocomplete(-5)
-            )
-        )
-        auto_row.addWidget(
-            _make_mouse_button(
-                "-1s", btn_step_style, timeout_card, lambda: self._adjust_autocomplete(-1)
-            )
-        )
-        auto_row.addWidget(self.autocomplete_spin)
-        auto_row.addWidget(
-            _make_mouse_button(
-                "+1s", btn_step_style, timeout_card, lambda: self._adjust_autocomplete(1)
-            )
-        )
-        auto_row.addWidget(
-            _make_mouse_button(
-                "+5s", btn_step_style, timeout_card, lambda: self._adjust_autocomplete(5)
-            )
-        )
-        timeout_layout.addLayout(auto_row)
-
-        # 3b. Sleep delay (screen + camera off)
-        sleep_row = QHBoxLayout()
-        sleep_row.setSpacing(6)
-        sleep_label_box = QVBoxLayout()
-        sleep_th = QLabel("เวลาพักหน้าจอและปิดกล้อง (Sleep Timeout)", timeout_card)
-        sleep_th.setStyleSheet("font-size: 13px; font-weight: bold; color: #E5E7EB; border: none;")
-        sleep_en = QLabel("Seconds with no motion before turning screen & camera off", timeout_card)
-        sleep_en.setStyleSheet("font-size: 11px; color: #9CA3AF; border: none;")
-        sleep_label_box.addWidget(sleep_th)
-        sleep_label_box.addWidget(sleep_en)
-        sleep_row.addLayout(sleep_label_box)
-        sleep_row.addStretch()
-
-        self.sleep_spin = QSpinBox(timeout_card)
-        self.sleep_spin.setFocusPolicy(Qt.FocusPolicy.ClickFocus)
+        self.sleep_spin = QSpinBox(self)
         self.sleep_spin.setRange(5, 7200)
         self.sleep_spin.setSuffix(" s")
-        self.sleep_spin.setFixedWidth(84)
-        self.sleep_spin.setStyleSheet(spin_style)
 
-        sleep_row.addWidget(
-            _make_mouse_button(
-                "-60s", btn_step_style, timeout_card, lambda: self._adjust_sleep(-60)
-            )
-        )
-        sleep_row.addWidget(
-            _make_mouse_button(
-                "-10s", btn_step_style, timeout_card, lambda: self._adjust_sleep(-10)
-            )
-        )
-        sleep_row.addWidget(self.sleep_spin)
-        sleep_row.addWidget(
-            _make_mouse_button("+10s", btn_step_style, timeout_card, lambda: self._adjust_sleep(10))
-        )
-        sleep_row.addWidget(
-            _make_mouse_button("+60s", btn_step_style, timeout_card, lambda: self._adjust_sleep(60))
-        )
-        timeout_layout.addLayout(sleep_row)
-
-        # 3c. PIR Motion Sensor GPIO Pin
-        pir_row = QHBoxLayout()
-        pir_row.setSpacing(6)
-        pir_label_box = QVBoxLayout()
-        pir_th = QLabel("ขา GPIO เซนเซอร์ตรวจจับการเคลื่อนไหว (PIR GPIO Pin)", timeout_card)
-        pir_th.setStyleSheet("font-size: 13px; font-weight: bold; color: #E5E7EB; border: none;")
-        pir_en = QLabel("BCM GPIO pin for SEN0018 PIR (default 22, -1 = disabled)", timeout_card)
-        pir_en.setStyleSheet("font-size: 11px; color: #9CA3AF; border: none;")
-        pir_label_box.addWidget(pir_th)
-        pir_label_box.addWidget(pir_en)
-        pir_row.addLayout(pir_label_box)
-        pir_row.addStretch()
-
-        self.pir_pin_spin = QSpinBox(timeout_card)
-        self.pir_pin_spin.setFocusPolicy(Qt.FocusPolicy.ClickFocus)
+        self.pir_pin_spin = QSpinBox(self)
         self.pir_pin_spin.setRange(-1, 27)
         self.pir_pin_spin.setSpecialValueText("-1 (Off)")
         self.pir_pin_spin.setPrefix("GPIO ")
-        self.pir_pin_spin.setFixedWidth(104)
-        self.pir_pin_spin.setStyleSheet(spin_style)
 
-        pir_row.addWidget(
-            _make_mouse_button(
-                "Off (-1)", btn_step_style, timeout_card, lambda: self.pir_pin_spin.setValue(-1)
-            )
-        )
-        pir_row.addWidget(self.pir_pin_spin)
-        pir_row.addWidget(
-            _make_mouse_button(
-                "Default (22)",
-                btn_step_style,
-                timeout_card,
-                lambda: self.pir_pin_spin.setValue(22),
-            )
-        )
-        timeout_layout.addLayout(pir_row)
-
-        # 3d. Automatic Door Closure Delay (Scene 4 configurable seconds)
-        door_row = QHBoxLayout()
-        door_row.setSpacing(6)
-        door_label_box = QVBoxLayout()
-        door_th = QLabel("เวลาปิดประตูอัตโนมัติ (Auto Door Close Delay)", timeout_card)
-        door_th.setStyleSheet("font-size: 13px; font-weight: bold; color: #E5E7EB; border: none;")
-        door_en = QLabel(
-            "Seconds door stays open with no human before sending CLOSE_DOOR",
-            timeout_card,
-        )
-        door_en.setStyleSheet("font-size: 11px; color: #9CA3AF; border: none;")
-        door_label_box.addWidget(door_th)
-        door_label_box.addWidget(door_en)
-        door_row.addLayout(door_label_box)
-        door_row.addStretch()
-
-        self.door_close_spin = QSpinBox(timeout_card)
-        self.door_close_spin.setFocusPolicy(Qt.FocusPolicy.ClickFocus)
+        self.door_close_spin = QSpinBox(self)
         self.door_close_spin.setRange(3, 600)
         self.door_close_spin.setSuffix(" s")
-        self.door_close_spin.setFixedWidth(84)
-        self.door_close_spin.setStyleSheet(spin_style)
 
-        door_row.addWidget(
-            _make_mouse_button(
-                "-10s", btn_step_style, timeout_card, lambda: self._adjust_door_close(-10)
-            )
+        card_auto = self._build_stepper_card(
+            "CardAuto",
+            "ยืนยันอัตโนมัติ (วินาที)",
+            self.autocomplete_spin,
+            lambda: self._adjust_autocomplete(-1),
+            lambda: self._adjust_autocomplete(1),
         )
-        door_row.addWidget(
-            _make_mouse_button(
-                "-1s", btn_step_style, timeout_card, lambda: self._adjust_door_close(-1)
-            )
+        card_sleep = self._build_stepper_card(
+            "CardSleep",
+            "พักหน้าจอ (วินาที)",
+            self.sleep_spin,
+            lambda: self._adjust_sleep(-30),
+            lambda: self._adjust_sleep(30),
         )
-        door_row.addWidget(self.door_close_spin)
-        door_row.addWidget(
-            _make_mouse_button(
-                "+1s", btn_step_style, timeout_card, lambda: self._adjust_door_close(1)
-            )
+        card_pir = self._build_stepper_card(
+            "CardPir",
+            "ขา PIR Motion (GPIO)",
+            self.pir_pin_spin,
+            lambda: self.pir_pin_spin.setValue(self.pir_pin_spin.value() - 1),
+            lambda: self.pir_pin_spin.setValue(self.pir_pin_spin.value() + 1),
+            spin_width=116,
         )
-        door_row.addWidget(
-            _make_mouse_button(
-                "+10s", btn_step_style, timeout_card, lambda: self._adjust_door_close(10)
-            )
+        card_door = self._build_stepper_card(
+            "CardDoor",
+            "ปิดประตูอัตโนมัติ (วินาที)",
+            self.door_close_spin,
+            lambda: self._adjust_door_close(-5),
+            lambda: self._adjust_door_close(5),
         )
-        timeout_layout.addLayout(door_row)
 
-        main_layout.addWidget(timeout_card)
+        grid.addWidget(card_auto, 0, 0)
+        grid.addWidget(card_sleep, 0, 1)
+        grid.addWidget(card_pir, 1, 0)
+        grid.addWidget(card_door, 1, 1)
+        root_layout.addLayout(grid, stretch=1)
 
-        # 4. Window & App Controls Card
-        win_card = QFrame(self)
-        win_card.setStyleSheet(card_style)
-        win_layout = QVBoxLayout(win_card)
-        win_layout.setContentsMargins(12, 8, 12, 8)
-        win_layout.setSpacing(6)
+        # 4. Footer Window Controls & Save
+        footer = QHBoxLayout()
+        footer.setSpacing(8)
 
-        win_lbl = QLabel("จัดการหน้าต่างและแอปพลิเคชัน / Window & Application Controls:", win_card)
-        win_lbl.setStyleSheet("font-size: 13px; font-weight: bold; color: #E5E7EB; border: none;")
-        win_layout.addWidget(win_lbl)
-
-        win_row = QHBoxLayout()
-        win_row.setSpacing(8)
         self.btn_minimize = _make_mouse_button(
-            "🗕 ย่อหน้าต่าง (Minimize)",
-            btn_neutral_style,
-            win_card,
+            "ย่อหน้าต่าง",
+            COLOR_SURFACE,
+            COLOR_SURFACE_2,
+            COLOR_INK,
+            self,
             self._on_minimize,
+            min_width=96,
+            min_height=42,
         )
         self.btn_fullscreen = _make_mouse_button(
-            "❐ ย่อ/ขยายเต็มจอ (Unfullscreen / Fullscreen)",
-            btn_neutral_style,
-            win_card,
+            "เต็มจอ / หน้าต่าง",
+            COLOR_SURFACE,
+            COLOR_SURFACE_2,
+            COLOR_INK,
+            self,
             self._on_toggle_fullscreen,
+            min_width=128,
+            min_height=42,
         )
         self.btn_quit = _make_mouse_button(
-            "✕ ปิดแอปพลิเคชัน (Quit Application)",
-            "QPushButton { background-color: #991B1B; color: #FFFFFF; font-size: 12px; "
-            "font-weight: bold; padding: 6px 12px; border-radius: 5px; border: 1px solid #DC2626; } "
-            "QPushButton:hover { background-color: #DC2626; }",
-            win_card,
-            self._on_quit,
-        )
-        win_row.addWidget(self.btn_minimize)
-        win_row.addWidget(self.btn_fullscreen)
-        win_row.addStretch()
-        win_row.addWidget(self.btn_quit)
-        win_layout.addLayout(win_row)
-        main_layout.addWidget(win_card)
-
-        # 5. Footer Navigation & Save Row
-        footer = QHBoxLayout()
-        footer.setSpacing(12)
-        self.btn_back = _make_mouse_button(
-            "← ย้อนกลับ (Back)",
-            btn_neutral_style,
+            "ปิดโปรแกรม",
+            COLOR_BAD,
+            "#B91C1C",
+            COLOR_ON_BAD,
             self,
-            self._handle_back,
+            self._on_quit,
+            min_width=102,
+            min_height=42,
+            border_color=COLOR_BAD,
         )
         self.btn_save = _make_mouse_button(
-            "💾 บันทึกการตั้งค่า (Save Settings)",
-            "QPushButton { background-color: #059669; color: #FFFFFF; font-size: 13px; "
-            "font-weight: bold; padding: 8px 18px; border-radius: 6px; border: 1px solid #10B981; } "
-            "QPushButton:hover { background-color: #10B981; }",
+            "บันทึก",
+            COLOR_FRESH,
+            "#245618",
+            COLOR_ON_FRESH,
             self,
             self._handle_save,
+            min_width=140,
+            min_height=42,
+            font_px=17,
+            border_color=COLOR_FRESH,
         )
-        footer.addWidget(self.btn_back)
+
+        footer.addWidget(self.btn_minimize)
+        footer.addWidget(self.btn_fullscreen)
+        footer.addWidget(self.btn_quit)
         footer.addStretch()
         footer.addWidget(self.btn_save)
-        main_layout.addLayout(footer)
+        root_layout.addLayout(footer)
 
     def load_values(
         self,
@@ -431,8 +399,10 @@ class SettingsScreen(QWidget):
     def _toggle_token_visibility(self) -> None:
         if self.token_input.echoMode() == QLineEdit.EchoMode.Password:
             self.token_input.setEchoMode(QLineEdit.EchoMode.Normal)
+            self.btn_toggle_echo.setText("ซ่อน")
         else:
             self.token_input.setEchoMode(QLineEdit.EchoMode.Password)
+            self.btn_toggle_echo.setText("แสดง")
 
     def _paste_token_from_clipboard(self) -> None:
         clipboard = QApplication.clipboard()
@@ -445,10 +415,12 @@ class SettingsScreen(QWidget):
         self.autocomplete_spin.setValue(self.autocomplete_spin.value() + delta)
 
     def _adjust_sleep(self, delta: int) -> None:
-        self.sleep_spin.setValue(self.sleep_spin.value() + delta)
+        self.sleep_spin.setValue(sleep_timeout_clamp(self.sleep_spin.value() + delta))
 
     def _adjust_door_close(self, delta: int) -> None:
-        self.door_close_spin.setValue(self.door_close_spin.value() + delta)
+        self.door_close_spin.setValue(
+            door_close_timeout_clamp(self.door_close_spin.value() + delta)
+        )
 
     def _handle_back(self) -> None:
         if self._on_back is not None:
@@ -476,5 +448,5 @@ def sleep_timeout_clamp(value: int) -> int:
 
 
 def door_close_timeout_clamp(value: int) -> int:
-    """Clamps auto door closure delay into the spinbox range [3, 600]."""
+    """Clamps auto door close timeout into [3, 600] seconds."""
     return max(3, min(600, value))

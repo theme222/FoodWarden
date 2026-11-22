@@ -1,8 +1,4 @@
-"""Idle / Home Screen for FoodWarden 5-inch LCD (800x480).
-
-Displays live system diagnostics, webcam preview, fridge temperature/VOC status,
-and prominent bilingual action prompts for [O] Check-In and [X] Check-Out.
-"""
+"""Idle Home Screen displaying live camera preview and fridge/node telemetry."""
 
 from __future__ import annotations
 
@@ -13,30 +9,56 @@ from PyQt6.QtCore import Qt
 from PyQt6.QtGui import QImage, QPixmap
 from PyQt6.QtWidgets import (
     QFrame,
+    QGridLayout,
     QHBoxLayout,
     QLabel,
     QPushButton,
+    QSizePolicy,
     QVBoxLayout,
     QWidget,
 )
 
+from foodwarden_camera.ui.styles import (
+    COLOR_BAD,
+    COLOR_DARK,
+    COLOR_FRESH,
+    COLOR_INK,
+    COLOR_LIME,
+    COLOR_LIME_INK,
+    COLOR_MUTED,
+    COLOR_ON_BAD,
+    COLOR_ON_DARK,
+    COLOR_ON_DARK_2,
+    COLOR_ON_FRESH,
+    COLOR_ON_SOON,
+    COLOR_ON_TAKE,
+    COLOR_RULE,
+    COLOR_SOON,
+    COLOR_SURFACE,
+    COLOR_SURFACE_2,
+    COLOR_TAKE_SOLID,
+    COLOR_WAIT_BG,
+    COLOR_WAIT_FG,
+    card_style,
+    pill_style,
+)
 
-def _format_elapsed_short(age_s: float) -> str:
-    """Formats elapsed seconds compactly (e.g. '3s', '1m05s', '2h+')."""
-    secs = max(0, int(age_s))
-    if secs < 60:
-        return f"{secs}s"
-    mins, rem_s = divmod(secs, 60)
-    if mins < 60:
-        return f"{mins}m{rem_s:02d}s"
-    return f"{mins // 60}h+"
-
-
-# Freshness windows (seconds) per node type: F0 wakes on 30s batch; D0 streams 1 Hz telemetry
 _NODE_BADGE_THRESHOLDS: dict[str, tuple[float, float]] = {
     "F0": (45.0, 120.0),
     "D0": (5.0, 20.0),
 }
+
+
+def _format_elapsed_short(age_s: float) -> str:
+    """Formats elapsed seconds cleanly (e.g. 12s, 1m15s, 2h05m)."""
+    secs = max(0, int(age_s))
+    if secs < 60:
+        return f"{secs}s"
+    if secs < 3600:
+        mins, rem = divmod(secs, 60)
+        return f"{mins}m{rem:02d}s"
+    hours, rem_m = divmod(secs // 60, 60)
+    return f"{hours}h{rem_m:02d}m"
 
 
 def format_node_badge(
@@ -46,52 +68,79 @@ def format_node_badge(
     is_connected: bool = False,
     is_offline: bool = False,
 ) -> tuple[str, str, str, str]:
-    """Returns (pill_text, detail_text, bg_hex, fg_hex) progressing Gray->Green->Yellow->Red."""
+    """Returns (pill_text, detail_text, bg_hex, fg_hex) matching Web Prototype colors."""
     green_max_s, yellow_max_s = _NODE_BADGE_THRESHOLDS.get(node_id, (45.0, 120.0))
 
     if age_s is None and not is_connected:
-        return f"● {node_id}: Wait", f"{node_id}: รอเชื่อมต่อ", "#374151", "#D1D5DB"
+        return (
+            f"● {node_id}: Wait",
+            f"{node_id}: รอเชื่อมต่อ",
+            COLOR_WAIT_BG,
+            COLOR_WAIT_FG,
+        )
 
     elapsed = _format_elapsed_short(0.0 if age_s is None else age_s)
 
     if is_offline:
-        return f"● {node_id}: Off {elapsed}", f"{node_id}: หลุด ({elapsed})", "#7F1D1D", "#FCA5A5"
+        return (
+            f"● {node_id}: Off {elapsed}",
+            f"{node_id}: หลุด ({elapsed})",
+            COLOR_BAD,
+            COLOR_ON_BAD,
+        )
 
     if is_connected or (age_s is not None and age_s <= green_max_s):
         state_txt = "LIVE" if is_connected and (age_s is None or age_s < 2.0) else elapsed
-        return f"● {node_id}: {state_txt}", f"{node_id}: ปกติ ({state_txt})", "#064E3B", "#34D399"
+        return (
+            f"● {node_id}: {state_txt}",
+            f"{node_id}: {state_txt}",
+            COLOR_FRESH,
+            COLOR_ON_FRESH,
+        )
 
     if age_s is not None and age_s <= yellow_max_s:
-        return f"● {node_id}: {elapsed}", f"{node_id}: นิ่ง ({elapsed})", "#78350F", "#FBBF24"
+        return (
+            f"● {node_id}: {elapsed}",
+            f"{node_id}: ช้า ({elapsed})",
+            COLOR_SOON,
+            COLOR_ON_SOON,
+        )
 
-    return f"● {node_id}: {elapsed}!", f"{node_id}: ขาดติดต่อ ({elapsed})", "#7F1D1D", "#FCA5A5"
+    return (
+        f"● {node_id}: {elapsed}!",
+        f"{node_id}: ขาด ({elapsed})",
+        COLOR_BAD,
+        COLOR_ON_BAD,
+    )
 
 
 def _create_header_button(
     text: str,
     bg_color: str,
     hover_color: str,
+    fg_color: str,
+    border_color: str,
     parent: QWidget,
     callback: Callable[[], None] | None,
+    *,
+    min_width: int = 38,
 ) -> QPushButton:
-    """Builds a mouse-only header button that ignores keyboard/button focus."""
+    """Builds a touch-friendly header control button matching Web Prototype style."""
     btn = QPushButton(text, parent)
     btn.setFocusPolicy(Qt.FocusPolicy.NoFocus)
-    btn.setCursor(Qt.CursorShape.PointingHandCursor)
+    btn.setMinimumSize(min_width, 36)
     btn.setStyleSheet(
         f"""
         QPushButton {{
             background-color: {bg_color};
-            color: #FFFFFF;
-            font-size: 11px;
+            color: {fg_color};
+            border: 1.5px solid {border_color};
+            border-radius: 10px;
+            font-size: 14px;
             font-weight: bold;
-            padding: 5px 9px;
-            border-radius: 5px;
-            border: 1px solid #374151;
+            padding: 4px 10px;
         }}
-        QPushButton:hover {{
-            background-color: {hover_color};
-        }}
+        QPushButton:hover {{ background-color: {hover_color}; }}
         """
     )
     if callback is not None:
@@ -99,8 +148,71 @@ def _create_header_button(
     return btn
 
 
+def _create_metric_tile(
+    object_name: str,
+    title: str,
+    initial_value: str,
+    value_px: int,
+    parent: QWidget,
+) -> tuple[QFrame, QLabel]:
+    """Builds a #F2F7E3 metric tile card matching Web Prototype `.mini` tiles."""
+    tile = QFrame(parent)
+    tile.setObjectName(object_name)
+    tile.setStyleSheet(card_style(object_name, bg=COLOR_SURFACE_2, border=COLOR_RULE, radius=12))
+    layout = QVBoxLayout(tile)
+    layout.setContentsMargins(10, 6, 10, 6)
+    layout.setSpacing(2)
+
+    title_lbl = QLabel(title, tile)
+    title_lbl.setStyleSheet(f"font-size: 12px; font-weight: bold; color: {COLOR_MUTED};")
+
+    val_lbl = QLabel(initial_value, tile)
+    val_lbl.setStyleSheet(f"font-size: {value_px}px; font-weight: bold; color: {COLOR_INK};")
+
+    layout.addWidget(title_lbl)
+    layout.addWidget(val_lbl)
+    return tile, val_lbl
+
+
+def _create_action_pill(
+    object_name: str,
+    key_text: str,
+    title_text: str,
+    bg_color: str,
+    fg_color: str,
+    badge_bg: str,
+    badge_fg: str,
+    parent: QWidget,
+) -> QFrame:
+    """Builds a bold bottom action guidance pill matching Web Prototype CTAs."""
+    frame = QFrame(parent)
+    frame.setObjectName(object_name)
+    frame.setFixedHeight(52)
+    frame.setStyleSheet(card_style(object_name, bg=bg_color, border=bg_color, radius=14))
+
+    row = QHBoxLayout(frame)
+    row.setContentsMargins(12, 6, 14, 6)
+    row.setSpacing(10)
+
+    badge = QLabel(key_text, frame)
+    badge.setAlignment(Qt.AlignmentFlag.AlignCenter)
+    badge.setFixedSize(34, 34)
+    badge.setStyleSheet(
+        f"background-color: {badge_bg}; color: {badge_fg}; "
+        "font-size: 17px; font-weight: bold; border-radius: 9px;"
+    )
+
+    label = QLabel(title_text, frame)
+    label.setStyleSheet(f"font-size: 18px; font-weight: bold; color: {fg_color};")
+
+    row.addWidget(badge)
+    row.addWidget(label)
+    row.addStretch()
+    return frame
+
+
 class IdleScreen(QWidget):
-    """Home screen providing continuous system status and workflow triggers."""
+    """Home screen providing high-contrast telemetry, camera feed, and CTA triggers."""
 
     def __init__(
         self,
@@ -115,208 +227,227 @@ class IdleScreen(QWidget):
         self._on_minimize = on_minimize
         self._on_toggle_fullscreen = on_toggle_fullscreen
         self._on_quit = on_quit
-        self._node_details: dict[str, str] = {"F0": "F0: รอเชื่อมต่อ", "D0": "D0: รอเชื่อมต่อ"}
+        self._f_status_text = "F: รอเชื่อมต่อ"
+        self._d_status_text = "D: รอเชื่อมต่อ"
         self._init_ui()
 
     def _init_ui(self) -> None:
-        main_layout = QVBoxLayout(self)
-        main_layout.setContentsMargins(16, 10, 16, 10)
-        main_layout.setSpacing(8)
+        root_layout = QVBoxLayout(self)
+        root_layout.setContentsMargins(12, 10, 12, 10)
+        root_layout.setSpacing(8)
 
-        # 1. Header Bar with Title & Mouse Window/Settings Controls
-        header_layout = QHBoxLayout()
-        header_layout.setSpacing(6)
-        title_box = QVBoxLayout()
-        title_th = QLabel("FoodWarden — ตู้เย็นอัจฉริยะ", self)
-        title_th.setStyleSheet("font-size: 18px; font-weight: bold; color: #FFFFFF;")
-        title_en = QLabel("Smart Refrigerator System", self)
-        title_en.setStyleSheet("font-size: 11px; color: #9CA3AF;")
-        title_box.addWidget(title_th)
-        title_box.addWidget(title_en)
-        header_layout.addLayout(title_box)
+        # 1. Top Header Bar (Brand + Connectivity Pills + Window Controls)
+        header = QHBoxLayout()
+        header.setSpacing(6)
 
-        header_layout.addStretch()
+        brand_dot = QLabel("FW", self)
+        brand_dot.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        brand_dot.setFixedSize(32, 32)
+        brand_dot.setStyleSheet(
+            f"background-color: {COLOR_LIME}; color: {COLOR_LIME_INK}; "
+            "font-size: 14px; font-weight: bold; border-radius: 9px;"
+        )
+
+        title = QLabel("FoodWarden", self)
+        title.setStyleSheet(f"font-size: 20px; font-weight: bold; color: {COLOR_INK};")
+
+        self.pill_wifi = QLabel("Wi-Fi: --", self)
+        self.pill_wifi.setStyleSheet(pill_style(COLOR_WAIT_BG, COLOR_WAIT_FG, font_px=12))
+
+        self.pill_node_f = QLabel("● F: Wait", self)
+        self.pill_node_f.setStyleSheet(pill_style(COLOR_WAIT_BG, COLOR_WAIT_FG, font_px=12))
+        self.pill_ble = self.pill_node_f
+
+        self.pill_node_d = QLabel("● D: Wait", self)
+        self.pill_node_d.setStyleSheet(pill_style(COLOR_WAIT_BG, COLOR_WAIT_FG, font_px=12))
+
+        self.pill_door = QLabel("Door: Closed", self)
+        self.pill_door.setStyleSheet(pill_style(COLOR_FRESH, COLOR_ON_FRESH, font_px=12))
 
         self.btn_settings = _create_header_button(
-            "⚙ ตั้งค่า / Settings",
-            "#1F2937",
-            "#374151",
+            "ตั้งค่า",
+            COLOR_SURFACE,
+            COLOR_SURFACE_2,
+            COLOR_INK,
+            COLOR_RULE,
             self,
             self._on_open_settings,
+            min_width=64,
         )
         self.btn_minimize = _create_header_button(
-            "🗕 ย่อ / Min",
-            "#1F2937",
-            "#374151",
-            self,
-            self._on_minimize,
+            "_", COLOR_SURFACE, COLOR_SURFACE_2, COLOR_INK, COLOR_RULE, self, self._on_minimize
         )
         self.btn_fullscreen = _create_header_button(
-            "❐ จอ / Win",
-            "#1F2937",
-            "#374151",
+            "□",
+            COLOR_SURFACE,
+            COLOR_SURFACE_2,
+            COLOR_INK,
+            COLOR_RULE,
             self,
             self._on_toggle_fullscreen,
         )
         self.btn_quit = _create_header_button(
-            "✕ ออก / Quit",
-            "#7F1D1D",
-            "#991B1B",
-            self,
-            self._on_quit,
+            "✕", COLOR_BAD, "#B91C1C", COLOR_ON_BAD, COLOR_BAD, self, self._on_quit
         )
 
-        header_layout.addWidget(self.btn_settings)
-        header_layout.addWidget(self.btn_minimize)
-        header_layout.addWidget(self.btn_fullscreen)
-        header_layout.addWidget(self.btn_quit)
-        main_layout.addLayout(header_layout)
+        header.addWidget(brand_dot)
+        header.addWidget(title)
+        header.addStretch()
+        header.addWidget(self.pill_wifi)
+        header.addWidget(self.pill_node_f)
+        header.addWidget(self.pill_node_d)
+        header.addWidget(self.pill_door)
+        header.addWidget(self.btn_settings)
+        header.addWidget(self.btn_minimize)
+        header.addWidget(self.btn_fullscreen)
+        header.addWidget(self.btn_quit)
+        root_layout.addLayout(header)
 
-        # 1b. System Status Pills Row
-        status_layout = QHBoxLayout()
-        status_layout.setSpacing(5)
+        # 2. Main Split Content: Left Camera Card | Right Status Card
+        content_layout = QHBoxLayout()
+        content_layout.setSpacing(10)
 
-        pill_pad = "font-size: 11px; font-weight: bold; padding: 4px 6px; border-radius: 4px;"
-        self.pill_wifi = QLabel("Wi-Fi: OK", self)
-        self.pill_wifi.setStyleSheet(f"background-color: #064E3B; color: #34D399; {pill_pad}")
-        self.pill_node_f = QLabel("● F0: Wait", self)
-        self.pill_node_f.setStyleSheet(f"background-color: #374151; color: #D1D5DB; {pill_pad}")
-        self.pill_ble = self.pill_node_f
-        self.pill_node_d = QLabel("● D0: Wait", self)
-        self.pill_node_d.setStyleSheet(f"background-color: #374151; color: #D1D5DB; {pill_pad}")
-        self.pill_door = QLabel("Door: Closed", self)
-        self.pill_door.setStyleSheet(f"background-color: #1E3A8A; color: #60A5FA; {pill_pad}")
-        self.pill_motion = QLabel("Motion: None (0s)", self)
-        self.pill_motion.setStyleSheet(f"background-color: #1F2937; color: #9CA3AF; {pill_pad}")
-        self.pill_person = QLabel("YOLO: Wait", self)
-        self.pill_person.setStyleSheet(f"background-color: #1F2937; color: #9CA3AF; {pill_pad}")
+        cam_card = QFrame(self)
+        cam_card.setObjectName("CamCard")
+        cam_card.setStyleSheet(
+            card_style("CamCard", bg=COLOR_SURFACE, border=COLOR_RULE, radius=16)
+        )
+        cam_card_layout = QVBoxLayout(cam_card)
+        cam_card_layout.setContentsMargins(10, 10, 10, 10)
+        cam_card_layout.setSpacing(6)
 
-        status_layout.addWidget(self.pill_wifi)
-        status_layout.addWidget(self.pill_node_f)
-        status_layout.addWidget(self.pill_node_d)
-        status_layout.addWidget(self.pill_door)
-        status_layout.addWidget(self.pill_motion)
-        status_layout.addWidget(self.pill_person)
-        status_layout.addStretch()
-        main_layout.addLayout(status_layout)
-
-        # 2. Middle Section (Webcam Viewfinder + Sensor Cards)
-        mid_layout = QHBoxLayout()
-        mid_layout.setSpacing(12)
-
-        # Camera preview frame (400x240)
-        self.camera_frame = QFrame(self)
+        self.camera_frame = QFrame(cam_card)
+        self.camera_frame.setObjectName("CameraFrame")
+        self.camera_frame.setMinimumSize(340, 215)
+        self.camera_frame.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
         self.camera_frame.setStyleSheet(
-            "background-color: #000000; border: 1px solid #333333; border-radius: 6px;"
+            f"#CameraFrame {{ background-color: {COLOR_DARK}; "
+            f"border: 1.5px solid {COLOR_RULE}; border-radius: 12px; }}"
         )
-        self.camera_frame.setFixedSize(380, 240)
         cam_inner = QVBoxLayout(self.camera_frame)
-        cam_inner.setContentsMargins(0, 0, 0, 0)
+        cam_inner.setContentsMargins(4, 4, 4, 4)
 
-        self.camera_label = QLabel(self.camera_frame)
+        self.camera_label = QLabel("รอสัญญาณกล้อง...", self.camera_frame)
         self.camera_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        self.camera_label.setText("กำลังเชื่อมต่อกล้อง...\nConnecting camera...")
-        self.camera_label.setStyleSheet("color: #6B7280; font-size: 13px;")
+        self.camera_label.setStyleSheet(
+            f"color: {COLOR_ON_DARK_2}; font-size: 16px; font-weight: bold;"
+        )
         cam_inner.addWidget(self.camera_label)
-        mid_layout.addWidget(self.camera_frame)
+        cam_card_layout.addWidget(self.camera_frame)
 
-        # Diagnostics Card (Right side)
+        # Right Status Card
         diag_card = QFrame(self)
+        diag_card.setObjectName("DiagCard")
         diag_card.setStyleSheet(
-            "background-color: #1E1E1E; border: 1px solid #2D2D2D; border-radius: 6px;"
+            card_style("DiagCard", bg=COLOR_SURFACE, border=COLOR_RULE, radius=16)
         )
         diag_layout = QVBoxLayout(diag_card)
-        diag_layout.setContentsMargins(14, 12, 14, 12)
+        diag_layout.setContentsMargins(10, 10, 10, 10)
         diag_layout.setSpacing(8)
 
-        # Temperature
-        diag_title = QLabel("สภาวะภายในตู้เย็น / Internal Climate", diag_card)
-        diag_title.setStyleSheet("font-size: 13px; font-weight: bold; color: #9CA3AF;")
-        diag_layout.addWidget(diag_title)
+        grid = QGridLayout()
+        grid.setSpacing(8)
 
-        self.temp_label = QLabel("อุณหภูมิ: 3.4 °C (ปกติ)", diag_card)
-        self.temp_label.setStyleSheet("font-size: 16px; font-weight: bold; color: #10B981;")
-        diag_layout.addWidget(self.temp_label)
-
-        # VOC Air Quality
-        self.voc_label = QLabel("คุณภาพอากาศ: 105 VOC (สะอาด)", diag_card)
-        self.voc_label.setStyleSheet("font-size: 14px; color: #E5E7EB;")
-        diag_layout.addWidget(self.voc_label)
-
-        # Door state
-        self.door_label = QLabel("สถานะประตู: ปิดสนิท (Closed)", diag_card)
-        self.door_label.setStyleSheet("font-size: 14px; color: #E5E7EB;")
-        diag_layout.addWidget(self.door_label)
-
-        # Peer Node Connection Summary (F0 BLE & D0 MQTTS)
-        self.nodes_label = QLabel("โหนด (Nodes): F0: รอเชื่อมต่อ | D0: รอเชื่อมต่อ", diag_card)
-        self.nodes_label.setWordWrap(True)
-        self.nodes_label.setStyleSheet("font-size: 13px; color: #9CA3AF;")
-        diag_layout.addWidget(self.nodes_label)
-
-        # Motion Sensor (PIR) debug state
-        self.motion_label = QLabel(
-            "ตรวจจับการเคลื่อนไหว: นิ่งมาแล้ว 0 วินาที (No Motion: 0s)",
-            diag_card,
+        temp_tile, self.temp_label = _create_metric_tile(
+            "TileTemp", "อุณหภูมิ", "--.- °C", 25, diag_card
         )
-        self.motion_label.setWordWrap(True)
-        self.motion_label.setStyleSheet("font-size: 13px; color: #9CA3AF;")
-        diag_layout.addWidget(self.motion_label)
-
-        # YOLO Person Detection debug state
-        self.person_label = QLabel(
-            "ตรวจจับบุคคล (YOLO): กำลังรอตรวจ... (Waiting)",
-            diag_card,
+        voc_tile, self.voc_label = _create_metric_tile(
+            "TileVoc", "อากาศ (VOC)", "--", 22, diag_card
         )
-        self.person_label.setWordWrap(True)
-        self.person_label.setStyleSheet("font-size: 13px; color: #9CA3AF;")
-        diag_layout.addWidget(self.person_label)
+        door_tile, self.door_label = _create_metric_tile("TileDoor", "ประตู", "ปิดสนิท", 16, diag_card)
+        nodes_tile, self.nodes_label = _create_metric_tile(
+            "TileNodes", "โหนด F / D", "F: รอ | D: รอ", 15, diag_card
+        )
+
+        grid.addWidget(temp_tile, 0, 0)
+        grid.addWidget(voc_tile, 0, 1)
+        grid.addWidget(door_tile, 1, 0)
+        grid.addWidget(nodes_tile, 1, 1)
+        diag_layout.addLayout(grid)
+
+        # PIR Motion Status Row
+        motion_tile = QFrame(diag_card)
+        motion_tile.setObjectName("TileMotion")
+        motion_tile.setStyleSheet(
+            card_style("TileMotion", bg=COLOR_SURFACE_2, border=COLOR_RULE, radius=12)
+        )
+        motion_col = QVBoxLayout(motion_tile)
+        motion_col.setContentsMargins(10, 6, 10, 6)
+        motion_col.setSpacing(3)
+
+        motion_top = QHBoxLayout()
+        motion_title = QLabel("PIR", motion_tile)
+        motion_title.setStyleSheet(f"font-size: 12px; font-weight: bold; color: {COLOR_MUTED};")
+        self.pill_motion = QLabel("PIR: --", motion_tile)
+        self.pill_motion.setStyleSheet(pill_style(COLOR_WAIT_BG, COLOR_WAIT_FG, font_px=12))
+        motion_top.addWidget(motion_title)
+        motion_top.addStretch()
+        motion_top.addWidget(self.pill_motion)
+
+        self.motion_label = QLabel("รอสัญญาณ PIR", motion_tile)
+        self.motion_label.setStyleSheet(f"font-size: 15px; font-weight: bold; color: {COLOR_INK};")
+        motion_col.addLayout(motion_top)
+        motion_col.addWidget(self.motion_label)
+        diag_layout.addWidget(motion_tile)
+
+        # YOLO Person Detection Row
+        person_tile = QFrame(diag_card)
+        person_tile.setObjectName("TilePerson")
+        person_tile.setStyleSheet(
+            card_style("TilePerson", bg=COLOR_SURFACE_2, border=COLOR_RULE, radius=12)
+        )
+        person_col = QVBoxLayout(person_tile)
+        person_col.setContentsMargins(10, 6, 10, 6)
+        person_col.setSpacing(3)
+
+        person_top = QHBoxLayout()
+        person_title = QLabel("YOLO", person_tile)
+        person_title.setStyleSheet(f"font-size: 12px; font-weight: bold; color: {COLOR_MUTED};")
+        self.pill_person = QLabel("Clear", person_tile)
+        self.pill_person.setStyleSheet(pill_style(COLOR_WAIT_BG, COLOR_WAIT_FG, font_px=12))
+        person_top.addWidget(person_title)
+        person_top.addStretch()
+        person_top.addWidget(self.pill_person)
+
+        self.person_label = QLabel("ไม่พบคน", person_tile)
+        self.person_label.setStyleSheet(f"font-size: 15px; font-weight: bold; color: {COLOR_INK};")
+        person_col.addLayout(person_top)
+        person_col.addWidget(self.person_label)
+        diag_layout.addWidget(person_tile)
 
         diag_layout.addStretch()
-        mid_layout.addWidget(diag_card)
-        main_layout.addLayout(mid_layout)
 
-        # 3. Bottom Action Guidance Prompts
+        content_layout.addWidget(cam_card, stretch=10)
+        content_layout.addWidget(diag_card, stretch=11)
+        root_layout.addLayout(content_layout, stretch=1)
+
+        # 3. Bottom Action CTA Bar
         action_bar = QHBoxLayout()
-        action_bar.setSpacing(16)
+        action_bar.setSpacing(10)
 
-        # [O] Check-In Button Pill
-        checkin_box = QHBoxLayout()
-        pill_o = QLabel("[O]", self)
-        pill_o.setStyleSheet(
-            "background-color: #059669; color: white; font-weight: bold; font-size: 16px; padding: 6px 12px; border-radius: 6px;"
+        checkin_pill = _create_action_pill(
+            "BtnCheckInGuide",
+            "O",
+            "นำเข้าอาหาร (Check-In)",
+            COLOR_DARK,
+            COLOR_ON_DARK,
+            COLOR_LIME,
+            COLOR_LIME_INK,
+            self,
         )
-        prompt_o_layout = QVBoxLayout()
-        prompt_o_th = QLabel("นำอาหารเข้าตู้ (เช็คอิน)", self)
-        prompt_o_th.setStyleSheet("font-size: 14px; font-weight: bold; color: #FFFFFF;")
-        prompt_o_en = QLabel("Check-In Grocery Item", self)
-        prompt_o_en.setStyleSheet("font-size: 11px; color: #9CA3AF;")
-        prompt_o_layout.addWidget(prompt_o_th)
-        prompt_o_layout.addWidget(prompt_o_en)
-        checkin_box.addWidget(pill_o)
-        checkin_box.addLayout(prompt_o_layout)
-        action_bar.addLayout(checkin_box)
-
-        action_bar.addStretch()
-
-        # [X] Check-Out Button Pill
-        checkout_box = QHBoxLayout()
-        pill_x = QLabel("[X]", self)
-        pill_x.setStyleSheet(
-            "background-color: #DC2626; color: white; font-weight: bold; font-size: 16px; padding: 6px 12px; border-radius: 6px;"
+        checkout_pill = _create_action_pill(
+            "BtnCheckOutGuide",
+            "X",
+            "นำออกอาหาร (Check-Out)",
+            COLOR_TAKE_SOLID,
+            COLOR_ON_TAKE,
+            COLOR_SURFACE,
+            COLOR_TAKE_SOLID,
+            self,
         )
-        prompt_x_layout = QVBoxLayout()
-        prompt_x_th = QLabel("นำอาหารออกจากตู้ (เช็คเอาต์)", self)
-        prompt_x_th.setStyleSheet("font-size: 14px; font-weight: bold; color: #FFFFFF;")
-        prompt_x_en = QLabel("Check-Out (FEFO Removal)", self)
-        prompt_x_en.setStyleSheet("font-size: 11px; color: #9CA3AF;")
-        prompt_x_layout.addWidget(prompt_x_th)
-        prompt_x_layout.addWidget(prompt_x_en)
-        checkout_box.addWidget(pill_x)
-        checkout_box.addLayout(prompt_x_layout)
-        action_bar.addLayout(checkout_box)
-
-        main_layout.addLayout(action_bar)
+        action_bar.addWidget(checkin_pill, stretch=1)
+        action_bar.addWidget(checkout_pill, stretch=1)
+        root_layout.addLayout(action_bar)
 
     def update_frame(self, frame_bgr: np.ndarray) -> None:
         """Updates live camera viewfinder from raw numpy BGR frame."""
@@ -331,58 +462,61 @@ class IdleScreen(QWidget):
             int(ch * w),
             QImage.Format.Format_RGB888,
         )
+        target_w = max(self.camera_frame.width() - 8, 320)
+        target_h = max(self.camera_frame.height() - 8, 200)
         pixmap = QPixmap.fromImage(qimg).scaled(
-            self.camera_frame.width(),
-            self.camera_frame.height(),
+            target_w,
+            target_h,
             Qt.AspectRatioMode.KeepAspectRatioByExpanding,
             Qt.TransformationMode.SmoothTransformation,
         )
+        self.camera_label.setText("")
         self.camera_label.setPixmap(pixmap)
 
     def update_telemetry(self, temp_c: float | None, voc: int | None, light: int | None) -> None:
-        """Updates climate card values."""
+        """Updates internal climate card values."""
         if temp_c is not None:
-            status = "ปกติ" if temp_c <= 4.0 else ("เฝ้าระวัง" if temp_c <= 8.0 else "เสี่ยงเน่าเสีย")
-            color = "#10B981" if temp_c <= 4.0 else ("#F59E0B" if temp_c <= 8.0 else "#EF4444")
-            self.temp_label.setText(f"อุณหภูมิ: {temp_c:.1f} °C ({status})")
-            self.temp_label.setStyleSheet(f"font-size: 16px; font-weight: bold; color: {color};")
+            status = "ปกติ" if temp_c <= 4.0 else ("อุ่น" if temp_c <= 8.0 else "ร้อน!")
+            color = COLOR_FRESH if temp_c <= 4.0 else ("#B45309" if temp_c <= 8.0 else COLOR_BAD)
+            self.temp_label.setText(f"{temp_c:.1f} °C · {status}")
+            self.temp_label.setStyleSheet(f"font-size: 23px; font-weight: bold; color: {color};")
 
         if voc is not None:
-            voc_desc = "สะอาด" if voc <= 150 else ("มีกลิ่น" if voc <= 250 else "กลิ่นเน่ารุนแรง")
-            self.voc_label.setText(f"คุณภาพอากาศ: {voc} VOC ({voc_desc})")
+            voc_desc = "สะอาด" if voc <= 150 else ("มีกลิ่น" if voc <= 250 else "กลิ่นแรง")
+            voc_color = COLOR_FRESH if voc <= 150 else ("#B45309" if voc <= 250 else COLOR_BAD)
+            self.voc_label.setText(f"{voc} · {voc_desc}")
+            self.voc_label.setStyleSheet(f"font-size: 20px; font-weight: bold; color: {voc_color};")
 
         if light is not None:
             if light >= 100:
-                self.door_label.setText("สถานะประตู: เปิดอยู่ (Open)")
-                self.door_label.setStyleSheet("font-size: 14px; color: #F59E0B;")
+                self.door_label.setText("เปิด (Open)")
+                self.door_label.setStyleSheet("font-size: 17px; font-weight: bold; color: #B45309;")
             else:
-                self.door_label.setText("สถานะประตู: ปิดสนิท (Closed)")
-                self.door_label.setStyleSheet("font-size: 14px; color: #10B981;")
+                self.door_label.setText("ปิดสนิท")
+                self.door_label.setStyleSheet(
+                    f"font-size: 17px; font-weight: bold; color: {COLOR_FRESH};"
+                )
 
     def update_door_state(self, is_open: bool, ajar_duration_s: float = 0.0) -> None:
-        """Updates door pill and diagnostics card."""
+        """Updates top door pill badge."""
         if is_open:
+            is_overdue = ajar_duration_s >= 15.0
+            bg = COLOR_BAD if is_overdue else COLOR_SOON
+            fg = COLOR_ON_BAD if is_overdue else COLOR_ON_SOON
             self.pill_door.setText(f"Door: Open ({int(ajar_duration_s)}s)")
-            self.pill_door.setStyleSheet(
-                "background-color: #78350F; color: #FBBF24; font-size: 11px; font-weight: bold; padding: 4px 8px; border-radius: 4px;"
-            )
+            self.pill_door.setStyleSheet(pill_style(bg, fg, font_px=12))
         else:
             self.pill_door.setText("Door: Closed")
-            self.pill_door.setStyleSheet(
-                "background-color: #1E3A8A; color: #60A5FA; font-size: 11px; font-weight: bold; padding: 4px 8px; border-radius: 4px;"
-            )
+            self.pill_door.setStyleSheet(pill_style(COLOR_FRESH, COLOR_ON_FRESH, font_px=12))
 
     def update_wifi_status(self, is_online: bool) -> None:
+        """Updates top Wi-Fi connectivity badge."""
         if is_online:
             self.pill_wifi.setText("Wi-Fi: OK")
-            self.pill_wifi.setStyleSheet(
-                "background-color: #064E3B; color: #34D399; font-size: 11px; font-weight: bold; padding: 4px 6px; border-radius: 4px;"
-            )
+            self.pill_wifi.setStyleSheet(pill_style(COLOR_FRESH, COLOR_ON_FRESH, font_px=12))
         else:
             self.pill_wifi.setText("Wi-Fi: Offline")
-            self.pill_wifi.setStyleSheet(
-                "background-color: #7F1D1D; color: #FCA5A5; font-size: 11px; font-weight: bold; padding: 4px 6px; border-radius: 4px;"
-            )
+            self.pill_wifi.setStyleSheet(pill_style(COLOR_BAD, COLOR_ON_BAD, font_px=12))
 
     def update_node_status(
         self,
@@ -391,22 +525,23 @@ class IdleScreen(QWidget):
         is_connected: bool = False,
         is_offline: bool = False,
     ) -> None:
-        """Updates Gray->Green->Yellow->Red connection indicator for Node 'F' or 'D'."""
+        """Updates Gray->Green->Amber->Red connection indicator for Node 'F' or 'D'."""
         pill_text, detail_text, bg_hex, fg_hex = format_node_badge(
             node_id,
             age_s,
             is_connected=is_connected,
             is_offline=is_offline,
         )
-        target_pill = self.pill_node_d if node_id == "D0" else self.pill_node_f
-        target_pill.setText(pill_text)
-        target_pill.setStyleSheet(
-            f"background-color: {bg_hex}; color: {fg_hex}; font-size: 11px; font-weight: bold; padding: 4px 6px; border-radius: 4px;"
-        )
-        self._node_details[node_id] = detail_text
-        self.nodes_label.setText(
-            f"โหนด (Nodes): {self._node_details['F0']} | {self._node_details['D0']}"
-        )
+        badge_css = pill_style(bg_hex, fg_hex, font_px=12)
+        if node_id.startswith("F"):
+            self.pill_node_f.setText(pill_text)
+            self.pill_node_f.setStyleSheet(badge_css)
+            self._f_status_text = detail_text
+        elif node_id.startswith("D"):
+            self.pill_node_d.setText(pill_text)
+            self.pill_node_d.setStyleSheet(badge_css)
+            self._d_status_text = detail_text
+        self.nodes_label.setText(f"{self._f_status_text} | {self._d_status_text}")
 
     def update_motion_state(
         self,
@@ -414,38 +549,27 @@ class IdleScreen(QWidget):
         idle_duration_s: float = 0.0,
         hw_status: str = "",
     ) -> None:
-        """Updates PIR motion sensor badge and debug status card."""
-        hw_suffix = f" [{hw_status}]" if hw_status else ""
+        """Updates PIR motion sensor badge and concise status label."""
+        hw_suffix = f" ({hw_status})" if hw_status else ""
         if has_motion:
-            self.pill_motion.setText(f"Motion: DETECTED{hw_suffix}")
-            self.pill_motion.setStyleSheet(
-                "background-color: #064E3B; color: #34D399; font-size: 11px; font-weight: bold; padding: 4px 8px; border-radius: 4px;"
+            self.pill_motion.setText(f"DETECTED{hw_suffix}")
+            self.pill_motion.setStyleSheet(pill_style(COLOR_FRESH, COLOR_ON_FRESH, font_px=12))
+            self.motion_label.setText(f"พบการเคลื่อนไหว{hw_suffix}")
+            self.motion_label.setStyleSheet(
+                f"font-size: 15px; font-weight: bold; color: {COLOR_FRESH};"
             )
-            self.motion_label.setText(
-                f"ตรวจจับการเคลื่อนไหว: พบการเคลื่อนไหว! (Motion Detected){hw_suffix}"
-            )
-            self.motion_label.setStyleSheet("font-size: 13px; font-weight: bold; color: #10B981;")
             return
 
         secs = max(0, int(idle_duration_s))
         if secs < 60:
-            self.pill_motion.setText(f"Motion: None ({secs}s){hw_suffix}")
-            self.motion_label.setText(
-                f"ตรวจจับการเคลื่อนไหว: นิ่งมาแล้ว {secs} วินาที (No Motion: {secs}s){hw_suffix}"
-            )
+            self.pill_motion.setText(f"นิ่ง {secs}s{hw_suffix}")
+            self.motion_label.setText(f"นิ่ง {secs} วินาที{hw_suffix}")
         else:
-            mins, rem_s = divmod(secs, 60)
-            self.pill_motion.setText(f"Motion: None ({mins}m {rem_s:02d}s){hw_suffix}")
-            self.motion_label.setText(
-                f"ตรวจจับการเคลื่อนไหว: นิ่งมาแล้ว {mins} นาที {rem_s} วินาที (No Motion: {secs}s){hw_suffix}"
-            )
-
-        pill_bg = "#78350F" if "Disabled" in hw_status or "Sim" in hw_status else "#1F2937"
-        pill_fg = "#FBBF24" if "Disabled" in hw_status or "Sim" in hw_status else "#9CA3AF"
-        self.pill_motion.setStyleSheet(
-            f"background-color: {pill_bg}; color: {pill_fg}; font-size: 11px; font-weight: bold; padding: 4px 8px; border-radius: 4px;"
-        )
-        self.motion_label.setStyleSheet(f"font-size: 13px; color: {pill_fg};")
+            mins, rem = divmod(secs, 60)
+            self.pill_motion.setText(f"{mins}m {rem}s{hw_suffix}")
+            self.motion_label.setText(f"นิ่ง {mins} นาที {rem} วินาที{hw_suffix}")
+        self.pill_motion.setStyleSheet(pill_style(COLOR_WAIT_BG, COLOR_WAIT_FG, font_px=12))
+        self.motion_label.setStyleSheet(f"font-size: 15px; font-weight: bold; color: {COLOR_INK};")
 
     def update_person_state(
         self,
@@ -453,21 +577,17 @@ class IdleScreen(QWidget):
         confidence: float = 0.0,
         person_count: int = 0,
     ) -> None:
-        """Updates YOLO person detection badge and debug status label."""
+        """Updates YOLO person detection badge and concise status label."""
         if is_person:
             pct = round(max(0.0, min(1.0, confidence)) * 100)
             count = max(1, person_count)
-            self.pill_person.setText(f"YOLO: Person ({pct}%)")
-            self.pill_person.setStyleSheet(
-                "background-color: #78350F; color: #FBBF24; font-size: 11px; font-weight: bold; padding: 4px 8px; border-radius: 4px;"
-            )
-            self.person_label.setText(f"ตรวจจับบุคคล (YOLO): พบคน! {count} คน (Person {pct}%)")
-            self.person_label.setStyleSheet("font-size: 13px; font-weight: bold; color: #FBBF24;")
+            self.pill_person.setText(f"Person {pct}%")
+            self.pill_person.setStyleSheet(pill_style(COLOR_SOON, COLOR_ON_SOON, font_px=12))
+            self.person_label.setText(f"พบคน {count} คน ({pct}%)")
+            self.person_label.setStyleSheet("font-size: 15px; font-weight: bold; color: #B45309;")
             return
 
-        self.pill_person.setText("YOLO: Clear")
-        self.pill_person.setStyleSheet(
-            "background-color: #1F2937; color: #9CA3AF; font-size: 11px; font-weight: bold; padding: 4px 8px; border-radius: 4px;"
-        )
-        self.person_label.setText("ตรวจจับบุคคล (YOLO): ไม่พบคน (No Person)")
-        self.person_label.setStyleSheet("font-size: 13px; color: #9CA3AF;")
+        self.pill_person.setText("Clear")
+        self.pill_person.setStyleSheet(pill_style(COLOR_WAIT_BG, COLOR_WAIT_FG, font_px=12))
+        self.person_label.setText("ไม่พบคน")
+        self.person_label.setStyleSheet(f"font-size: 15px; font-weight: bold; color: {COLOR_INK};")

@@ -58,12 +58,11 @@ class _SleepOverlay(QFrame):
         layout.addStretch()
 
         hint = QLabel(
-            "โหมดประหยัดพลังงาน — โบกมือหน้าเซนเซอร์หรือแตะหน้าจอเพื่อปลุก\n"
-            "Display Sleeping — Wave at PIR sensor or tap to wake",
+            "พักหน้าจอ — โบกมือหรือแตะเพื่อปลุก\nDisplay Sleeping — Wave or tap to wake",
             self,
         )
         hint.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        hint.setStyleSheet("color: #1F2937; font-size: 12px; background-color: #000000;")
+        hint.setStyleSheet("color: #1F2937; font-size: 14px; background-color: #000000;")
         layout.addWidget(hint)
         self.hide()
 

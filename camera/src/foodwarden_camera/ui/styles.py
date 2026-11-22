@@ -1,127 +1,144 @@
-"""Dark-mode UI Stylesheet and layout metrics for 5-inch 800x480 LCD."""
+"""FoodWarden Pi-top 5-inch (800x480) LCD theme matching the Web Prototype."""
+
+from __future__ import annotations
 
 MAIN_WINDOW_WIDTH = 800
 MAIN_WINDOW_HEIGHT = 480
 
-DARK_STYLESHEET = """
-QWidget {
-    background-color: #121212;
-    color: #FFFFFF;
-    font-family: 'Segoe UI', 'Noto Sans Thai', 'Tahoma', sans-serif;
-}
+FONT_FAMILY = "'Lexend', 'K2D', 'Noto Sans Thai', 'Segoe UI', 'Tahoma', sans-serif"
 
-QFrame.card {
-    background-color: #1E1E1E;
-    border-radius: 8px;
-    border: 1px solid #2D2D2D;
-}
+# Web Prototype light pale-lime design tokens (FoodWarden-Web-Prototype)
+COLOR_BG = "#E9F2D2"
+COLOR_SURFACE = "#FFFFFF"
+COLOR_SURFACE_2 = "#F2F7E3"
+COLOR_INK = "#161A12"
+COLOR_MUTED = "#59644E"
+COLOR_RULE = "#D3E0B0"
 
-QFrame.card-highlight {
-    background-color: #242A38;
-    border-radius: 8px;
-    border: 2px solid #3B82F6;
-}
+COLOR_LIME = "#B4D44E"
+COLOR_LIME_INK = "#1F2B08"
+COLOR_LIME_SOFT = "#DCEBB0"
+COLOR_LEAF = "#4E7A12"
 
-QLabel.title-th {
-    font-size: 20px;
+COLOR_DARK = "#161A12"
+COLOR_ON_DARK = "#F4F9E6"
+COLOR_ON_DARK_2 = "#C9E07A"
+
+COLOR_FRESH = "#2E6B1F"
+COLOR_ON_FRESH = "#FFFFFF"
+COLOR_SOON = "#F2A33A"
+COLOR_ON_SOON = "#2B1A02"
+COLOR_BAD = "#D6432C"
+COLOR_ON_BAD = "#FFFFFF"
+COLOR_TAKE_SOLID = "#E4581F"
+COLOR_ON_TAKE = "#FFFFFF"
+
+COLOR_WAIT_BG = "#D8E2C2"
+COLOR_WAIT_FG = "#4B5542"
+
+
+def pill_style(
+    bg: str,
+    fg: str,
+    *,
+    font_px: int = 13,
+    pad_v: int = 4,
+    pad_h: int = 10,
+    radius: int = 12,
+    border: str | None = None,
+) -> str:
+    """Returns QLabel pill stylesheet matching Web Prototype rounded badges."""
+    border_css = f" border: 1px solid {border};" if border else ""
+    return (
+        f"background-color: {bg}; color: {fg}; font-size: {font_px}px; "
+        f"font-weight: bold; padding: {pad_v}px {pad_h}px; "
+        f"border-radius: {radius}px;{border_css}"
+    )
+
+
+def card_style(
+    object_name: str,
+    *,
+    bg: str = COLOR_SURFACE,
+    border: str = COLOR_RULE,
+    radius: int = 16,
+) -> str:
+    """Returns QFrame card stylesheet with scoped selector."""
+    return (
+        f"#{object_name} {{ background-color: {bg}; "
+        f"border: 1.5px solid {border}; border-radius: {radius}px; }}"
+    )
+
+
+THEME_STYLESHEET = f"""
+QWidget {{
+    background-color: {COLOR_BG};
+    color: {COLOR_INK};
+    font-family: {FONT_FAMILY};
+}}
+
+QLabel {{
+    background-color: transparent;
+}}
+
+QPushButton {{
+    background-color: {COLOR_SURFACE};
+    color: {COLOR_INK};
+    border: 1.5px solid {COLOR_RULE};
+    border-radius: 12px;
+    padding: 8px 14px;
     font-weight: bold;
-    color: #FFFFFF;
-}
+    font-size: 14px;
+}}
 
-QLabel.title-en {
-    font-size: 13px;
-    color: #9CA3AF;
-}
+QPushButton:hover {{
+    background-color: {COLOR_SURFACE_2};
+    border-color: {COLOR_LEAF};
+}}
 
-QLabel.prompt-th {
-    font-size: 18px;
-    font-weight: 600;
-    color: #E5E7EB;
-}
+QPushButton:pressed {{
+    background-color: {COLOR_LIME_SOFT};
+}}
 
-QLabel.prompt-en {
-    font-size: 13px;
-    color: #9CA3AF;
-}
-
-QLabel.item-name-th {
-    font-size: 24px;
-    font-weight: bold;
-    color: #10B981;
-}
-
-QLabel.item-name-en {
+QLineEdit, QSpinBox {{
+    background-color: {COLOR_SURFACE_2};
+    color: {COLOR_INK};
+    border: 1.5px solid {COLOR_RULE};
+    border-radius: 10px;
+    padding: 6px 10px;
     font-size: 16px;
-    color: #D1D5DB;
-}
-
-QLabel.countdown-text {
-    font-size: 16px;
     font-weight: bold;
-    color: #F59E0B;
-}
+}}
 
-QLabel.pill-button-o {
-    background-color: #059669;
-    color: white;
-    font-weight: bold;
-    font-size: 14px;
-    border-radius: 6px;
-    padding: 6px 14px;
-}
+QLineEdit:focus, QSpinBox:focus {{
+    border: 2px solid {COLOR_LEAF};
+    background-color: {COLOR_SURFACE};
+}}
 
-QLabel.pill-button-x {
-    background-color: #DC2626;
-    color: white;
-    font-weight: bold;
-    font-size: 14px;
-    border-radius: 6px;
-    padding: 6px 14px;
-}
-
-QLabel.pill-button-nav {
-    background-color: #2563EB;
-    color: white;
-    font-weight: bold;
-    font-size: 14px;
-    border-radius: 6px;
-    padding: 6px 14px;
-}
-
-QLabel.status-pill-ok {
-    background-color: #064E3B;
-    color: #34D399;
-    font-size: 12px;
-    font-weight: 600;
-    border-radius: 4px;
-    padding: 3px 8px;
-}
-
-QLabel.status-pill-warn {
-    background-color: #78350F;
-    color: #FBBF24;
-    font-size: 12px;
-    font-weight: 600;
-    border-radius: 4px;
-    padding: 3px 8px;
-}
-
-QListWidget {
-    background-color: #1A1A1A;
-    border: 1px solid #333333;
-    border-radius: 6px;
+QListWidget {{
+    background-color: {COLOR_SURFACE};
+    color: {COLOR_INK};
+    border: 1.5px solid {COLOR_RULE};
+    border-radius: 14px;
+    padding: 4px;
     outline: 0;
-}
+}}
 
-QListWidget::item {
-    padding: 10px;
-    border-bottom: 1px solid #262626;
-    border-radius: 4px;
-}
+QListWidget::item {{
+    background-color: {COLOR_SURFACE_2};
+    color: {COLOR_INK};
+    padding: 10px 12px;
+    margin: 3px 2px;
+    border: 1.5px solid {COLOR_RULE};
+    border-radius: 10px;
+}}
 
-QListWidget::item:selected {
-    background-color: #1E3A8A;
-    border: 2px solid #3B82F6;
-    color: #FFFFFF;
-}
+QListWidget::item:selected {{
+    background-color: {COLOR_DARK};
+    border: 2px solid {COLOR_LIME};
+    color: {COLOR_ON_DARK};
+}}
 """
+
+# Backward-compatible export expected by FoodWardenMainWindow
+DARK_STYLESHEET = THEME_STYLESHEET

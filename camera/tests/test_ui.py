@@ -280,25 +280,28 @@ def test_node_connection_badges_and_display_sleep_overlay(
         initial_door_close_timeout_s=15,
     )
 
-    # Gray -> Green -> Yellow -> Red progression for Node 'F' and Node 'D'
+    # Wait -> Fresh Green -> Amber Soon -> Red Critical progression for Node 'F' and Node 'D'
     window.update_node_status("F0", None)
     assert "Wait" in window.idle_screen.pill_node_f.text()
-    assert "#374151" in window.idle_screen.pill_node_f.styleSheet()
+    assert "#D8E2C2" in window.idle_screen.pill_node_f.styleSheet()
 
     window.update_node_status("F0", 1.0, is_connected=True)
     assert "LIVE" in window.idle_screen.pill_node_f.text()
-    assert "#064E3B" in window.idle_screen.pill_node_f.styleSheet()
+    assert "#2E6B1F" in window.idle_screen.pill_node_f.styleSheet()
 
     window.update_node_status("F0", 75.0)
     assert "1m15s" in window.idle_screen.pill_node_f.text()
-    assert "#78350F" in window.idle_screen.pill_node_f.styleSheet()
+    assert "#F2A33A" in window.idle_screen.pill_node_f.styleSheet()
 
     window.update_node_status("D0", 25.0, is_offline=True)
     assert "Off 25s" in window.idle_screen.pill_node_d.text()
-    assert "#7F1D1D" in window.idle_screen.pill_node_d.styleSheet()
+    assert "#D6432C" in window.idle_screen.pill_node_d.styleSheet()
 
-    # Sleep overlay renders solid black #000000 and wakes cleanly on button press
+    # Awake renders pale-lime Web Prototype canvas (#E9F2D2); Sleep renders solid black #000000
     window.show()
+    qapp.processEvents()
+    assert window.grab().toImage().pixelColor(4, 4).name() == "#e9f2d2"
+
     window.set_display_sleep(True)
     qapp.processEvents()
     assert window.is_display_sleeping is True

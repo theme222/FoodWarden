@@ -614,23 +614,23 @@ class GatewayOrchestrator:
         """Displays a bilingual alert matching the failure kind instead of blaming Wi-Fi."""
         alerts: dict[CloudErrorKind, tuple[str, str, bool]] = {
             "unidentifiable": (
-                f"ไม่พบอาหารขณะ{action_th} กรุณาถือให้ชัดแล้วลองใหม่",
-                f"Food not identified during {action_en} — hold clearly and retry",
+                f"ไม่พบอาหารขณะ{action_th} — ถือให้ชัดแล้วลองใหม่",
+                f"Food not detected ({action_en}) — retry",
                 False,
             ),
             "auth": (
-                "Token เชื่อมต่อไม่ถูกต้อง กรุณาตรวจสอบ GATEWAY_TOKEN",
+                "Token ไม่ถูกต้อง — ตรวจ GATEWAY_TOKEN",
                 "Invalid Gateway Token — check Settings",
                 True,
             ),
             "rate_limited": (
-                "ใช้งาน AI เกินโควตาชั่วคราว กรุณารอสักครู่",
-                "AI rate limit reached — please wait a moment",
+                "ใช้งาน AI เกินโควตา — รอสักครู่",
+                "AI rate limit — please wait",
                 False,
             ),
             "rejected": (
-                f"ข้อมูล{action_th}ไม่ถูกต้อง กรุณาลองถ่ายใหม่",
-                f"{action_en.capitalize()} request rejected — please retake photo",
+                f"ข้อมูล{action_th}ไม่ถูกต้อง — ลองถ่ายใหม่",
+                f"{action_en.capitalize()} rejected — retake photo",
                 False,
             ),
         }

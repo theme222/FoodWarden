@@ -316,8 +316,8 @@ def test_dark_box_ble_does_not_reset_active_door_ir_and_indicators_update(
     test_orchestrator._on_ble_telemetry(packet)
 
     test_orchestrator.mqtt.set_door_state.assert_not_called()
-    assert "#064E3B" in test_orchestrator.window.idle_screen.pill_node_f.styleSheet()
-    assert "#064E3B" in test_orchestrator.window.idle_screen.pill_node_d.styleSheet()
+    assert "#2E6B1F" in test_orchestrator.window.idle_screen.pill_node_f.styleSheet()
+    assert "#2E6B1F" in test_orchestrator.window.idle_screen.pill_node_d.styleSheet()
     assert "Wi-Fi: OK" == test_orchestrator.window.idle_screen.pill_wifi.text()
     assert "Door: Open (12s)" == test_orchestrator.window.idle_screen.pill_door.text()
 

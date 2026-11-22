@@ -1,8 +1,4 @@
-"""Check-In Screen for FoodWarden 5-inch LCD (800x480).
-
-Handles grocery item review, AI metadata presentation, date adjustment via
-Up/Down buttons, and 5-second auto-confirmation countdown per GOAL.md §2.
-"""
+"""Check-In Flow Screen with Web Prototype styling and high-legibility typography."""
 
 from __future__ import annotations
 
@@ -11,19 +7,55 @@ from datetime import datetime, timedelta
 
 from PyQt6.QtCore import Qt, QTimer
 from PyQt6.QtGui import QImage, QPixmap
-from PyQt6.QtWidgets import (
-    QFrame,
-    QHBoxLayout,
-    QLabel,
-    QVBoxLayout,
-    QWidget,
-)
+from PyQt6.QtWidgets import QFrame, QHBoxLayout, QLabel, QVBoxLayout, QWidget
 
 from foodwarden_camera.models.cloud_cbs import CheckInDraftResult
+from foodwarden_camera.ui.styles import (
+    COLOR_BAD,
+    COLOR_DARK,
+    COLOR_FRESH,
+    COLOR_INK,
+    COLOR_LIME,
+    COLOR_LIME_INK,
+    COLOR_LIME_SOFT,
+    COLOR_MUTED,
+    COLOR_ON_BAD,
+    COLOR_ON_DARK,
+    COLOR_RULE,
+    COLOR_SURFACE,
+    COLOR_SURFACE_2,
+    COLOR_WAIT_BG,
+    COLOR_WAIT_FG,
+    card_style,
+    pill_style,
+)
+
+
+def _create_key_guide(
+    object_name: str,
+    key_text: str,
+    label_text: str,
+    bg_color: str,
+    fg_color: str,
+    parent: QWidget,
+) -> QFrame:
+    """Builds a concise bottom button-guide pill."""
+    pill = QFrame(parent)
+    pill.setObjectName(object_name)
+    pill.setFixedHeight(44)
+    pill.setStyleSheet(card_style(object_name, bg=bg_color, border=bg_color, radius=12))
+    row = QHBoxLayout(pill)
+    row.setContentsMargins(12, 4, 14, 4)
+    row.setSpacing(8)
+    lbl = QLabel(f"[{key_text}] {label_text}", pill)
+    lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
+    lbl.setStyleSheet(f"font-size: 15px; font-weight: bold; color: {fg_color};")
+    row.addWidget(lbl)
+    return pill
 
 
 class CheckInScreen(QWidget):
-    """Bilingual Check-In workflow screen with interactive date editing."""
+    """High-contrast Check-In confirmation screen with date adjustment."""
 
     def __init__(
         self,
@@ -36,11 +68,10 @@ class CheckInScreen(QWidget):
         self.on_confirm = on_confirm_callback
         self.on_cancel = on_cancel_callback
         self.autocomplete_timeout_s = max(1, autocomplete_timeout_s)
-
         self._draft: CheckInDraftResult | None = None
-        self._is_loading: bool = False
+        self._is_loading = False
         self._current_date = datetime.now() + timedelta(days=7)
-        self._selected_segment = 0  # 0: Day, 1: Month, 2: Year
+        self._selected_segment = 0  # 0=Day, 1=Month, 2=Year
         self._countdown_seconds = self.autocomplete_timeout_s
 
         self._countdown_timer = QTimer(self)
@@ -49,160 +80,168 @@ class CheckInScreen(QWidget):
         self._init_ui()
 
     def _init_ui(self) -> None:
-        main_layout = QVBoxLayout(self)
-        main_layout.setContentsMargins(16, 12, 16, 12)
-        main_layout.setSpacing(10)
+        root_layout = QVBoxLayout(self)
+        root_layout.setContentsMargins(14, 12, 14, 12)
+        root_layout.setSpacing(10)
 
-        # 1. Header Bar
+        # Header
         header = QHBoxLayout()
-        header_title = QVBoxLayout()
-        title_th = QLabel("ตรวจรับอาหารเข้าตู้ (Check-In)", self)
-        title_th.setStyleSheet("font-size: 18px; font-weight: bold; color: #FFFFFF;")
-        title_en = QLabel("Review Item & Expiry Date", self)
-        title_en.setStyleSheet("font-size: 11px; color: #9CA3AF;")
-        header_title.addWidget(title_th)
-        header_title.addWidget(title_en)
-        header.addLayout(header_title)
+        title = QLabel("นำเข้าอาหาร", self)
+        title.setStyleSheet(f"font-size: 24px; font-weight: bold; color: {COLOR_INK};")
 
-        header.addStretch()
-
-        self.countdown_label = QLabel(
-            f"ยืนยันอัตโนมัติใน: {self.autocomplete_timeout_s} วินาที (Auto: {self.autocomplete_timeout_s}s)",
-            self,
-        )
+        self.countdown_label = QLabel(f"ยืนยันอัตโนมัติ {self.autocomplete_timeout_s} วิ", self)
         self.countdown_label.setStyleSheet(
-            "font-size: 13px; font-weight: bold; color: #F59E0B; background-color: #2D2310; padding: 4px 10px; border-radius: 4px; border: 1px solid #78350F;"
+            pill_style(COLOR_LIME_SOFT, COLOR_LIME_INK, font_px=15, pad_v=6, pad_h=14)
         )
+
+        header.addWidget(title)
+        header.addStretch()
         header.addWidget(self.countdown_label)
-        main_layout.addLayout(header)
+        root_layout.addLayout(header)
 
-        # 2. Main Content (Captured Image on Left + Item Details on Right)
-        content_layout = QHBoxLayout()
-        content_layout.setSpacing(16)
+        # Main Split: Photo Card | Metadata & Date Card
+        body = QHBoxLayout()
+        body.setSpacing(12)
 
-        # Left: Captured / Cropped Image Frame
-        self.img_frame = QFrame(self)
-        self.img_frame.setStyleSheet(
-            "background-color: #000000; border: 1px solid #333333; border-radius: 6px;"
+        photo_card = QFrame(self)
+        photo_card.setObjectName("CheckInPhotoCard")
+        photo_card.setFixedWidth(290)
+        photo_card.setStyleSheet(
+            card_style("CheckInPhotoCard", bg=COLOR_SURFACE, border=COLOR_RULE, radius=16)
         )
-        self.img_frame.setFixedSize(300, 240)
-        img_inner = QVBoxLayout(self.img_frame)
-        img_inner.setContentsMargins(0, 0, 0, 0)
-        self.image_label = QLabel(self.img_frame)
-        self.image_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        img_inner.addWidget(self.image_label)
-        content_layout.addWidget(self.img_frame)
+        photo_layout = QVBoxLayout(photo_card)
+        photo_layout.setContentsMargins(10, 10, 10, 10)
 
-        # Right: AI Metadata & Date Adjustment Card
+        self.img_frame = QFrame(photo_card)
+        self.img_frame.setObjectName("CheckInImgFrame")
+        self.img_frame.setMinimumSize(266, 240)
+        self.img_frame.setStyleSheet(
+            f"#CheckInImgFrame {{ background-color: {COLOR_DARK}; "
+            f"border: 1.5px solid {COLOR_RULE}; border-radius: 12px; }}"
+        )
+        img_layout = QVBoxLayout(self.img_frame)
+        img_layout.setContentsMargins(4, 4, 4, 4)
+        self.image_label = QLabel("เตรียมภาพ...", self.img_frame)
+        self.image_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.image_label.setStyleSheet(
+            f"color: {COLOR_ON_DARK}; font-size: 16px; font-weight: bold;"
+        )
+        img_layout.addWidget(self.image_label)
+        photo_layout.addWidget(self.img_frame)
+
         self.card = QFrame(self)
+        self.card.setObjectName("CheckInCard")
         self.card.setStyleSheet(
-            "background-color: #1E1E1E; border: 1px solid #2D2D2D; border-radius: 6px;"
+            card_style("CheckInCard", bg=COLOR_SURFACE, border=COLOR_RULE, radius=16)
         )
         card_layout = QVBoxLayout(self.card)
-        card_layout.setContentsMargins(16, 12, 16, 12)
+        card_layout.setContentsMargins(16, 14, 16, 14)
         card_layout.setSpacing(6)
 
-        self.name_th = QLabel("กำลังประมวลผลอาหาร...", self.card)
-        self.name_th.setStyleSheet("font-size: 20px; font-weight: bold; color: #10B981;")
-        self.name_en = QLabel("Analyzing grocery item...", self.card)
-        self.name_en.setStyleSheet("font-size: 14px; color: #D1D5DB;")
+        self.name_th = QLabel("กำลังวิเคราะห์...", self.card)
+        self.name_th.setWordWrap(True)
+        self.name_th.setStyleSheet("font-size: 26px; font-weight: bold; color: #B45309;")
+
+        self.name_en = QLabel("Gemini AI", self.card)
+        self.name_en.setStyleSheet(f"font-size: 16px; font-weight: bold; color: {COLOR_MUTED};")
+
+        self.category_label = QLabel("หมวดหมู่: -", self.card)
+        self.category_label.setStyleSheet(
+            f"font-size: 16px; font-weight: bold; color: {COLOR_INK};"
+        )
+
+        self.storage_label = QLabel("เก็บ: -", self.card)
+        self.storage_label.setWordWrap(True)
+        self.storage_label.setStyleSheet(f"font-size: 15px; color: {COLOR_MUTED};")
+
+        # Expiry Date Tile (#F2F7E3)
+        date_tile = QFrame(self.card)
+        date_tile.setObjectName("ExpiryTile")
+        date_tile.setStyleSheet(
+            card_style("ExpiryTile", bg=COLOR_SURFACE_2, border=COLOR_RULE, radius=12)
+        )
+        date_col = QVBoxLayout(date_tile)
+        date_col.setContentsMargins(12, 8, 12, 10)
+        date_col.setSpacing(6)
+
+        exp_title = QLabel("วันหมดอายุ (วัน / เดือน / ปี)", date_tile)
+        exp_title.setStyleSheet(f"font-size: 14px; font-weight: bold; color: {COLOR_MUTED};")
+
+        date_box = QHBoxLayout()
+        date_box.setSpacing(8)
+
+        self.day_label = QLabel("01", date_tile)
+        self.day_label.setFixedSize(72, 44)
+        self.day_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+
+        sep1 = QLabel("/", date_tile)
+        sep1.setStyleSheet(f"font-size: 20px; font-weight: bold; color: {COLOR_MUTED};")
+
+        self.month_label = QLabel("01", date_tile)
+        self.month_label.setFixedSize(72, 44)
+        self.month_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+
+        sep2 = QLabel("/", date_tile)
+        sep2.setStyleSheet(f"font-size: 20px; font-weight: bold; color: {COLOR_MUTED};")
+
+        self.year_label = QLabel("2026", date_tile)
+        self.year_label.setFixedSize(96, 44)
+        self.year_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+
+        date_box.addWidget(self.day_label)
+        date_box.addWidget(sep1)
+        date_box.addWidget(self.month_label)
+        date_box.addWidget(sep2)
+        date_box.addWidget(self.year_label)
+        date_box.addStretch()
+
+        date_col.addWidget(exp_title)
+        date_col.addLayout(date_box)
+
         card_layout.addWidget(self.name_th)
         card_layout.addWidget(self.name_en)
-
-        self.category_label = QLabel("หมวดหมู่: นมและผลิตภัณฑ์นม (Dairy)", self.card)
-        self.category_label.setStyleSheet("font-size: 13px; color: #9CA3AF;")
         card_layout.addWidget(self.category_label)
-
-        self.storage_label = QLabel("คำแนะนำ: เก็บในช่องแช่เย็นหลัก อุณหภูมิ 0-4°C", self.card)
-        self.storage_label.setStyleSheet("font-size: 12px; color: #9CA3AF;")
         card_layout.addWidget(self.storage_label)
-
-        card_layout.addSpacing(6)
-
-        # Date Editor Segment
-        date_title = QLabel("วันหมดอายุ (Expiry Date) — ปรับด้วย [▲/▼]:", self.card)
-        date_title.setStyleSheet("font-size: 12px; font-weight: bold; color: #60A5FA;")
-        card_layout.addWidget(date_title)
-
-        date_editor_box = QHBoxLayout()
-        date_editor_box.setSpacing(6)
-
-        self.day_label = QLabel("01", self.card)
-        self.month_label = QLabel("01", self.card)
-        self.year_label = QLabel("2026", self.card)
-
-        for lbl in (self.day_label, self.month_label, self.year_label):
-            lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
-            lbl.setFixedSize(64, 34)
-
-        slash1 = QLabel("/", self.card)
-        slash1.setStyleSheet("font-size: 18px; color: #6B7280;")
-        slash2 = QLabel("/", self.card)
-        slash2.setStyleSheet("font-size: 18px; color: #6B7280;")
-
-        date_editor_box.addWidget(self.day_label)
-        date_editor_box.addWidget(slash1)
-        date_editor_box.addWidget(self.month_label)
-        date_editor_box.addWidget(slash2)
-        date_editor_box.addWidget(self.year_label)
-        date_editor_box.addStretch()
-
-        card_layout.addLayout(date_editor_box)
         card_layout.addStretch()
-        content_layout.addWidget(self.card)
+        card_layout.addWidget(date_tile)
 
-        main_layout.addLayout(content_layout)
+        body.addWidget(photo_card)
+        body.addWidget(self.card, stretch=1)
+        root_layout.addLayout(body, stretch=1)
 
-        # 3. Bottom Action Hints
-        action_layout = QHBoxLayout()
-        action_layout.setSpacing(12)
-
-        pill_o = QLabel("[O] ยืนยัน / เลื่อนวัน (Confirm / Next)", self)
-        pill_o.setStyleSheet(
-            "background-color: #059669; color: white; font-weight: bold; font-size: 13px; padding: 6px 12px; border-radius: 6px;"
+        # Bottom Button Guide Bar
+        nav_bar = QHBoxLayout()
+        nav_bar.setSpacing(10)
+        pill_o = _create_key_guide(
+            "CheckInPillO", "O", "ยืนยัน / ถัดไป", COLOR_FRESH, COLOR_ON_BAD, self
         )
-        action_layout.addWidget(pill_o)
-
-        pill_arrows = QLabel("[▲/▼] ปรับวัน (Adjust Date)", self)
-        pill_arrows.setStyleSheet(
-            "background-color: #2563EB; color: white; font-weight: bold; font-size: 13px; padding: 6px 12px; border-radius: 6px;"
+        pill_arrows = _create_key_guide(
+            "CheckInPillArrows", "↑↓", "ปรับวันที่", COLOR_SURFACE, COLOR_INK, self
         )
-        action_layout.addWidget(pill_arrows)
-
-        action_layout.addStretch()
-
-        pill_x = QLabel("[X] ยกเลิก (Cancel)", self)
-        pill_x.setStyleSheet(
-            "background-color: #DC2626; color: white; font-weight: bold; font-size: 13px; padding: 6px 12px; border-radius: 6px;"
-        )
-        action_layout.addWidget(pill_x)
-
-        main_layout.addLayout(action_layout)
-
-    # ==========================================================================
-    # State & Workflow Controls
-    # ==========================================================================
+        pill_x = _create_key_guide("CheckInPillX", "X", "ยกเลิก", COLOR_BAD, COLOR_ON_BAD, self)
+        nav_bar.addWidget(pill_o, stretch=1)
+        nav_bar.addWidget(pill_arrows, stretch=1)
+        nav_bar.addWidget(pill_x, stretch=1)
+        root_layout.addLayout(nav_bar)
 
     def set_autocomplete_timeout(self, seconds: int) -> None:
-        """Updates the inactivity auto-confirm duration in seconds."""
+        """Updates inactivity auto-confirm duration in seconds."""
         self.autocomplete_timeout_s = max(1, seconds)
 
     def _reset_countdown_display(self) -> None:
         self._countdown_seconds = self.autocomplete_timeout_s
-        self.countdown_label.setText(
-            f"ยืนยันอัตโนมัติใน: {self._countdown_seconds} วินาที (Auto: {self._countdown_seconds}s)"
-        )
+        self.countdown_label.setText(f"ยืนยันอัตโนมัติ {self._countdown_seconds} วิ")
 
     def _set_preview_image(self, image_bytes: bytes) -> None:
         if not image_bytes:
             self.image_label.clear()
-            self.image_label.setText("กำลังเตรียมภาพ...\nPreparing image...")
+            self.image_label.setText("เตรียมภาพ...")
             return
         qimg = QImage.fromData(image_bytes)
         if not qimg.isNull():
             pixmap = QPixmap.fromImage(qimg).scaled(
-                self.img_frame.width(),
-                self.img_frame.height(),
+                max(self.img_frame.width() - 8, 258),
+                max(self.img_frame.height() - 8, 228),
                 Qt.AspectRatioMode.KeepAspectRatio,
                 Qt.TransformationMode.SmoothTransformation,
             )
@@ -210,45 +249,43 @@ class CheckInScreen(QWidget):
             self.image_label.setPixmap(pixmap)
 
     def load_loading(self, image_bytes: bytes) -> None:
-        """Immediately shows captured photo while AI metadata is still loading."""
+        """Shows captured photo immediately while Gemini analysis completes."""
         self._countdown_timer.stop()
         self._is_loading = True
         self._draft = None
         self._set_preview_image(image_bytes)
 
-        self.countdown_label.setText("กำลังรอผลจาก AI... (Loading)")
-        self.name_th.setText("กำลังวิเคราะห์อาหารด้วย AI...")
-        self.name_th.setStyleSheet("font-size: 20px; font-weight: bold; color: #F59E0B;")
-        self.name_en.setText("Analyzing item with Gemini... Please wait")
-        self.category_label.setText("หมวดหมู่: กำลังโหลด... (Loading...)")
-        self.storage_label.setText("คำแนะนำ: กำลังโหลด... (Loading...)")
+        self.countdown_label.setText("กำลังรอ AI... (Loading)")
+        self.name_th.setText("กำลังวิเคราะห์...")
+        self.name_th.setStyleSheet("font-size: 26px; font-weight: bold; color: #B45309;")
+        self.name_en.setText("กำลังตรวจสอบกับ Gemini AI")
+        self.category_label.setText("หมวดหมู่: กำลังโหลด...")
+        self.storage_label.setText("เก็บ: กำลังโหลด...")
 
         muted_style = (
-            "font-size: 18px; font-weight: bold; color: #6B7280; "
-            "background-color: #262626; border: 1px solid #3D3D3D; border-radius: 4px;"
+            f"font-size: 22px; font-weight: bold; color: {COLOR_WAIT_FG}; "
+            f"background-color: {COLOR_WAIT_BG}; border: 1.5px solid {COLOR_RULE}; border-radius: 10px;"
         )
         self.day_label.setText("--")
         self.month_label.setText("--")
         self.year_label.setText("----")
-        for lbl in (self.day_label, self.month_label, self.year_label):
-            lbl.setStyleSheet(muted_style)
+        self.day_label.setStyleSheet(muted_style)
+        self.month_label.setStyleSheet(muted_style)
+        self.year_label.setStyleSheet(muted_style)
 
     def load_draft(self, draft: CheckInDraftResult, image_bytes: bytes) -> None:
-        """Loads AI metadata and starts auto-confirm countdown."""
+        """Populates AI result and starts auto-confirm countdown."""
         self._is_loading = False
         self._draft = draft
-
         if image_bytes:
             self._set_preview_image(image_bytes)
 
-        # Populate labels
         self.name_th.setText(draft.name_th)
-        self.name_th.setStyleSheet("font-size: 20px; font-weight: bold; color: #10B981;")
+        self.name_th.setStyleSheet(f"font-size: 26px; font-weight: bold; color: {COLOR_FRESH};")
         self.name_en.setText(f"{draft.name_en} ({draft.confidence * 100:.0f}%)")
-        self.category_label.setText(f"หมวดหมู่: {draft.category_th} ({draft.category})")
-        self.storage_label.setText(f"คำแนะนำ: {draft.storage_recommendation_th}")
+        self.category_label.setText(f"หมวดหมู่: {draft.category_th}")
+        self.storage_label.setText(f"เก็บ: {draft.storage_recommendation_th}")
 
-        # Parse suggested date YYYY-MM-DD
         try:
             self._current_date = datetime.strptime(draft.estimated_expiry_date, "%Y-%m-%d")
         except ValueError:
@@ -256,19 +293,23 @@ class CheckInScreen(QWidget):
 
         self._selected_segment = 0
         self._refresh_date_display()
-
-        # Start configured countdown
         self._reset_countdown_display()
         self._countdown_timer.start(1000)
 
     def _refresh_date_display(self) -> None:
-        """Renders day/month/year segments with visual highlight on active segment."""
+        """Renders day/month/year segments highlighting the active field."""
         self.day_label.setText(f"{self._current_date.day:02d}")
         self.month_label.setText(f"{self._current_date.month:02d}")
         self.year_label.setText(f"{self._current_date.year:04d}")
 
-        active_style = "font-size: 18px; font-weight: bold; color: #FFFFFF; background-color: #1E3A8A; border: 2px solid #3B82F6; border-radius: 4px;"
-        inactive_style = "font-size: 18px; font-weight: bold; color: #D1D5DB; background-color: #262626; border: 1px solid #3D3D3D; border-radius: 4px;"
+        active_style = (
+            f"font-size: 22px; font-weight: bold; color: {COLOR_ON_DARK}; "
+            f"background-color: {COLOR_DARK}; border: 2px solid {COLOR_LIME}; border-radius: 10px;"
+        )
+        inactive_style = (
+            f"font-size: 22px; font-weight: bold; color: {COLOR_INK}; "
+            f"background-color: {COLOR_SURFACE}; border: 1.5px solid {COLOR_RULE}; border-radius: 10px;"
+        )
 
         self.day_label.setStyleSheet(
             active_style if self._selected_segment == 0 else inactive_style
@@ -284,7 +325,7 @@ class CheckInScreen(QWidget):
         """Increments highlighted date segment."""
         if self._is_loading:
             return
-        self._reset_countdown_display()  # Reset countdown on user adjustment
+        self._reset_countdown_display()
         if self._selected_segment == 0:
             self._current_date += timedelta(days=1)
         elif self._selected_segment == 1:
@@ -345,9 +386,7 @@ class CheckInScreen(QWidget):
             self._countdown_timer.stop()
             self._commit()
         else:
-            self.countdown_label.setText(
-                f"ยืนยันอัตโนมัติใน: {self._countdown_seconds} วินาที (Auto: {self._countdown_seconds}s)"
-            )
+            self.countdown_label.setText(f"ยืนยันอัตโนมัติ {self._countdown_seconds} วิ")
 
     def _commit(self) -> None:
         self._countdown_timer.stop()
