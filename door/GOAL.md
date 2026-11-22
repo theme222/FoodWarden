@@ -21,19 +21,19 @@
 ---
 
 ## 2. Use Cases
-- [ ] **Normal Automated Door Closure:** Receive `CLOSE_DOOR` command → sound audible buzzer warning → drive arm forward until IR sensor (`GPIO 32`) detects door closed → retract arm until Limit Switch (`GPIO 33`) ISR fires → publish `SUCCESS`.
-- [ ] **Manual Debug Door Closure (`S2` / `GPIO 14`):** Pressing onboard button `S2` (`GPIO 14`) triggers the exact same door-closing sequence locally for hardware debugging, strictly enforcing all safety rules (INA219 current stall cutoff, IR door-closed stop, Limit Switch ISR, and 30-second motion timeout).
-- [ ] **Physical Obstruction Reflex:** While closing, user's hand or object blocks the door → INA219 current spikes above threshold → immediately brake and reverse arm back to the Home Limit Switch → publish `OBSTRUCTION_ERROR`.
-- [ ] **Vision Human-Approach Software Abort:** Gateway `'C'` detects a person approaching via YOLO and sends `ABORT` over MQTTS → Node `'D'` immediately halts forward push, retracts arm to the Home Limit Switch, and acknowledges abort.
+- [x] **Normal Automated Door Closure:** Receive `CLOSE_DOOR` command → sound audible buzzer warning → drive arm forward until IR sensor (`GPIO 32`) detects door closed (+ 75 ms gasket seal) → retract arm until Limit Switch (`GPIO 33`) ISR fires → publish `SUCCESS`.
+- [x] **Manual Debug Door Closure (`S2` / `GPIO 14`):** Pressing onboard button `S2` (`GPIO 14`) triggers the exact same door-closing sequence locally for hardware debugging, strictly enforcing all safety rules (INA219 current stall cutoff, IR door-closed stop, Limit Switch ISR, and 30-second motion timeout).
+- [x] **Physical Obstruction Reflex:** While closing, user's hand or object blocks the door → INA219 current spikes above threshold (`≥ 225 mA`) → immediately brake and reverse arm back to the Home Limit Switch → publish `OBSTRUCTION_ERROR`.
+- [x] **Vision Human-Approach Software Abort:** Gateway `'C'` detects a person approaching via YOLO and sends `ABORT` over MQTTS → Node `'D'` immediately halts forward push, retracts arm to the Home Limit Switch, and acknowledges abort.
 
 ---
 
 ## 3. Edge Cases & Failure Mode Handlers
-- [ ] **Power Interruption / Reboot Recovery:** On boot, if the Limit Switch (`GPIO 33`) is not depressed, automatically enter `HOMING_ON_BOOT` state and slowly retract the arm until the Limit Switch trips (or timeout) so the arm never blocks the fridge door after a power outage.
-- [ ] **Retraction Mechanical Jam Reflex:** If INA219 current spikes (`≥ 1200 mA`) while the arm is reversing (`RETRACTING` or `HOMING_ON_BOOT`), immediately cut motor power (`motorCoastStop()`), enter `FAULT` state, and enqueue `FAULT_LOCKOUT` with `"RETRACTION_MECHANICAL_JAM"`.
-- [ ] **Hard Motion Timeout Fail-Safe:** Enforce a strict maximum duration of `30 seconds` for any forward closing or reverse retracting motion; if neither the IR sensor nor the Limit Switch trips before timeout, cut motor power immediately, publish `TIMEOUT_ERROR`, and enter `FAULT_LOCKOUT`.
-- [ ] **Wi-Fi / MQTTS Disconnection During Motion:** If Wi-Fi or MQTTS drops while the arm is moving forward, immediately halt forward push and retract to the Home Limit Switch (safe fail-safe default, as vision-based human abort is severed).
-- [ ] **Unplugged INA219 Sensor Defense:** Verify INA219 I2C connectivity before starting motor movement; refuse to drive the motor forward (`FAULT_LOCKOUT`) if the current sensor is unresponsive on `I2C1`.
+- [x] **Power Interruption / Reboot Recovery:** On boot, if the Limit Switch (`GPIO 33`) is not depressed, automatically enter `HOMING_ON_BOOT` state and slowly retract the arm until the Limit Switch trips (or timeout) so the arm never blocks the fridge door after a power outage.
+- [x] **Retraction Mechanical Jam Reflex:** If INA219 current spikes (`≥ 225 mA`) while the arm is reversing (`RETRACTING` or `HOMING_ON_BOOT`), immediately cut motor power (`motorCoastStop()`), enter `FAULT` state, and enqueue `FAULT_LOCKOUT` with `"RETRACTION_MECHANICAL_JAM"`.
+- [x] **Hard Motion Timeout Fail-Safe:** Enforce a strict maximum duration of `30 seconds` for any forward closing or reverse retracting motion; if neither the IR sensor nor the Limit Switch trips before timeout, cut motor power immediately, publish `TIMEOUT_ERROR`, and enter `FAULT_LOCKOUT`.
+- [x] **Wi-Fi / MQTTS Disconnection During Motion:** If Wi-Fi or MQTTS drops while the arm is moving forward, immediately halt forward push and retract to the Home Limit Switch (safe fail-safe default, as vision-based human abort is severed).
+- [x] **Unplugged INA219 Sensor Defense:** Verify INA219 I2C connectivity before starting motor movement; refuse to drive the motor forward (`FAULT_LOCKOUT`) if the current sensor is unresponsive on `I2C0`.
 
 ---
 

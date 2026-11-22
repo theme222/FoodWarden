@@ -169,6 +169,9 @@ inline void vMqttCommTask(void* pvParameters) {
   (void)pvParameters;
 
   WiFi.mode(WIFI_STA);
+  // Allow WPA1 (in addition to WPA2) so Node 'D' can join the Pi-top AP
+  // (`raspberrypi-27D7` advertises WPA1); MQTT traffic remains TLS-encrypted.
+  WiFi.setMinSecurity(WIFI_AUTH_WPA_PSK);
   Serial.printf("[WIFI] Connecting to SSID '%s'...\n", WIFI_SSID);
   WiFi.begin(WIFI_SSID, WIFI_PASSWORD);
 
