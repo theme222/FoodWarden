@@ -5,6 +5,7 @@ from __future__ import annotations
 from PyQt6.QtCore import QTimer
 from PyQt6.QtWidgets import QFrame, QHBoxLayout, QLabel, QVBoxLayout, QWidget
 
+from foodwarden_camera.ui.i18n import get_language
 from foodwarden_camera.ui.styles import (
     COLOR_BAD,
     COLOR_FRESH,
@@ -41,6 +42,16 @@ class AlertBanner(QFrame):
         self._timer.setSingleShot(True)
         self._timer.timeout.connect(self.hide)
 
+    def _set_messages(self, message_th: str, message_en: str) -> None:
+        if get_language() == "en":
+            self.label_th.setText(message_en or message_th)
+            self.label_en.setText("")
+            self.label_en.hide()
+        else:
+            self.label_th.setText(message_th)
+            self.label_en.setText(message_en)
+            self.label_en.setVisible(bool(message_en))
+
     def _apply_severity_style(self, *, is_critical: bool, is_success: bool = False) -> None:
         if is_success:
             bg, fg = COLOR_FRESH, COLOR_ON_FRESH
@@ -58,9 +69,12 @@ class AlertBanner(QFrame):
         is_critical: bool = True,
         duration_ms: int = 5000,
     ) -> None:
-        """Shows bilingual alert with auto-hide timer."""
-        self.label_th.setText(message_th)
-        self.label_en.setText(message_en)
+        """Shows the alert with auto-hide timer.
+
+        Thai UI: Thai headline + English translation underneath (bilingual).
+        English UI: English headline only.
+        """
+        self._set_messages(message_th, message_en)
         self._apply_severity_style(is_critical=is_critical)
 
         self.show()
@@ -96,8 +110,7 @@ class AlertBanner(QFrame):
 
     def show_success(self, message_th: str, message_en: str, duration_ms: int = 4000) -> None:
         """Green confirmation banner (e.g. a save that finished after leaving the result card)."""
-        self.label_th.setText(message_th)
-        self.label_en.setText(message_en)
+        self._set_messages(message_th, message_en)
         self._apply_severity_style(is_critical=False, is_success=True)
         self.show()
         if duration_ms > 0:

@@ -25,6 +25,16 @@ from PyQt6.QtWidgets import (
 
 from foodwarden_camera.hardware.buttons import ButtonController, ButtonType
 from foodwarden_camera.models.cloud_cbs import CheckInDraftResult, CheckOutCandidate
+from foodwarden_camera.ui.fonts import load_bundled_fonts
+from foodwarden_camera.ui.i18n import (
+    DEFAULT_LANGUAGE,
+    bind_text,
+    get_language,
+    pick,
+    set_language,
+    t,
+    t_pair,
+)
 from foodwarden_camera.ui.screens.alert_overlay import AlertBanner
 from foodwarden_camera.ui.screens.checkin_screen import CheckInScreen
 from foodwarden_camera.ui.screens.checkout_screen import CheckOutScreen
@@ -77,10 +87,7 @@ class _SleepOverlay(QFrame):
         layout.setContentsMargins(20, 20, 20, 20)
         layout.addStretch()
 
-        hint = QLabel(
-            "พักหน้าจอ — โบกมือหรือแตะเพื่อปลุก\nDisplay Sleeping — Wave or tap to wake",
-            self,
-        )
+        hint = bind_text(QLabel(self), "sleep.hint")
         hint.setAlignment(Qt.AlignmentFlag.AlignCenter)
         hint.setStyleSheet("color: #1F2937; font-size: 14px; background-color: #000000;")
         layout.addWidget(hint)
@@ -142,6 +149,8 @@ class FoodWardenMainWindow(QMainWindow):
         sleep_timeout_s: int = 600,
         initial_pir_gpio_pin: int = 22,
         initial_door_close_timeout_s: int = 60,
+        on_save_language: Callable[[str], None] | None = None,
+        initial_language: str = DEFAULT_LANGUAGE,
     ) -> None:
         super().__init__()
         self.button_controller = button_controller
@@ -160,6 +169,11 @@ class FoodWardenMainWindow(QMainWindow):
         self._current_sleep_s = sleep_timeout_s
         self._current_pir_gpio_pin = initial_pir_gpio_pin
         self._current_door_close_s = initial_door_close_timeout_s
+        self.on_save_language = on_save_language
+
+        # Fonts + language must be ready before any widget is built.
+        load_bundled_fonts()
+        set_language(initial_language)
         self._is_display_sleeping = False
 
         self.setWindowTitle("FoodWarden Gateway (Node 'C')")
@@ -222,6 +236,7 @@ class FoodWardenMainWindow(QMainWindow):
             on_quit=self.quit_application,
             on_save_pir_pin=self._handle_pir_pin_saved,
             on_save_door_close_timeout=self._handle_door_close_timeout_saved,
+            on_save_language=self._handle_language_saved,
             initial_token=self._current_token,
             initial_autocomplete_s=self._current_autocomplete_s,
             initial_sleep_s=self._current_sleep_s,
@@ -368,6 +383,7 @@ class FoodWardenMainWindow(QMainWindow):
             self._current_pir_gpio_pin,
             self._current_door_close_s,
         )
+        self.settings_screen.set_language_choice(get_language())
         self.stack.setCurrentIndex(3)
         logger.info("Transitioned to Settings screen (mouse-only)")
 
@@ -559,6 +575,21 @@ class FoodWardenMainWindow(QMainWindow):
         if self.on_save_pir_pin:
             self.on_save_pir_pin(pir_gpio_pin)
 
+    def _handle_language_saved(self, lang: str) -> None:
+        """Applies a language chosen in Settings immediately and persists it."""
+        if lang == get_language():
+            return
+        self.apply_language(lang)
+        if self.on_save_language:
+            self.on_save_language(get_language())
+
+    def apply_language(self, lang: str) -> None:
+        """Switches every screen to ``lang`` ('th' / 'en') without restarting."""
+        set_language(lang)
+        self.idle_screen.retranslate()
+        self.settings_screen.set_language_choice(get_language())
+        logger.info("UI language set to %s", get_language())
+
     def _handle_door_close_timeout_saved(self, door_close_s: int) -> None:
         self._current_door_close_s = max(3, door_close_s)
         if self.on_save_door_close_timeout:
@@ -575,8 +606,8 @@ class FoodWardenMainWindow(QMainWindow):
             badge = None
         self.confirm_screen.show_confirm(
             "checkin",
-            draft.name_th,
-            f"หมดอายุ {_format_thai_date(expiry_date)}",
+            pick(draft.name_th, draft.name_en),
+            t("common.expires_on", date=_format_thai_date(expiry_date)),
             badge,
             self.checkin_screen.current_pixmap,
         )
@@ -592,8 +623,8 @@ class FoodWardenMainWindow(QMainWindow):
             badge = None
         self.confirm_screen.show_confirm(
             "checkout",
-            candidate.name_th,
-            f"หมดอายุ {_format_thai_date(candidate.expiry_date)}",
+            pick(candidate.name_th, candidate.name_en),
+            t("common.expires_on", date=_format_thai_date(candidate.expiry_date)),
             badge,
             self.checkout_screen.current_pixmap,
         )
@@ -638,7 +669,7 @@ class FoodWardenMainWindow(QMainWindow):
     def _handle_checkout_timed_out(self, candidate: CheckOutCandidate) -> None:
         """Check-Out countdown expired: nothing is removed; tell the user which item."""
         logger.info("Check-out timed out; item NOT removed: %s", candidate.item_id)
-        self.result_screen.show_skipped("checkout", candidate.name_th)
+        self.result_screen.show_skipped("checkout", pick(candidate.name_th, candidate.name_en))
         self.stack.setCurrentIndex(IDX_RESULT)
 
     # --- Commit + outcome card ------------------------------------------------
@@ -646,14 +677,14 @@ class FoodWardenMainWindow(QMainWindow):
     def _handle_checkin_confirmed(self, draft: CheckInDraftResult, expiry_date: str) -> None:
         logger.info("Check-in confirmed with expiry: %s", expiry_date)
         # Show "saving" first: the commit callback may report its result synchronously.
-        self.result_screen.show_saving("checkin", draft.name_th)
+        self.result_screen.show_saving("checkin", pick(draft.name_th, draft.name_en))
         self.stack.setCurrentIndex(IDX_RESULT)
         if self.on_commit_checkin:
             self.on_commit_checkin(draft, expiry_date)
 
     def _handle_checkout_confirmed(self, candidate: CheckOutCandidate) -> None:
         logger.info("Check-out confirmed for item: %s", candidate.item_id)
-        self.result_screen.show_saving("checkout", candidate.name_th)
+        self.result_screen.show_saving("checkout", pick(candidate.name_th, candidate.name_en))
         self.stack.setCurrentIndex(IDX_RESULT)
         if self.on_commit_checkout:
             self.on_commit_checkout(candidate)
@@ -679,22 +710,18 @@ class FoodWardenMainWindow(QMainWindow):
             self.result_screen.show_outcome(cast(ResultStatus, status), message)
             return
         # User already left the card: fall back to the top banner.
-        verb_th = "นำเข้า" if kind == "checkin" else "นำออก"
-        verb_en = "Checked in" if kind == "checkin" else "Checked out"
+        side = "in" if kind == "checkin" else "out"
         if status == "success":
-            self.alert_banner.show_success(f"{verb_th}แล้ว: {item_name}", f"{verb_en}: {item_name}")
+            self.alert_banner.show_success(*t_pair(f"banner.{side}_done", name=item_name))
         elif status == "queued":
-            self.alert_banner.show_alert(
-                f"บันทึก{verb_th}ไว้ในเครื่อง: {item_name}",
-                "Saved offline — will sync when online",
-                is_critical=False,
-            )
+            th, en = t_pair(f"banner.{side}_queued", name=item_name)
+            sub_th, sub_en = t_pair("banner.queued_sub")
+            self.alert_banner.show_alert(f"{th} — {sub_th}", f"{en} — {sub_en}", is_critical=False)
         elif status == "failed":
-            self.alert_banner.show_alert(
-                f"{verb_th}ไม่สำเร็จ: {item_name}",
-                message or f"{verb_en} failed — please retry",
-                is_critical=True,
-            )
+            th, en = t_pair(f"banner.{side}_failed", name=item_name)
+            _, retry_en = t_pair("banner.retry")
+            # ``message`` is already in the current UI language (built by the orchestrator).
+            self.alert_banner.show_alert(th, message or f"{en} — {retry_en}", is_critical=True)
 
     # ==========================================================================
     # Dev / PC Keyboard Navigation Fallback

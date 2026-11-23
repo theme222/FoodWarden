@@ -20,6 +20,7 @@ from typing import Literal
 from PyQt6.QtCore import Qt, QTimer
 from PyQt6.QtWidgets import QFrame, QLabel, QVBoxLayout, QWidget
 
+from foodwarden_camera.ui.i18n import bind_text, t
 from foodwarden_camera.ui.styles import (
     COLOR_BAD,
     COLOR_DARK,
@@ -95,7 +96,7 @@ class ResultScreen(QWidget):
             f"font-size: {FS_BODY}px; font-weight: bold; color: {COLOR_MUTED};"
         )
 
-        self.hint_label = QLabel("กดปุ่มใดก็ได้เพื่อกลับหน้าหลัก", self.card)
+        self.hint_label = bind_text(QLabel(self.card), "result.any_button")
         self.hint_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self.hint_label.setStyleSheet(f"font-size: {FS_LABEL}px; color: {COLOR_MUTED};")
 
@@ -118,8 +119,8 @@ class ResultScreen(QWidget):
         self._apply(
             "saving",
             "…",
-            "กำลังบันทึก...",
-            "รอการตอบกลับจากระบบ",
+            t("result.saving"),
+            t("result.waiting_server"),
             COLOR_WAIT_BG,
             COLOR_WAIT_FG,
         )
@@ -135,28 +136,27 @@ class ResultScreen(QWidget):
         """Updates the card with the server's answer and schedules return to Idle."""
         is_in = self.kind == "checkin"
         if status == "success":
-            headline = "นำเข้าแล้ว" if is_in else "นำออกแล้ว"
-            default = "บันทึกเข้าตู้เย็นเรียบร้อย" if is_in else "ลบออกจากรายการในตู้เย็นแล้ว"
+            headline = t("result.in_done") if is_in else t("result.out_done")
+            default = t("result.in_done_msg") if is_in else t("result.out_done_msg")
             self._apply(status, "✓", headline, message or default, COLOR_FRESH, COLOR_ON_FRESH)
             self._return_timer.start(SUCCESS_RETURN_MS)
         elif status == "queued":
-            default = "ตอนนี้ออฟไลน์ ระบบจะส่งข้อมูลให้อัตโนมัติเมื่อกลับมาออนไลน์"
+            default = t("result.queued_msg")
             self._apply(
-                status, "!", "บันทึกไว้ในเครื่องแล้ว", message or default, COLOR_SOON, COLOR_ON_SOON
+                status, "!", t("result.queued"), message or default, COLOR_SOON, COLOR_ON_SOON
             )
             self._return_timer.start(FAILED_RETURN_MS)
         elif status == "skipped":
-            headline = "ไม่ได้นำออก" if self.kind == "checkout" else "ไม่ได้นำเข้า"
-            default = (
-                "หมดเวลา — ไม่ได้บันทึกการนำรายการนี้ออก รายการยังอยู่ในตู้เย็น"
-                if self.kind == "checkout"
-                else "หมดเวลา — ไม่ได้บันทึกรายการนี้"
-            )
+            is_out = self.kind == "checkout"
+            headline = t("result.out_skipped") if is_out else t("result.in_skipped")
+            default = t("result.out_skipped_msg") if is_out else t("result.in_skipped_msg")
             self._apply(status, "–", headline, message or default, COLOR_DARK, COLOR_ON_DARK)
             self._return_timer.start(FAILED_RETURN_MS)
         elif status == "failed":
-            default = "กรุณาลองใหม่อีกครั้ง"
-            self._apply(status, "✕", "บันทึกไม่สำเร็จ", message or default, COLOR_BAD, COLOR_ON_BAD)
+            default = t("result.failed_msg")
+            self._apply(
+                status, "✕", t("result.failed"), message or default, COLOR_BAD, COLOR_ON_BAD
+            )
             self._return_timer.start(FAILED_RETURN_MS)
 
     def _apply(

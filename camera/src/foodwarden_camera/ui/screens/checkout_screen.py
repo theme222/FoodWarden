@@ -19,6 +19,7 @@ from PyQt6.QtWidgets import (
 )
 
 from foodwarden_camera.models.cloud_cbs import CheckOutCandidate
+from foodwarden_camera.ui.i18n import pick, t
 from foodwarden_camera.ui.styles import (
     COLOR_DARK,
     COLOR_INK,
@@ -62,7 +63,7 @@ class _CandidateRow(QFrame):
 
         text_col = QVBoxLayout()
         text_col.setSpacing(0)
-        self.name_label = FitLabel(cand.name_th, self, min_px=17)
+        self.name_label = FitLabel(pick(cand.name_th, cand.name_en), self, min_px=17)
         self.detail_label = QLabel(self._detail_text(cand), self)
         text_col.addWidget(self.name_label)
         text_col.addWidget(self.detail_label)
@@ -72,7 +73,7 @@ class _CandidateRow(QFrame):
         badge_col.addStretch()
         self.fefo_label: QLabel | None = None
         if is_fefo:
-            self.fefo_label = QLabel("หมดก่อน", self)
+            self.fefo_label = QLabel(t("checkout.fefo"), self)
             self.fefo_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
             self.fefo_label.setStyleSheet(
                 pill_style(COLOR_TAKE_SOLID, COLOR_ON_TAKE, font_px=FS_LABEL - 3, pad_v=4, pad_h=8)
@@ -103,7 +104,7 @@ class _CandidateRow(QFrame):
             exp = datetime.strptime(cand.expiry_date, "%Y-%m-%d").strftime("%d/%m/%Y")
         except ValueError:
             exp = cand.expiry_date
-        return f"หมดอายุ {exp}"
+        return t("common.expires_on", date=exp)
 
     def set_selected(self, selected: bool) -> None:
         if selected:
@@ -175,8 +176,8 @@ class CheckOutScreen(QWidget):
         root_layout.setContentsMargins(14, 10, 14, 12)
         root_layout.setSpacing(10)
 
-        header, self.countdown_label = create_screen_header("นำออกอาหาร", self)
-        self.countdown_label.setText(f"ยกเลิกอัตโนมัติใน {self.autocomplete_timeout_s} วิ")
+        header, self.countdown_label = create_screen_header("checkout.title", self)
+        self.countdown_label.setText(t("countdown.cancel", n=self.autocomplete_timeout_s))
         root_layout.addLayout(header)
 
         body = QHBoxLayout()
@@ -197,7 +198,7 @@ class CheckOutScreen(QWidget):
         )
         img_layout = QVBoxLayout(self.img_frame)
         img_layout.setContentsMargins(4, 4, 4, 4)
-        self.image_label = QLabel("เตรียมภาพ...", self.img_frame)
+        self.image_label = QLabel(t("common.preparing_image"), self.img_frame)
         self.image_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self.image_label.setStyleSheet(
             f"color: {COLOR_ON_DARK}; font-size: {FS_LABEL}px; font-weight: bold;"
@@ -213,7 +214,7 @@ class CheckOutScreen(QWidget):
         list_layout.setSpacing(6)
 
         hint_row = QHBoxLayout()
-        self.hint_label = QLabel("เลือกรายการที่จะนำออก", list_card)
+        self.hint_label = QLabel(t("checkout.choose"), list_card)
         self.position_label = QLabel("", list_card)
         self.position_label.setStyleSheet(
             f"font-size: {FS_LABEL}px; font-weight: bold; color: {COLOR_MUTED};"
@@ -248,18 +249,20 @@ class CheckOutScreen(QWidget):
         nav_bar = QHBoxLayout()
         nav_bar.setSpacing(10)
         pill_o = create_key_guide(
-            "CheckOutPillO", "O", "นำออก", COLOR_TAKE_SOLID, COLOR_ON_TAKE, self
+            "CheckOutPillO", "O", "checkout.remove", COLOR_TAKE_SOLID, COLOR_ON_TAKE, self
         )
         pill_arrows = create_key_guide(
             "CheckOutPillArrows",
             "↑↓",
-            "เลือกรายการ",
+            "checkout.select",
             COLOR_SURFACE,
             COLOR_INK,
             self,
             border_color=COLOR_RULE,
         )
-        pill_x = create_key_guide("CheckOutPillX", "X", "ยกเลิก", COLOR_DARK, COLOR_ON_DARK, self)
+        pill_x = create_key_guide(
+            "CheckOutPillX", "X", "common.cancel", COLOR_DARK, COLOR_ON_DARK, self
+        )
         nav_bar.addWidget(pill_o, stretch=1)
         nav_bar.addWidget(pill_arrows, stretch=1)
         nav_bar.addWidget(pill_x, stretch=1)
@@ -298,7 +301,7 @@ class CheckOutScreen(QWidget):
         self._countdown_timer.start(1000)
 
     def _update_countdown_label(self) -> None:
-        self.countdown_label.setText(f"ยกเลิกอัตโนมัติใน {self._countdown_seconds} วิ")
+        self.countdown_label.setText(t("countdown.cancel", n=self._countdown_seconds))
 
     def _on_user_interaction(self) -> None:
         """User is choosing: switch to / restart the 30 s browse countdown."""
@@ -330,7 +333,7 @@ class CheckOutScreen(QWidget):
     def _set_preview_image(self, image_bytes: bytes) -> None:
         if not image_bytes:
             self.image_label.clear()
-            self.image_label.setText("เตรียมภาพ...")
+            self.image_label.setText(t("common.preparing_image"))
             return
         qimg = QImage.fromData(image_bytes)
         if not qimg.isNull():
@@ -353,13 +356,13 @@ class CheckOutScreen(QWidget):
         self.countdown_label.setStyleSheet(countdown_style())
         self._set_preview_image(image_bytes)
 
-        self.countdown_label.setText("กำลังรอ AI... (Loading)")
-        self.hint_label.setText("กำลังค้นหาในตู้เย็น...")
+        self.countdown_label.setText(t("common.loading_ai"))
+        self.hint_label.setText(t("checkout.searching"))
         self._set_hint_style(COLOR_WARN_TEXT)
         self.position_label.setText("")
 
         self.list_widget.clear()
-        self._add_message_row("กำลังวิเคราะห์สินค้า...\nกด X เพื่อยกเลิก", COLOR_WARN_TEXT)
+        self._add_message_row(t("checkout.analyzing"), COLOR_WARN_TEXT)
 
     def load_candidates(
         self, candidates: list[CheckOutCandidate], image_bytes: bytes = b""
@@ -373,7 +376,7 @@ class CheckOutScreen(QWidget):
         if image_bytes:
             self._set_preview_image(image_bytes)
 
-        self.hint_label.setText("เลือกรายการที่จะนำออก")
+        self.hint_label.setText(t("checkout.choose"))
         self._set_hint_style(COLOR_INK)
 
         # Block signals while rebuilding so clear()/setCurrentRow don't fire
@@ -385,8 +388,8 @@ class CheckOutScreen(QWidget):
             self.list_widget.blockSignals(False)
             self._is_loading = False
             self.position_label.setText("")
-            self._add_message_row("ไม่พบรายการนี้ในตู้เย็น\nกด X เพื่อกลับ")
-            self.countdown_label.setText("ไม่พบรายการ")
+            self._add_message_row(t("checkout.not_found"))
+            self.countdown_label.setText(t("checkout.not_found_short"))
             return
 
         for idx, cand in enumerate(candidates):

@@ -34,6 +34,7 @@ from foodwarden_camera.models.mqtt_cbd import (
 )
 from foodwarden_camera.mqtt.client import DoorMQTTClient
 from foodwarden_camera.storage.offline_queue import OfflineQueue
+from foodwarden_camera.ui.i18n import STRINGS, pick, t
 from foodwarden_camera.ui.main_window import FoodWardenMainWindow
 from foodwarden_camera.vision.camera import WebcamCapture
 from foodwarden_camera.vision.detector import VisionDetector, encode_bgr_to_jpeg
@@ -41,13 +42,10 @@ from foodwarden_camera.vision.detector import VisionDetector, encode_bgr_to_jpeg
 logger = logging.getLogger(__name__)
 
 
-_COMMIT_FAILURE_TH: dict[str, str] = {
-    "offline": "ไม่มีอินเทอร์เน็ต กรุณาลองใหม่เมื่อออนไลน์",
-    "auth": "Token ไม่ถูกต้อง กรุณาตรวจสอบหน้าตั้งค่า",
-    "rate_limited": "ระบบ AI ไม่ว่าง กรุณารอสักครู่แล้วลองใหม่",
-    "rejected": "ระบบปฏิเสธข้อมูล กรุณาลองใหม่",
-    "unidentifiable": "ระบบไม่รู้จักรายการนี้ กรุณาลองใหม่",
-}
+def _failure_message(err_kind: str) -> str:
+    """User-facing reason (current UI language) for a failed commit, '' if unknown."""
+    key = f"result.fail.{err_kind}"
+    return t(key) if key in STRINGS else ""
 
 
 def _thai_date(iso_date: str) -> str:
@@ -126,6 +124,8 @@ class GatewayOrchestrator:
             sleep_timeout_s=settings.sleep_timeout_s,
             initial_pir_gpio_pin=settings.pir_gpio_pin,
             initial_door_close_timeout_s=settings.door_close_timeout_s,
+            on_save_language=self.apply_language,
+            initial_language=settings.ui_language,
         )
 
         # Safety & State Tracking
@@ -444,6 +444,11 @@ class GatewayOrchestrator:
             self.pir.hardware_status_text,
         )
         logger.info("Applied PIR GPIO pin: %d (%s)", pir_gpio_pin, self.pir.hardware_status_text)
+
+    def apply_language(self, lang: str) -> None:
+        """Persists the UI language chosen in Settings (UI_LANGUAGE in .env)."""
+        self.settings.save_ui_language(lang)
+        logger.info("Saved UI language: %s", self.settings.ui_language)
 
     def apply_door_close_timeout(self, door_close_timeout_s: int) -> None:
         """Updates automatic door closure delay at runtime and persists to .env."""
@@ -801,7 +806,7 @@ class GatewayOrchestrator:
         """Commits confirmed check-in item in background so UI stays responsive."""
         if draft.image_storage_path == "local_offline":
             logger.info("Offline check-in already buffered for background draft/commit")
-            self.window.show_commit_result("checkin", "queued", draft.name_th)
+            self.window.show_commit_result("checkin", "queued", pick(draft.name_th, draft.name_en))
             return
 
         payload = CheckInCommitPayload(
@@ -828,13 +833,14 @@ class GatewayOrchestrator:
 
     def _run_commit_checkin_worker(self, payload: CheckInCommitPayload, commit_key: str) -> None:
         ok, res, err = self.cloud_client.checkin_commit(payload, idempotency_key=commit_key)
+        item_name = pick(payload.name_th, payload.name_en)
         if ok and res is not None:
             logger.info("Successfully committed check-in: %s", res.item_id)
             self.window.show_commit_result(
                 "checkin",
                 "success",
-                payload.name_th,
-                f"บันทึกเข้าตู้เย็นแล้ว · หมดอายุ {_thai_date(payload.expiry_date)}",
+                item_name,
+                t("result.in_done_msg_exp", date=_thai_date(payload.expiry_date)),
             )
             return
 
@@ -843,10 +849,10 @@ class GatewayOrchestrator:
         if err_kind in ("offline", "rate_limited"):
             # Buffered for store-and-forward retry (E4): the item is not lost.
             self.sync_manager.enqueue_pending_commit(payload, commit_key)
-            self.window.show_commit_result("checkin", "queued", payload.name_th)
+            self.window.show_commit_result("checkin", "queued", item_name)
         else:
             self.window.show_commit_result(
-                "checkin", "failed", payload.name_th, _COMMIT_FAILURE_TH.get(err_kind, "")
+                "checkin", "failed", item_name, _failure_message(err_kind)
             )
 
     def handle_checkout_capture(self) -> None:
@@ -907,7 +913,7 @@ class GatewayOrchestrator:
         payload = CheckOutCommitPayload(item_id=candidate.item_id)
         worker = threading.Thread(
             target=self._run_commit_checkout_worker,
-            args=(payload, candidate.name_th),
+            args=(payload, pick(candidate.name_th, candidate.name_en)),
             daemon=True,
             name="CheckOutCommitWorker",
         )
@@ -926,5 +932,5 @@ class GatewayOrchestrator:
             logger.warning("Check-out commit failed (%s): %s", err_kind, err)
             # Check-outs are not queued offline, so tell the user it didn't happen.
             self.window.show_commit_result(
-                "checkout", "failed", item_name, _COMMIT_FAILURE_TH.get(err_kind, "")
+                "checkout", "failed", item_name, _failure_message(err_kind)
             )

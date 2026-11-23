@@ -5,7 +5,7 @@ from __future__ import annotations
 MAIN_WINDOW_WIDTH = 800
 MAIN_WINDOW_HEIGHT = 480
 
-FONT_FAMILY = "'Lexend', 'K2D', 'Noto Sans Thai', 'Segoe UI', 'Tahoma', sans-serif"
+FONT_FAMILY = "'Lexend', 'K2D', sans-serif"  # both bundled + loaded by ui/fonts.py
 
 # Web Prototype light pale-lime design tokens (FoodWarden-Web-Prototype)
 COLOR_BG = "#E9F2D2"

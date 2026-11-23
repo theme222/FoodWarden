@@ -17,6 +17,7 @@ from PyQt6.QtWidgets import (
     QWidget,
 )
 
+from foodwarden_camera.ui.i18n import bind_text, t
 from foodwarden_camera.ui.styles import (
     COLOR_BAD,
     COLOR_DARK,
@@ -88,7 +89,7 @@ def format_node_badge(
     if age_s is None and not is_connected:
         return (
             f"● {name}: Wait",
-            f"{name}: รอเชื่อมต่อ",
+            f"{name}: {t('node.wait')}",
             COLOR_WAIT_BG,
             COLOR_WAIT_FG,
         )
@@ -98,7 +99,7 @@ def format_node_badge(
     if is_offline:
         return (
             f"● {name}: Off {elapsed}",
-            f"{name}: หลุด ({elapsed})",
+            f"{name}: {t('node.lost', t=elapsed)}",
             COLOR_BAD,
             COLOR_ON_BAD,
         )
@@ -115,14 +116,14 @@ def format_node_badge(
     if age_s is not None and age_s <= yellow_max_s:
         return (
             f"● {name}: {elapsed}",
-            f"{name}: ช้า ({elapsed})",
+            f"{name}: {t('node.slow', t=elapsed)}",
             COLOR_SOON,
             COLOR_ON_SOON,
         )
 
     return (
         f"● {name}: {elapsed}!",
-        f"{name}: ขาด ({elapsed})",
+        f"{name}: {t('node.stale', t=elapsed)}",
         COLOR_BAD,
         COLOR_ON_BAD,
     )
@@ -169,7 +170,7 @@ class _StatusTile(QFrame):
     def __init__(
         self,
         object_name: str,
-        title: str,
+        title_key: str,
         initial_value: str,
         value_px: int,
         parent: QWidget,
@@ -189,7 +190,7 @@ class _StatusTile(QFrame):
 
         top = QHBoxLayout()
         top.setSpacing(6)
-        self.title_label = QLabel(title, self)
+        self.title_label = bind_text(QLabel(self), title_key)
         self.title_label.setStyleSheet(
             f"font-size: {TILE_TITLE_PX}px; font-weight: bold; color: {COLOR_MUTED};"
         )
@@ -223,7 +224,7 @@ class _StatusTile(QFrame):
 def _create_action_pill(
     object_name: str,
     key_text: str,
-    title_text: str,
+    title_key: str,
     bg_color: str,
     fg_color: str,
     badge_bg: str,
@@ -248,7 +249,7 @@ def _create_action_pill(
         "font-size: 22px; font-weight: bold; border-radius: 10px;"
     )
 
-    label = QLabel(title_text, frame)
+    label = bind_text(QLabel(frame), title_key)
     label.setStyleSheet(f"font-size: 22px; font-weight: bold; color: {fg_color};")
 
     row.addWidget(badge)
@@ -276,7 +277,38 @@ class IdleScreen(QWidget):
     ) -> None:
         super().__init__(parent)
         self._on_open_settings = on_open_settings
+        # Last values shown, replayed by retranslate() after a language switch.
+        self._last_temp: float | None = None
+        self._last_voc: int | None = None
+        self._last_light: int | None = None
+        self._last_door: tuple[bool, float] = (False, 0.0)
+        self._last_wifi: bool | None = None
+        self._last_nodes: dict[str, tuple[float | None, bool, bool]] = {}
+        self._last_motion: tuple[bool, float, str] | None = None
+        self._last_person: tuple[bool, float, int] | None = None
         self._init_ui()
+
+    def retranslate(self) -> None:
+        """Re-renders the dynamic tile texts in the current language."""
+        if (
+            self._last_temp is not None
+            or self._last_voc is not None
+            or self._last_light is not None
+        ):
+            self.update_telemetry(self._last_temp, self._last_voc, self._last_light)
+        else:
+            self.door_tile.set_value(t("idle.door_closed"), COLOR_INK)
+        self.update_door_state(*self._last_door)
+        if self._last_wifi is not None:
+            self.update_wifi_status(self._last_wifi)
+        for node_id, (age_s, connected, offline) in list(self._last_nodes.items()):
+            self.update_node_status(node_id, age_s, connected, offline)
+        if self._last_motion is not None:
+            self.update_motion_state(*self._last_motion)
+        if self._last_person is not None:
+            self.update_person_state(*self._last_person)
+        if self.camera_label.pixmap() is None or self.camera_label.pixmap().isNull():
+            self.camera_label.setText(t("idle.waiting_camera"))
 
     def _init_ui(self) -> None:
         root_layout = QVBoxLayout(self)
@@ -296,7 +328,7 @@ class IdleScreen(QWidget):
         checkin_pill = _create_action_pill(
             "BtnCheckInGuide",
             "O",
-            "นำเข้าอาหาร (Check-In)",
+            "idle.checkin",
             COLOR_DARK,
             COLOR_ON_DARK,
             COLOR_LIME,
@@ -306,7 +338,7 @@ class IdleScreen(QWidget):
         checkout_pill = _create_action_pill(
             "BtnCheckOutGuide",
             "X",
-            "นำออกอาหาร (Check-Out)",
+            "idle.checkout",
             COLOR_TAKE_SOLID,
             COLOR_ON_TAKE,
             COLOR_SURFACE,
@@ -342,7 +374,8 @@ class IdleScreen(QWidget):
         self.pill_node_d = QLabel("● Door: Wait", self)
         self.pill_node_d.setStyleSheet(pill_style(COLOR_WAIT_BG, COLOR_WAIT_FG, font_px=PILL_PX))
 
-        self.btn_settings = _create_header_button("ตั้งค่า", self, self._on_open_settings)
+        self.btn_settings = _create_header_button(t("idle.settings"), self, self._on_open_settings)
+        bind_text(self.btn_settings, "idle.settings")
 
         header.addWidget(_fixed(brand_dot))
         header.addSpacing(4)
@@ -374,7 +407,7 @@ class IdleScreen(QWidget):
         cam_inner = QVBoxLayout(self.camera_frame)
         cam_inner.setContentsMargins(4, 4, 4, 4)
 
-        self.camera_label = QLabel("รอสัญญาณกล้อง...", self.camera_frame)
+        self.camera_label = QLabel(t("idle.waiting_camera"), self.camera_frame)
         self.camera_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self.camera_label.setStyleSheet(
             f"color: {COLOR_ON_DARK_2}; font-size: 18px; font-weight: bold;"
@@ -396,10 +429,10 @@ class IdleScreen(QWidget):
         climate_row = QHBoxLayout()
         climate_row.setSpacing(8)
         self.temp_tile = _StatusTile(
-            "TileTemp", "อุณหภูมิ", "--.- °C", 28, diag_card, pill_text="รอข้อมูล"
+            "TileTemp", "idle.temp", "--.- °C", 28, diag_card, pill_text=t("idle.waiting_data")
         )
         self.voc_tile = _StatusTile(
-            "TileVoc", "อากาศ (VOC)", "--", 28, diag_card, pill_text="รอข้อมูล"
+            "TileVoc", "idle.voc", "--", 28, diag_card, pill_text=t("idle.waiting_data")
         )
         climate_row.addWidget(self.temp_tile, stretch=1)
         climate_row.addWidget(self.voc_tile, stretch=1)
@@ -407,18 +440,28 @@ class IdleScreen(QWidget):
 
         # Door: value = light sensor in fridge (F), pill = actuator node (D) state.
         self.door_tile = _StatusTile(
-            "TileDoor", "ประตู", "ปิดสนิท", TILE_VALUE_PX, diag_card, pill_text="Door: Closed"
+            "TileDoor",
+            "idle.door",
+            t("idle.door_closed"),
+            TILE_VALUE_PX,
+            diag_card,
+            pill_text="Door: Closed",
         )
         self.motion_tile = _StatusTile(
             "TileMotion",
-            "ตรวจจับการเคลื่อนไหว",
-            "รอสัญญาณ",
+            "idle.motion",
+            t("idle.waiting_signal"),
             TILE_VALUE_PX,
             diag_card,
             pill_text="PIR: --",
         )
         self.person_tile = _StatusTile(
-            "TilePerson", "ตรวจจับคน", "ไม่พบคน", TILE_VALUE_PX, diag_card, pill_text="Clear"
+            "TilePerson",
+            "idle.person",
+            t("idle.no_person"),
+            TILE_VALUE_PX,
+            diag_card,
+            pill_text="Clear",
         )
         for tile in (self.door_tile, self.motion_tile, self.person_tile):
             col.addWidget(tile)
@@ -464,33 +507,50 @@ class IdleScreen(QWidget):
     def update_telemetry(self, temp_c: float | None, voc: int | None, light: int | None) -> None:
         """Updates internal climate card values."""
         if temp_c is not None:
+            self._last_temp = temp_c
+        if voc is not None:
+            self._last_voc = voc
+        if light is not None:
+            self._last_light = light
+        if temp_c is not None:
             if temp_c <= 4.0:
-                status, bg, fg, color = "ปกติ", COLOR_FRESH, COLOR_ON_FRESH, COLOR_FRESH
+                status, bg, fg, color = t("idle.temp_ok"), COLOR_FRESH, COLOR_ON_FRESH, COLOR_FRESH
             elif temp_c <= 8.0:
-                status, bg, fg, color = "อุ่น", COLOR_SOON, COLOR_ON_SOON, COLOR_WARN_TEXT
+                status, bg, fg, color = (
+                    t("idle.temp_warm"),
+                    COLOR_SOON,
+                    COLOR_ON_SOON,
+                    COLOR_WARN_TEXT,
+                )
             else:
-                status, bg, fg, color = "ร้อน!", COLOR_BAD, COLOR_ON_BAD, COLOR_BAD
+                status, bg, fg, color = t("idle.temp_hot"), COLOR_BAD, COLOR_ON_BAD, COLOR_BAD
             self.temp_tile.set_value(f"{temp_c:.1f} °C", color)
             self.temp_tile.set_pill(status, bg, fg)
 
         if voc is not None:
             if voc <= 150:
-                desc, bg, fg, color = "สะอาด", COLOR_FRESH, COLOR_ON_FRESH, COLOR_FRESH
+                desc, bg, fg, color = t("idle.voc_clean"), COLOR_FRESH, COLOR_ON_FRESH, COLOR_FRESH
             elif voc <= 250:
-                desc, bg, fg, color = "มีกลิ่น", COLOR_SOON, COLOR_ON_SOON, COLOR_WARN_TEXT
+                desc, bg, fg, color = (
+                    t("idle.voc_smell"),
+                    COLOR_SOON,
+                    COLOR_ON_SOON,
+                    COLOR_WARN_TEXT,
+                )
             else:
-                desc, bg, fg, color = "กลิ่นแรง", COLOR_BAD, COLOR_ON_BAD, COLOR_BAD
+                desc, bg, fg, color = t("idle.voc_strong"), COLOR_BAD, COLOR_ON_BAD, COLOR_BAD
             self.voc_tile.set_value(str(voc), color)
             self.voc_tile.set_pill(desc, bg, fg)
 
         if light is not None:
             if light >= 100:
-                self.door_tile.set_value("เปิดอยู่", COLOR_WARN_TEXT)
+                self.door_tile.set_value(t("idle.door_open"), COLOR_WARN_TEXT)
             else:
-                self.door_tile.set_value("ปิดสนิท", COLOR_FRESH)
+                self.door_tile.set_value(t("idle.door_closed"), COLOR_FRESH)
 
     def update_door_state(self, is_open: bool, ajar_duration_s: float = 0.0) -> None:
         """Updates the door actuator (Node D) pill on the door tile."""
+        self._last_door = (is_open, ajar_duration_s)
         if is_open:
             is_overdue = ajar_duration_s >= 15.0
             bg = COLOR_BAD if is_overdue else COLOR_SOON
@@ -501,6 +561,7 @@ class IdleScreen(QWidget):
 
     def update_wifi_status(self, is_online: bool) -> None:
         """Updates top Wi-Fi connectivity badge."""
+        self._last_wifi = is_online
         if is_online:
             self.pill_wifi.setText("Wi-Fi: OK")
             self.pill_wifi.setStyleSheet(pill_style(COLOR_FRESH, COLOR_ON_FRESH, font_px=PILL_PX))
@@ -516,6 +577,7 @@ class IdleScreen(QWidget):
         is_offline: bool = False,
     ) -> None:
         """Updates Gray->Green->Amber->Red connection indicator for Node 'F' or 'D'."""
+        self._last_nodes[node_id] = (age_s, is_connected, is_offline)
         pill_text, detail_text, bg_hex, fg_hex = format_node_badge(
             node_id,
             age_s,
@@ -540,22 +602,23 @@ class IdleScreen(QWidget):
         hw_status: str = "",
     ) -> None:
         """Updates PIR motion sensor badge and concise status label."""
+        self._last_motion = (has_motion, idle_duration_s, hw_status)
         # GPIO binding details ("GPIO 22: HW/Sim") are for developers, not users;
         # only surface the one state a user needs to know: the sensor is off.
-        hw_suffix = " (ปิดใช้งาน)" if hw_status == "PIR Disabled" else ""
+        hw_suffix = t("idle.sensor_off") if hw_status == "PIR Disabled" else ""
         if has_motion:
             self.motion_tile.set_pill(f"DETECTED{hw_suffix}", COLOR_FRESH, COLOR_ON_FRESH)
-            self.motion_tile.set_value(f"พบการเคลื่อนไหว{hw_suffix}", COLOR_FRESH)
+            self.motion_tile.set_value(f"{t('idle.motion_seen')}{hw_suffix}", COLOR_FRESH)
             return
 
         secs = max(0, int(idle_duration_s))
         if secs < 60:
-            pill_text = f"นิ่ง {secs}s{hw_suffix}"
-            value = f"นิ่ง {secs} วินาที{hw_suffix}"
+            pill_text = f"{t('idle.still_pill', s=secs)}{hw_suffix}"
+            value = f"{t('idle.still_s', s=secs)}{hw_suffix}"
         else:
             mins, rem = divmod(secs, 60)
             pill_text = f"{mins}m {rem}s{hw_suffix}"
-            value = f"นิ่ง {mins} นาที {rem} วินาที{hw_suffix}"
+            value = f"{t('idle.still_ms', m=mins, s=rem)}{hw_suffix}"
         self.motion_tile.set_pill(pill_text, COLOR_WAIT_BG, COLOR_WAIT_FG)
         self.motion_tile.set_value(value, COLOR_INK)
 
@@ -566,12 +629,13 @@ class IdleScreen(QWidget):
         person_count: int = 0,
     ) -> None:
         """Updates YOLO person detection badge and concise status label."""
+        self._last_person = (is_person, confidence, person_count)
         if is_person:
             pct = round(max(0.0, min(1.0, confidence)) * 100)
             count = max(1, person_count)
             self.person_tile.set_pill(f"Person {pct}%", COLOR_SOON, COLOR_ON_SOON)
-            self.person_tile.set_value(f"พบคน {count} คน ({pct}%)", COLOR_WARN_TEXT)
+            self.person_tile.set_value(t("idle.person_seen", n=count, pct=pct), COLOR_WARN_TEXT)
             return
 
         self.person_tile.set_pill("Clear", COLOR_WAIT_BG, COLOR_WAIT_FG)
-        self.person_tile.set_value("ไม่พบคน", COLOR_INK)
+        self.person_tile.set_value(t("idle.no_person"), COLOR_INK)

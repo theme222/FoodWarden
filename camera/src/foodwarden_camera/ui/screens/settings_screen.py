@@ -21,11 +21,13 @@ from PyQt6.QtWidgets import (
     QWidget,
 )
 
+from foodwarden_camera.ui.i18n import bind_text, get_language, t
 from foodwarden_camera.ui.styles import (
     COLOR_BAD,
     COLOR_DARK,
     COLOR_FRESH,
     COLOR_INK,
+    COLOR_LIME,
     COLOR_LIME_SOFT,
     COLOR_MUTED,
     COLOR_ON_BAD,
@@ -122,7 +124,7 @@ def _paint_icon(kind: IconKind, color: str, size: int = 22) -> QIcon:
 
 def _make_icon_button(
     kind: IconKind,
-    tooltip: str,
+    tooltip_key: str,
     bg_color: str,
     hover_color: str,
     fg_color: str,
@@ -145,16 +147,28 @@ def _make_icon_button(
     btn.setFixedSize(_ICON_BTN, _ICON_BTN)
     btn.setIcon(_paint_icon(kind, fg_color))
     btn.setIconSize(QSize(22, 22))
-    btn.setToolTip(tooltip)
-    btn.setAccessibleName(tooltip)
+    bind_text(btn, tooltip_key, _set_tooltip)
     return btn
+
+
+def _set_tooltip(widget: QPushButton, text: str) -> None:
+    widget.setToolTip(text)
+    widget.setAccessibleName(text)
+
+
+def _set_suffix(widget: QSpinBox, text: str) -> None:
+    widget.setSuffix(text)
+
+
+def _set_special_value_text(widget: QSpinBox, text: str) -> None:
+    widget.setSpecialValueText(text)
 
 
 class SettingsScreen(QWidget):
     """Touch/mouse-controlled settings and window management screen.
 
     Layout (800×480):
-        header   ตั้งค่าระบบ ................. [—] [⛶] [✕]   (window controls, icon only)
+        header   ตั้งค่าระบบ [ไทย|English] ........ [—] [⛶] [✕]   (window controls, icon only)
         token    Gateway Token [••••••] [แสดง] [วาง] [ล้าง]
         grid     ยืนยันอัตโนมัติ | พักหน้าจอ
                  เซ็นเซอร์การเคลื่อนไหว | ปิดประตูอัตโนมัติ
@@ -170,6 +184,7 @@ class SettingsScreen(QWidget):
         on_quit: Callable[[], None] | None = None,
         on_save_pir_pin: Callable[[int], None] | None = None,
         on_save_door_close_timeout: Callable[[int], None] | None = None,
+        on_save_language: Callable[[str], None] | None = None,
         initial_token: str = "",
         initial_autocomplete_s: int = 10,
         initial_sleep_s: int = 600,
@@ -185,6 +200,8 @@ class SettingsScreen(QWidget):
         self._on_quit = on_quit
         self._on_save_pir_pin = on_save_pir_pin
         self._on_save_door_close_timeout = on_save_door_close_timeout
+        self._on_save_language = on_save_language
+        self._language_choice: str = get_language()
 
         self._initial_token = initial_token
         self._initial_autocomplete_s = initial_autocomplete_s
@@ -204,7 +221,7 @@ class SettingsScreen(QWidget):
     def _build_stepper_card(
         self,
         object_name: str,
-        title_text: str,
+        title_key: str,
         spin: QSpinBox,
         on_minus: Callable[[], None],
         on_plus: Callable[[], None],
@@ -218,7 +235,7 @@ class SettingsScreen(QWidget):
         col.setContentsMargins(14, 10, 14, 12)
         col.setSpacing(8)
 
-        lbl = QLabel(title_text, card)
+        lbl = bind_text(QLabel(card), title_key)
         lbl.setStyleSheet(f"font-size: {FS_BODY}px; font-weight: bold; color: {COLOR_INK};")
 
         row = QHBoxLayout()
@@ -269,12 +286,18 @@ class SettingsScreen(QWidget):
         # 1. Header: title + icon-only window controls
         header = QHBoxLayout()
         header.setSpacing(8)
-        title = QLabel("ตั้งค่าระบบ", self)
+        title = bind_text(QLabel(self), "settings.title")
         title.setStyleSheet(f"font-size: {FS_TITLE}px; font-weight: bold; color: {COLOR_INK};")
+
+        # Language toggle: each option is written in its own language on purpose,
+        # so a user stuck in the wrong language can still find theirs.
+        self.btn_lang_th = self._make_lang_button("ไทย", "th")
+        self.btn_lang_en = self._make_lang_button("English", "en")
+        self.set_language_choice(self._language_choice)
 
         self.btn_minimize = _make_icon_button(
             "minimize",
-            "ย่อหน้าต่าง",
+            "settings.minimize",
             COLOR_SURFACE,
             COLOR_SURFACE_2,
             COLOR_INK,
@@ -284,7 +307,7 @@ class SettingsScreen(QWidget):
         )
         self.btn_fullscreen = _make_icon_button(
             "fullscreen",
-            "เต็มจอ / หน้าต่าง",
+            "settings.fullscreen",
             COLOR_SURFACE,
             COLOR_SURFACE_2,
             COLOR_INK,
@@ -294,7 +317,7 @@ class SettingsScreen(QWidget):
         )
         self.btn_quit = _make_icon_button(
             "quit",
-            "ปิดโปรแกรม",
+            "settings.quit",
             COLOR_BAD,
             "#B91C1C",
             COLOR_ON_BAD,
@@ -304,6 +327,9 @@ class SettingsScreen(QWidget):
         )
 
         header.addWidget(title)
+        header.addSpacing(12)
+        header.addWidget(self.btn_lang_th)
+        header.addWidget(self.btn_lang_en)
         header.addStretch()
         header.addWidget(self.btn_minimize)
         header.addWidget(self.btn_fullscreen)
@@ -320,7 +346,7 @@ class SettingsScreen(QWidget):
         token_col.setContentsMargins(14, 8, 14, 10)
         token_col.setSpacing(6)
 
-        token_lbl = QLabel("Gateway Token (รหัสเชื่อมต่อเซิร์ฟเวอร์)", token_card)
+        token_lbl = bind_text(QLabel(token_card), "settings.token")
         token_lbl.setStyleSheet(f"font-size: {FS_BODY}px; font-weight: bold; color: {COLOR_INK};")
 
         token_row = QHBoxLayout()
@@ -336,7 +362,7 @@ class SettingsScreen(QWidget):
         )
 
         self.btn_toggle_echo = _make_mouse_button(
-            "แสดง",
+            t("settings.show"),
             COLOR_SURFACE_2,
             COLOR_LIME_SOFT,
             COLOR_INK,
@@ -345,7 +371,7 @@ class SettingsScreen(QWidget):
             min_width=76,
         )
         self.btn_paste_token = _make_mouse_button(
-            "วาง",
+            t("settings.paste"),
             COLOR_DARK,
             "#2B3322",
             COLOR_ON_DARK,
@@ -354,8 +380,9 @@ class SettingsScreen(QWidget):
             min_width=68,
             border_color=COLOR_DARK,
         )
+        bind_text(self.btn_paste_token, "settings.paste")
         self.btn_clear_token = _make_mouse_button(
-            "ล้าง",
+            t("settings.clear"),
             COLOR_BAD,
             "#B91C1C",
             COLOR_ON_BAD,
@@ -364,6 +391,7 @@ class SettingsScreen(QWidget):
             min_width=68,
             border_color=COLOR_BAD,
         )
+        bind_text(self.btn_clear_token, "settings.clear")
 
         token_row.addWidget(self.token_input, stretch=1)
         token_row.addWidget(self.btn_toggle_echo)
@@ -379,45 +407,45 @@ class SettingsScreen(QWidget):
 
         self.autocomplete_spin = QSpinBox(self)
         self.autocomplete_spin.setRange(1, 120)
-        self.autocomplete_spin.setSuffix(" วินาที")
+        bind_text(self.autocomplete_spin, "settings.seconds_suffix", _set_suffix)
 
         self.sleep_spin = QSpinBox(self)
         self.sleep_spin.setRange(5, 7200)
-        self.sleep_spin.setSuffix(" วินาที")
+        bind_text(self.sleep_spin, "settings.seconds_suffix", _set_suffix)
 
         self.pir_pin_spin = QSpinBox(self)
         self.pir_pin_spin.setRange(-1, 27)
-        self.pir_pin_spin.setSpecialValueText("ปิดใช้งาน")
+        bind_text(self.pir_pin_spin, "settings.disabled", _set_special_value_text)
         self.pir_pin_spin.setPrefix("GPIO ")
 
         self.door_close_spin = QSpinBox(self)
         self.door_close_spin.setRange(3, 600)
-        self.door_close_spin.setSuffix(" วินาที")
+        bind_text(self.door_close_spin, "settings.seconds_suffix", _set_suffix)
 
         card_auto = self._build_stepper_card(
             "CardAuto",
-            "นับถอยหลังเริ่มต้น (นำเข้า/นำออก)",
+            "settings.autocomplete",
             self.autocomplete_spin,
             lambda: self._adjust_autocomplete(-1),
             lambda: self._adjust_autocomplete(1),
         )
         card_sleep = self._build_stepper_card(
             "CardSleep",
-            "พักหน้าจอเมื่อไม่มีคนหลัง",
+            "settings.sleep",
             self.sleep_spin,
             lambda: self._adjust_sleep(-30),
             lambda: self._adjust_sleep(30),
         )
         card_pir = self._build_stepper_card(
             "CardPir",
-            "ขาเซ็นเซอร์ตรวจจับการเคลื่อนไหว",
+            "settings.pir",
             self.pir_pin_spin,
             lambda: self.pir_pin_spin.setValue(self.pir_pin_spin.value() - 1),
             lambda: self.pir_pin_spin.setValue(self.pir_pin_spin.value() + 1),
         )
         card_door = self._build_stepper_card(
             "CardDoor",
-            "ปิดประตูอัตโนมัติเมื่อเปิดค้าง",
+            "settings.door",
             self.door_close_spin,
             lambda: self._adjust_door_close(-5),
             lambda: self._adjust_door_close(5),
@@ -435,7 +463,7 @@ class SettingsScreen(QWidget):
         footer.setSpacing(10)
 
         self.btn_back = _make_mouse_button(
-            "‹  ย้อนกลับ",
+            t("settings.back"),
             COLOR_SURFACE,
             COLOR_SURFACE_2,
             COLOR_INK,
@@ -445,11 +473,12 @@ class SettingsScreen(QWidget):
             min_height=_FOOTER_H,
             font_px=FS_BODY - 1,
         )
-        hint = QLabel("ใช้เมาส์หรือแตะหน้าจอ", self)
+        bind_text(self.btn_back, "settings.back")
+        hint = bind_text(QLabel(self), "settings.hint")
         hint.setAlignment(Qt.AlignmentFlag.AlignCenter)
         hint.setStyleSheet(f"font-size: {FS_SMALL}px; color: {COLOR_MUTED};")
         self.btn_save = _make_mouse_button(
-            "บันทึก",
+            t("settings.save"),
             COLOR_FRESH,
             "#245618",
             COLOR_ON_FRESH,
@@ -460,6 +489,7 @@ class SettingsScreen(QWidget):
             font_px=FS_BODY,
             border_color=COLOR_FRESH,
         )
+        bind_text(self.btn_save, "settings.save")
 
         footer.addWidget(self.btn_back)
         footer.addStretch()
@@ -479,6 +509,9 @@ class SettingsScreen(QWidget):
     ) -> None:
         """Populates controls with current runtime settings."""
         self.token_input.setText(token)
+        # Always reopen with the token masked (and the button label in the current language).
+        self.token_input.setEchoMode(QLineEdit.EchoMode.Password)
+        self.btn_toggle_echo.setText(t("settings.show"))
         self.autocomplete_spin.setValue(max(1, min(120, autocomplete_s)))
         self.sleep_spin.setValue(sleep_timeout_clamp(sleep_s))
         self.pir_pin_spin.setValue(max(-1, min(27, pir_gpio_pin)))
@@ -488,10 +521,10 @@ class SettingsScreen(QWidget):
     def _toggle_token_visibility(self) -> None:
         if self.token_input.echoMode() == QLineEdit.EchoMode.Password:
             self.token_input.setEchoMode(QLineEdit.EchoMode.Normal)
-            self.btn_toggle_echo.setText("ซ่อน")
+            self.btn_toggle_echo.setText(t("settings.hide"))
         else:
             self.token_input.setEchoMode(QLineEdit.EchoMode.Password)
-            self.btn_toggle_echo.setText("แสดง")
+            self.btn_toggle_echo.setText(t("settings.show"))
 
     def _paste_token_from_clipboard(self) -> None:
         clipboard = QApplication.clipboard()
@@ -527,8 +560,40 @@ class SettingsScreen(QWidget):
             self._on_save_pir_pin(pir_pin)
         if self._on_save_door_close_timeout is not None:
             self._on_save_door_close_timeout(door_close_s)
+        if self._on_save_language is not None:
+            self._on_save_language(self._language_choice)
         if self._on_back is not None:
             self._on_back()
+
+    # --- Language toggle --------------------------------------------------------
+
+    def _make_lang_button(self, text: str, lang: str) -> QPushButton:
+        btn = QPushButton(text, self)
+        btn.setFocusPolicy(Qt.FocusPolicy.NoFocus)
+        btn.setFixedHeight(_ICON_BTN)
+        btn.setMinimumWidth(84)
+        btn.clicked.connect(lambda: self.set_language_choice(lang))
+        return btn
+
+    def set_language_choice(self, lang: str) -> None:
+        """Highlights the chosen language (applied on Save)."""
+        self._language_choice = "en" if lang == "en" else "th"
+        for btn, code in ((self.btn_lang_th, "th"), (self.btn_lang_en, "en")):
+            selected = code == self._language_choice
+            bg, fg, border = (
+                (COLOR_DARK, COLOR_ON_DARK, COLOR_LIME)
+                if selected
+                else (COLOR_SURFACE, COLOR_INK, COLOR_RULE)
+            )
+            btn.setStyleSheet(
+                f"QPushButton {{ background-color: {bg}; color: {fg}; "
+                f"border: 2px solid {border}; border-radius: 12px; "
+                f"font-size: {FS_LABEL}px; font-weight: bold; padding: 4px 14px; }}"
+            )
+
+    @property
+    def language_choice(self) -> str:
+        return self._language_choice
 
 
 def sleep_timeout_clamp(value: int) -> int:

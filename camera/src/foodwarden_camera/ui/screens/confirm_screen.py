@@ -14,6 +14,7 @@ from PyQt6.QtCore import Qt, QTimer
 from PyQt6.QtGui import QPixmap
 from PyQt6.QtWidgets import QFrame, QHBoxLayout, QLabel, QVBoxLayout, QWidget
 
+from foodwarden_camera.ui.i18n import t
 from foodwarden_camera.ui.styles import (
     COLOR_DARK,
     COLOR_FRESH,
@@ -43,7 +44,7 @@ _IMG_SIZE = 200
 
 
 class ConfirmScreen(QWidget):
-    """Summary card + [O ยืนยัน] / [X กลับไปแก้ไข]."""
+    """Summary card + [O confirm] / [X go back]."""
 
     def __init__(
         self,
@@ -68,7 +69,7 @@ class ConfirmScreen(QWidget):
         root.setSpacing(10)
 
         header = QHBoxLayout()
-        self.title_label = QLabel("ยืนยันรายการ", self)
+        self.title_label = QLabel(t("confirm.title_in"), self)
         self.title_label.setStyleSheet(
             f"font-size: {FS_TITLE}px; font-weight: bold; color: {COLOR_INK};"
         )
@@ -125,12 +126,14 @@ class ConfirmScreen(QWidget):
         nav = QHBoxLayout()
         nav.setSpacing(10)
         self.pill_o_in = create_key_guide(
-            "ConfirmPillOIn", "O", "ยืนยันนำเข้า", COLOR_FRESH, COLOR_ON_BAD, self
+            "ConfirmPillOIn", "O", "confirm.ok_in", COLOR_FRESH, COLOR_ON_BAD, self
         )
         self.pill_o_out = create_key_guide(
-            "ConfirmPillOOut", "O", "ยืนยันนำออก", COLOR_TAKE_SOLID, COLOR_ON_TAKE, self
+            "ConfirmPillOOut", "O", "confirm.ok_out", COLOR_TAKE_SOLID, COLOR_ON_TAKE, self
         )
-        pill_x = create_key_guide("ConfirmPillX", "X", "กลับไปแก้ไข", COLOR_DARK, COLOR_ON_DARK, self)
+        pill_x = create_key_guide(
+            "ConfirmPillX", "X", "confirm.back", COLOR_DARK, COLOR_ON_DARK, self
+        )
         nav.addWidget(self.pill_o_in, stretch=1)
         nav.addWidget(self.pill_o_out, stretch=1)
         nav.addWidget(pill_x, stretch=1)
@@ -147,9 +150,9 @@ class ConfirmScreen(QWidget):
         """Fills the summary card for the item about to be saved."""
         self.kind = kind
         is_in = kind == "checkin"
-        self.title_label.setText("ยืนยันนำเข้า" if is_in else "ยืนยันนำออก")
+        self.title_label.setText(t("confirm.title_in") if is_in else t("confirm.title_out"))
         self.question_label.setText(
-            "ต้องการนำรายการนี้เข้าตู้เย็นใช่ไหม?" if is_in else "ต้องการนำรายการนี้ออกใช่ไหม?"
+            t("confirm.question_in") if is_in else t("confirm.question_out")
         )
         self.name_label.setText(name_th)
         self.detail_label.setText(detail)
@@ -177,15 +180,15 @@ class ConfirmScreen(QWidget):
             )
         else:
             self.image_label.clear()
-            self.image_label.setText("ไม่มีภาพ")
+            self.image_label.setText(t("common.no_image"))
 
         self._countdown_seconds = CONFIRM_TIMEOUT_S
         self._update_countdown_label()
         self._countdown_timer.start(1000)
 
     def _update_countdown_label(self) -> None:
-        verb = "บันทึก" if self.kind == "checkin" else "ยกเลิก"
-        self.countdown_label.setText(f"{verb}อัตโนมัติใน {self._countdown_seconds} วิ")
+        key = "countdown.save" if self.kind == "checkin" else "countdown.cancel"
+        self.countdown_label.setText(t(key, n=self._countdown_seconds))
 
     def _tick_countdown(self) -> None:
         self._countdown_seconds -= 1

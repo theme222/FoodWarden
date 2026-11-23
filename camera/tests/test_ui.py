@@ -685,3 +685,90 @@ def test_add_months_clamps_day_to_month_length() -> None:
     assert _add_months(date(2026, 12, 15), 1) == date(2027, 1, 15)
     assert _add_months(date(2027, 1, 15), -1) == date(2026, 12, 15)
     assert _add_years(date(2028, 2, 29), 1) == date(2029, 2, 28)
+
+
+def test_i18n_strings_are_complete() -> None:
+    import string
+
+    from foodwarden_camera.ui.i18n import STRINGS
+
+    fmt = string.Formatter()
+    for key, (th, en) in STRINGS.items():
+        assert th and en, key
+        th_fields = {f for _, f, _, _ in fmt.parse(th) if f}
+        en_fields = {f for _, f, _, _ in fmt.parse(en) if f}
+        assert th_fields == en_fields, key
+
+
+def test_bundled_fonts_load(qapp: QApplication) -> None:
+    from foodwarden_camera.ui.fonts import load_bundled_fonts
+
+    families = load_bundled_fonts()
+    assert {"Lexend", "K2D"} <= families
+
+
+def test_language_switch_from_settings(qapp: QApplication) -> None:
+    from foodwarden_camera.ui.i18n import get_language
+
+    saved: list[str] = []
+    button_ctrl = ButtonController()
+    window = FoodWardenMainWindow(button_controller=button_ctrl, on_save_language=saved.append)
+    idle = window.idle_screen
+    idle.update_telemetry(3.4, 120, 10)
+    idle.update_person_state(False)
+    assert idle.btn_settings.text() == "ตั้งค่า"
+    assert idle.temp_tile.pill is not None and idle.temp_tile.pill.text() == "ปกติ"
+
+    # Choose English in Settings and save -> applied immediately and persisted.
+    window.show_settings_screen()
+    window.settings_screen.btn_lang_en.click()
+    window.settings_screen.btn_save.click()
+    assert saved == ["en"]
+    assert get_language() == "en"
+    assert window.stack.currentIndex() == 0
+    assert idle.btn_settings.text() == "Settings"
+    assert idle.temp_tile.title_label.text() == "Temperature"
+    assert idle.temp_tile.pill.text() == "Normal"  # replayed from the last telemetry
+    assert idle.person_label.text() == "No one"
+    assert window.settings_screen.btn_save.text() == "Save"
+
+    # Flow screens render in English, and item names use the English name.
+    draft = CheckInDraftResult(
+        name_th="นมสด",
+        name_en="Fresh Milk",
+        category="Dairy",
+        category_th="นม",
+        estimated_shelf_life_days=7,
+        estimated_expiry_date="2099-01-10",
+        storage_recommendation_th="แช่เย็น",
+        storage_recommendation_en="Keep cold",
+        image_storage_path="milk.jpg",
+        confidence=0.95,
+    )
+    window.show_checkin_draft(draft, b"")
+    assert window.checkin_screen.name_th.text() == "Fresh Milk"
+    assert "Auto-save in" in window.checkin_screen.countdown_label.text()
+    assert window.checkin_screen.storage_label.text() == "Storage: Keep cold"
+    window.checkin_screen.handle_cancel()
+
+    # Banner shows English only in English mode.
+    window.alert_banner.show_door_closing_alert()
+    assert "CLOSE_DOOR" in window.alert_banner.label_th.text()
+    assert window.alert_banner.label_en.isHidden()
+
+    # Re-saving the same language does not persist again.
+    window.show_settings_screen()
+    window.settings_screen.btn_save.click()
+    assert saved == ["en"]
+
+
+def test_language_setting_persists_to_env(tmp_path: Path) -> None:
+    env_file = tmp_path / ".env"
+    settings = GatewaySettings(sqlite_db_path=":memory:")
+    settings.save_ui_language("en", target_env_path=env_file)
+    assert settings.ui_language == "en"
+    assert "UI_LANGUAGE='en'" in env_file.read_text(encoding="utf-8") or (
+        "UI_LANGUAGE=en" in env_file.read_text(encoding="utf-8")
+    )
+    settings.save_ui_language("klingon", target_env_path=env_file)
+    assert settings.ui_language == "th"

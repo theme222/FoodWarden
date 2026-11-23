@@ -11,6 +11,7 @@ from PyQt6.QtGui import QImage, QPixmap
 from PyQt6.QtWidgets import QFrame, QHBoxLayout, QLabel, QVBoxLayout, QWidget
 
 from foodwarden_camera.models.cloud_cbs import CheckInDraftResult
+from foodwarden_camera.ui.i18n import bind_text, get_language, pick, t
 from foodwarden_camera.ui.styles import (
     COLOR_BAD,
     COLOR_DARK,
@@ -111,8 +112,8 @@ class CheckInScreen(QWidget):
         root_layout.setContentsMargins(14, 10, 14, 12)
         root_layout.setSpacing(10)
 
-        header, self.countdown_label = create_screen_header("นำเข้าอาหาร", self)
-        self.countdown_label.setText(f"บันทึกอัตโนมัติใน {self.autocomplete_timeout_s} วิ")
+        header, self.countdown_label = create_screen_header("checkin.title", self)
+        self.countdown_label.setText(t("countdown.save", n=self.autocomplete_timeout_s))
         root_layout.addLayout(header)
 
         # Body: Photo | Item details + expiry date
@@ -134,7 +135,7 @@ class CheckInScreen(QWidget):
         )
         img_layout = QVBoxLayout(self.img_frame)
         img_layout.setContentsMargins(4, 4, 4, 4)
-        self.image_label = QLabel("เตรียมภาพ...", self.img_frame)
+        self.image_label = QLabel(t("common.preparing_image"), self.img_frame)
         self.image_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self.image_label.setStyleSheet(
             f"color: {COLOR_ON_DARK}; font-size: {FS_LABEL}px; font-weight: bold;"
@@ -149,19 +150,19 @@ class CheckInScreen(QWidget):
         card_layout.setContentsMargins(16, 10, 16, 12)
         card_layout.setSpacing(4)
 
-        self.name_th = FitLabel("กำลังวิเคราะห์...", self.card, min_px=24)
+        self.name_th = FitLabel(t("checkin.analyzing"), self.card, min_px=24)
 
         self.name_en = FitLabel("Gemini AI", self.card, min_px=15)
         self.name_en.setStyleSheet(
             f"font-size: {FS_LABEL}px; font-weight: bold; color: {COLOR_MUTED};"
         )
 
-        self.category_label = FitLabel("หมวดหมู่: -", self.card, min_px=15)
+        self.category_label = FitLabel(t("checkin.category", v="-"), self.card, min_px=15)
         self.category_label.setStyleSheet(
             f"font-size: {FS_LABEL}px; font-weight: bold; color: {COLOR_INK};"
         )
 
-        self.storage_label = QLabel("วิธีเก็บ: -", self.card)
+        self.storage_label = QLabel(t("checkin.storage", v="-"), self.card)
         self.storage_label.setWordWrap(True)
         self.storage_label.setStyleSheet(f"font-size: {FS_LABEL}px; color: {COLOR_MUTED};")
 
@@ -180,17 +181,21 @@ class CheckInScreen(QWidget):
         # Bottom button guide
         nav_bar = QHBoxLayout()
         nav_bar.setSpacing(10)
-        self.pill_o = create_key_guide("CheckInPillO", "O", "ถัดไป", COLOR_FRESH, COLOR_ON_BAD, self)
+        self.pill_o = create_key_guide(
+            "CheckInPillO", "O", "common.next", COLOR_FRESH, COLOR_ON_BAD, self
+        )
         pill_arrows = create_key_guide(
             "CheckInPillArrows",
             "↑↓",
-            "ปรับวันที่",
+            "checkin.adjust_date",
             COLOR_SURFACE,
             COLOR_INK,
             self,
             border_color=COLOR_RULE,
         )
-        pill_x = create_key_guide("CheckInPillX", "X", "ยกเลิก", COLOR_BAD, COLOR_ON_BAD, self)
+        pill_x = create_key_guide(
+            "CheckInPillX", "X", "common.cancel", COLOR_BAD, COLOR_ON_BAD, self
+        )
         nav_bar.addWidget(self.pill_o, stretch=1)
         nav_bar.addWidget(pill_arrows, stretch=1)
         nav_bar.addWidget(pill_x, stretch=1)
@@ -207,7 +212,7 @@ class CheckInScreen(QWidget):
         col.setSpacing(6)
 
         title_row = QHBoxLayout()
-        exp_title = QLabel("วันหมดอายุ  (วัน / เดือน / ปี)", tile)
+        exp_title = bind_text(QLabel(tile), "checkin.expiry_title")
         exp_title.setStyleSheet(
             f"font-size: {FS_LABEL}px; font-weight: bold; color: {COLOR_MUTED};"
         )
@@ -262,7 +267,7 @@ class CheckInScreen(QWidget):
         self._countdown_timer.start(1000)
 
     def _update_countdown_label(self) -> None:
-        self.countdown_label.setText(f"บันทึกอัตโนมัติใน {self._countdown_seconds} วิ")
+        self.countdown_label.setText(t("countdown.save", n=self._countdown_seconds))
 
     def _on_user_interaction(self) -> None:
         """Any button press while editing: switch to / restart the 30 s edit countdown."""
@@ -289,7 +294,7 @@ class CheckInScreen(QWidget):
     def _set_preview_image(self, image_bytes: bytes) -> None:
         if not image_bytes:
             self.image_label.clear()
-            self.image_label.setText("เตรียมภาพ...")
+            self.image_label.setText(t("common.preparing_image"))
             return
         qimg = QImage.fromData(image_bytes)
         if not qimg.isNull():
@@ -311,12 +316,12 @@ class CheckInScreen(QWidget):
         self.countdown_label.setStyleSheet(countdown_style())
         self._set_preview_image(image_bytes)
 
-        self.countdown_label.setText("กำลังรอ AI... (Loading)")
-        self.name_th.setText("กำลังวิเคราะห์...")
+        self.countdown_label.setText(t("common.loading_ai"))
+        self.name_th.setText(t("checkin.analyzing"))
         self._set_name_style(COLOR_WARN_TEXT)
-        self.name_en.setText("กำลังตรวจสอบกับ Gemini AI")
-        self.category_label.setText("หมวดหมู่: กำลังโหลด...")
-        self.storage_label.setText("วิธีเก็บ: กำลังโหลด...")
+        self.name_en.setText(t("checkin.checking_gemini"))
+        self.category_label.setText(t("checkin.category", v=t("checkin.loading")))
+        self.storage_label.setText(t("checkin.storage", v=t("checkin.loading")))
         self.days_left_label.setText("")
         self.days_left_label.setStyleSheet("")
 
@@ -338,11 +343,21 @@ class CheckInScreen(QWidget):
         if image_bytes:
             self._set_preview_image(image_bytes)
 
-        self.name_th.setText(draft.name_th)
+        # Primary name follows the UI language; the secondary line shows the other one.
+        self.name_th.setText(pick(draft.name_th, draft.name_en))
         self._set_name_style(COLOR_FRESH)
-        self.name_en.setText(f"มั่นใจ {draft.confidence * 100:.0f}%  ·  {draft.name_en}")
-        self.category_label.setText(f"หมวดหมู่: {draft.category_th}")
-        self.storage_label.setText(f"วิธีเก็บ: {draft.storage_recommendation_th}")
+        other_name = draft.name_en if get_language() == "th" else draft.name_th
+        confidence = t("checkin.confidence", pct=f"{draft.confidence * 100:.0f}")
+        self.name_en.setText(f"{confidence}  ·  {other_name}")
+        self.category_label.setText(
+            t("checkin.category", v=pick(draft.category_th, draft.category))
+        )
+        self.storage_label.setText(
+            t(
+                "checkin.storage",
+                v=pick(draft.storage_recommendation_th, draft.storage_recommendation_en),
+            )
+        )
 
         try:
             parsed = datetime.strptime(draft.estimated_expiry_date, "%Y-%m-%d").date()
@@ -387,7 +402,7 @@ class CheckInScreen(QWidget):
 
         text, bg, fg = days_left_badge(self._current_date)
         if self._current_date <= date.today():
-            text = f"{text} (ต่ำสุด)"
+            text = f"{text}{t('days.min_suffix')}"
         self.days_left_label.setText(text)
         self.days_left_label.setStyleSheet(
             pill_style(bg, fg, font_px=FS_LABEL - 1, pad_v=3, pad_h=10, radius=10)
@@ -395,7 +410,7 @@ class CheckInScreen(QWidget):
 
         # O advances through Day → Month → Year, then opens the confirm step.
         is_last = self._selected_segment >= 2
-        self._set_select_hint("เสร็จ" if is_last else "ถัดไป")
+        self._set_select_hint(t("common.done") if is_last else t("common.next"))
 
     def _set_select_hint(self, text: str) -> None:
         label = self.pill_o.findChild(QLabel, "CheckInPillOLabel")

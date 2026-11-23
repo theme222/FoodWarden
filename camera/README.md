@@ -14,6 +14,8 @@ Running on a **Pi-top [4] (Raspberry Pi 4)** in **Python 3.11**, Node `'C'` capt
 * **[`pyproject.toml`](pyproject.toml) & [`.python-version`](.python-version):** `uv` project configuration pinned to Python `3.11`.
 * **[`.env.example`](.env.example):** Symlink to the root environment variable template ([`../.env.example`](../.env.example)).
 * **[`src/foodwarden_camera/__init__.py`](src/foodwarden_camera/__init__.py):** Application package entrypoint.
+* **[`src/foodwarden_camera/ui/i18n.py`](src/foodwarden_camera/ui/i18n.py):** All LCD UI strings in Thai and English. The language is chosen in Settings (default Thai) and saved as `UI_LANGUAGE=th|en` in `.env`.
+* **[`src/foodwarden_camera/assets/fonts/`](src/foodwarden_camera/assets/fonts/):** Bundled UI fonts (SIL OFL 1.1): **Lexend** for Latin text and **K2D** for Thai text. They are loaded at start-up by [`ui/fonts.py`](src/foodwarden_camera/ui/fonts.py), so the Pi-top needs no font installation.
 
 ### System & Interface References
 * **Root Documentation:** [`SUMMARY.md`](../SUMMARY.md) | [`AGENTS.md`](../AGENTS.md) | [`RUBRIC.md`](../RUBRIC.md)
