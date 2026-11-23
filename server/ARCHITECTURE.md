@@ -86,16 +86,18 @@ The web dashboard is a responsive Single Page Application designed for mobile an
 │
 └── /fridges (Protected Routes: requires verified Better Auth session cookie)
     │
-    ├── /fridges .................. Multi-fridge hub: lists accessible fridges (owner/member), create new fridge form
+    ├── /fridges .................. Fridge list with sensor freshness, inventory counts, and upcoming expiry counts
     │
-    ├── /me ....................... Personal LINE pairing & notification preferences across memberships
+    ├── /me ....................... Appearance, personal LINE pairing, and notifications across memberships
     │
     └── /fridges/:fridgeId (Fridge Workspace: contextual navigation bar + live WebSocket pill)
         │
         ├── /fridges/:fridgeId ................ Food Dashboard & Live Metrics (optional `?sim=1` redirects owner to `/sim`)
-        │                                       - Live environmental readings & FEFO-sorted grocery inventory with favorites
+        │                                       - Live readings, FEFO-sorted inventory, and private favorites below inventory
         │
-        ├── /fridges/:fridgeId/charts ......... 1h / 24h / 7d / 30d multi-sensor telemetry charts & door event scrubbing
+        ├── /fridges/:fridgeId/charts ......... Multi-sensor charts with a 1h / 24h / 7d / 30d period slider and reading cursor
+        │
+        ├── /fridges/:fridgeId/history ........ Paginated inventory, door, and sensor history with a Bangkok date filter
         │
         ├── /fridges/:fridgeId/food/add ....... Manual food check-in with bilingual mapping & optional JPEG crop upload
         │
@@ -103,7 +105,7 @@ The web dashboard is a responsive Single Page Application designed for mobile an
         │
         ├── /fridges/:fridgeId/devices ........ Gateway heartbeat tree (node last_seen_s vs last_known_seen_s) & door safety event timeline
         │
-        ├── /fridges/:fridgeId/me ............. Account personal LINE connection & per-fridge favorite alerts
+        ├── /fridges/:fridgeId/me ............. Legacy bookmark that redirects to /me
         │
         ├── /fridges/:fridgeId/settings ....... Owner-only fridge configuration:
         │                                       - Fridge rename & verified 1-use Family LINE pairing / disconnect
