@@ -58,7 +58,7 @@ struct __attribute__((packed)) SensorSample {
   uint64_t timestamp_s; // Second-accurate Unix timestamp (Little-Endian)
   int16_t  temp_cdeg;   // Temperature in centi-degrees Celsius (e.g. 342 = 3.42°C; -32768 / 0x8000 = Error)
   uint16_t voc_index;   // Sensirion Gas Index Algorithm output (1-500; 0 = warming up; 0xFFFF = Error)
-  uint16_t light_ldr;   // Raw ADC light reading (0-4095; 0xFFFF = Error)
+  uint16_t light_ldr;   // Light level 0-1000 (0 = dark, 1000 = bright; inverted + scaled ADC; 0xFFFF = Error)
 };
 
 // Encrypted Payload Structure (1 + N * 14 bytes)

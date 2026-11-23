@@ -13,7 +13,7 @@
 - [ ] **FreeRTOS Multi-Task Architecture (E1):** Implement discrete prioritized tasks (`vCurrentMonitorTask` at priority 4 for safety stall monitoring, `vMotorControlTask` at priority 3, `vMqttCommTask` at priority 2) communicating via queues, semaphores, or direct task notifications.
 - [ ] **Interrupt-Driven Safety Inputs (E2):** Configure `IRAM_ATTR` hardware ISRs for the Home Limit Switch (`GPIO 33`) and Emergency Stop Button (`S1` / `GPIO 16`) with deferred task notification (`vTaskNotifyGiveFromISR`).
 - [ ] **TB6612FNG Worm Gear Motor Control:** Drive JGY-370 12V worm gear motor via `PWMA` (`GPIO 26`), `AIN1` (`GPIO 27`), and `AIN2` (`GPIO 25`) with soft-start PWM ramping and active short-braking.
-- [ ] **INA219 Stall & Obstruction Cutoff:** Continuously sample motor current (`I2C1`: `GPIO 21/22`, `0x40`) at `≥ 50 Hz` while moving and trigger immediate motor reversal/retraction when current exceeds the obstruction threshold.
+- [ ] **INA219 Stall & Obstruction Cutoff:** Continuously sample motor current (`I2C1`: `GPIO 4/5`, `0x40`) at `≥ 50 Hz` while moving and trigger immediate motor reversal/retraction when current exceeds the obstruction threshold.
 - [ ] **Close-Range IR Door Shut Detection:** Monitor the digital IR obstacle sensor (`GPIO 32`) to detect full door closure, stop forward push, retract arm to the limit switch, and report `SUCCESS`.
 - [ ] **MQTT over TLS Client ([`CBD.md`](../interface/CBD.md), E4, E5):** Maintain a persistent TLS connection to Gateway `'C'` (`port 8883`), subscribe to `CLOSE_DOOR` and `ABORT` commands, and publish status/safety events.
 
