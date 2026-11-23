@@ -8,7 +8,8 @@ from __future__ import annotations
 
 import logging
 from collections.abc import Callable
-from typing import Any
+from datetime import datetime
+from typing import Any, cast
 
 from PyQt6.QtCore import Qt, QThread, pyqtSignal
 from PyQt6.QtGui import QColor, QKeyEvent, QMouseEvent, QPainter, QPaintEvent, QResizeEvent
@@ -27,15 +28,34 @@ from foodwarden_camera.models.cloud_cbs import CheckInDraftResult, CheckOutCandi
 from foodwarden_camera.ui.screens.alert_overlay import AlertBanner
 from foodwarden_camera.ui.screens.checkin_screen import CheckInScreen
 from foodwarden_camera.ui.screens.checkout_screen import CheckOutScreen
+from foodwarden_camera.ui.screens.confirm_screen import ConfirmScreen
 from foodwarden_camera.ui.screens.idle_screen import IdleScreen
+from foodwarden_camera.ui.screens.result_screen import ResultKind, ResultScreen, ResultStatus
 from foodwarden_camera.ui.screens.settings_screen import SettingsScreen
 from foodwarden_camera.ui.styles import (
     DARK_STYLESHEET,
     MAIN_WINDOW_HEIGHT,
     MAIN_WINDOW_WIDTH,
 )
+from foodwarden_camera.ui.widgets import days_left_badge
 
 logger = logging.getLogger(__name__)
+
+# QStackedWidget page indices
+IDX_IDLE = 0
+IDX_CHECKIN = 1
+IDX_CHECKOUT = 2
+IDX_SETTINGS = 3
+IDX_CONFIRM = 4
+IDX_RESULT = 5
+
+
+def _format_thai_date(iso_date: str) -> str:
+    """'2026-11-25' -> '25/11/2026' (falls back to the raw string)."""
+    try:
+        return datetime.strptime(iso_date, "%Y-%m-%d").strftime("%d/%m/%Y")
+    except ValueError:
+        return iso_date
 
 
 class _SleepOverlay(QFrame):
@@ -103,6 +123,7 @@ class FoodWardenMainWindow(QMainWindow):
     _sig_show_checkout_loading = pyqtSignal(bytes)
     _sig_show_checkout_candidates = pyqtSignal(object, bytes)
     _sig_set_display_sleep = pyqtSignal(bool)
+    _sig_show_commit_result = pyqtSignal(str, str, str, str)
 
     def __init__(
         self,
@@ -177,6 +198,7 @@ class FoodWardenMainWindow(QMainWindow):
             on_cancel_callback=self._handle_workflow_cancelled,
             autocomplete_timeout_s=self._current_autocomplete_s,
             parent=self.stack,
+            on_review_callback=self._handle_checkin_review,
         )
         self.stack.addWidget(self.checkin_screen)
 
@@ -186,6 +208,7 @@ class FoodWardenMainWindow(QMainWindow):
             on_cancel_callback=self._handle_workflow_cancelled,
             autocomplete_timeout_s=self._current_autocomplete_s,
             parent=self.stack,
+            on_review_callback=self._handle_checkout_review,
         )
         self.stack.addWidget(self.checkout_screen)
 
@@ -206,6 +229,20 @@ class FoodWardenMainWindow(QMainWindow):
             parent=self.stack,
         )
         self.stack.addWidget(self.settings_screen)
+
+        # Screen 4: "Are you sure?" step after a manual Check-In / Check-Out edit
+        self.confirm_screen = ConfirmScreen(
+            on_confirm=self._handle_confirm_accepted,
+            on_back=self._handle_confirm_back,
+            parent=self.stack,
+        )
+        self.stack.addWidget(self.confirm_screen)
+        self._pending_checkin: tuple[CheckInDraftResult, str] | None = None
+        self._pending_checkout: CheckOutCandidate | None = None
+
+        # Screen 5: "Saved ✓" outcome card
+        self.result_screen = ResultScreen(on_done=self.show_idle_screen, parent=self.stack)
+        self.stack.addWidget(self.result_screen)
 
         root_layout.addWidget(self.stack)
 
@@ -237,6 +274,7 @@ class FoodWardenMainWindow(QMainWindow):
         self._sig_show_checkout_loading.connect(self._apply_show_checkout_loading)
         self._sig_show_checkout_candidates.connect(self._apply_show_checkout_candidates)
         self._sig_set_display_sleep.connect(self._apply_display_sleep)
+        self._sig_show_commit_result.connect(self._apply_show_commit_result)
 
         self.button_controller.register_callback(ButtonType.UP, self._on_button_up)
         self.button_controller.register_callback(ButtonType.DOWN, self._on_button_down)
@@ -411,7 +449,13 @@ class FoodWardenMainWindow(QMainWindow):
         if self._wake_if_sleeping():
             return
         idx = self.stack.currentIndex()
-        if idx == 3:
+        if idx == IDX_SETTINGS:
+            return
+        if idx == IDX_RESULT:
+            self.result_screen.handle_any_button()
+            return
+        if idx == IDX_CONFIRM:
+            self.confirm_screen.handle_select()
             return
         if idx == 0:
             # Idle screen -> Trigger Check-In capture
@@ -434,7 +478,13 @@ class FoodWardenMainWindow(QMainWindow):
         if self._wake_if_sleeping():
             return
         idx = self.stack.currentIndex()
-        if idx == 3:
+        if idx == IDX_SETTINGS:
+            return
+        if idx == IDX_RESULT:
+            self.result_screen.handle_any_button()
+            return
+        if idx == IDX_CONFIRM:
+            self.confirm_screen.handle_cancel()
             return
         if idx == 0:
             # Idle screen -> Trigger Check-Out capture
@@ -457,7 +507,8 @@ class FoodWardenMainWindow(QMainWindow):
         if self._wake_if_sleeping():
             return
         idx = self.stack.currentIndex()
-        if idx == 3:
+        if idx == IDX_RESULT:
+            self.result_screen.handle_any_button()
             return
         if idx == 1:
             self.checkin_screen.handle_up()
@@ -475,7 +526,8 @@ class FoodWardenMainWindow(QMainWindow):
         if self._wake_if_sleeping():
             return
         idx = self.stack.currentIndex()
-        if idx == 3:
+        if idx == IDX_RESULT:
+            self.result_screen.handle_any_button()
             return
         if idx == 1:
             self.checkin_screen.handle_down()
@@ -509,17 +561,116 @@ class FoodWardenMainWindow(QMainWindow):
         if self.on_save_door_close_timeout:
             self.on_save_door_close_timeout(self._current_door_close_s)
 
+    # --- Confirm step (only after a manual edit / explicit O press) -------------
+
+    def _handle_checkin_review(self, draft: CheckInDraftResult, expiry_date: str) -> None:
+        self._pending_checkin = (draft, expiry_date)
+        self._pending_checkout = None
+        try:
+            badge = days_left_badge(datetime.strptime(expiry_date, "%Y-%m-%d").date())
+        except ValueError:
+            badge = None
+        self.confirm_screen.show_confirm(
+            "checkin",
+            draft.name_th,
+            f"หมดอายุ {_format_thai_date(expiry_date)}",
+            badge,
+            self.checkin_screen.current_pixmap,
+        )
+        self.stack.setCurrentIndex(IDX_CONFIRM)
+        logger.info("Check-in review requested (expiry %s)", expiry_date)
+
+    def _handle_checkout_review(self, candidate: CheckOutCandidate) -> None:
+        self._pending_checkout = candidate
+        self._pending_checkin = None
+        try:
+            badge = days_left_badge(datetime.strptime(candidate.expiry_date, "%Y-%m-%d").date())
+        except ValueError:
+            badge = None
+        self.confirm_screen.show_confirm(
+            "checkout",
+            candidate.name_th,
+            f"หมดอายุ {_format_thai_date(candidate.expiry_date)}",
+            badge,
+            self.checkout_screen.current_pixmap,
+        )
+        self.stack.setCurrentIndex(IDX_CONFIRM)
+        logger.info("Check-out review requested for item: %s", candidate.item_id)
+
+    def _handle_confirm_accepted(self) -> None:
+        if self.confirm_screen.kind == "checkin" and self._pending_checkin is not None:
+            draft, expiry = self._pending_checkin
+            self._pending_checkin = None
+            self._handle_checkin_confirmed(draft, expiry)
+        elif self.confirm_screen.kind == "checkout" and self._pending_checkout is not None:
+            candidate = self._pending_checkout
+            self._pending_checkout = None
+            self._handle_checkout_confirmed(candidate)
+        else:
+            self.show_idle_screen()
+
+    def _handle_confirm_back(self) -> None:
+        """X on the confirm step: return to editing (countdown stays off)."""
+        if self.confirm_screen.kind == "checkin":
+            self.checkin_screen.resume_editing()
+            self.stack.setCurrentIndex(IDX_CHECKIN)
+        else:
+            self.stack.setCurrentIndex(IDX_CHECKOUT)
+
+    # --- Commit + outcome card ------------------------------------------------
+
     def _handle_checkin_confirmed(self, draft: CheckInDraftResult, expiry_date: str) -> None:
         logger.info("Check-in confirmed with expiry: %s", expiry_date)
+        # Show "saving" first: the commit callback may report its result synchronously.
+        self.result_screen.show_saving("checkin", draft.name_th)
+        self.stack.setCurrentIndex(IDX_RESULT)
         if self.on_commit_checkin:
             self.on_commit_checkin(draft, expiry_date)
-        self.show_idle_screen()
 
     def _handle_checkout_confirmed(self, candidate: CheckOutCandidate) -> None:
         logger.info("Check-out confirmed for item: %s", candidate.item_id)
+        self.result_screen.show_saving("checkout", candidate.name_th)
+        self.stack.setCurrentIndex(IDX_RESULT)
         if self.on_commit_checkout:
             self.on_commit_checkout(candidate)
-        self.show_idle_screen()
+
+    def show_commit_result(
+        self, kind: ResultKind, status: ResultStatus, item_name: str, message: str = ""
+    ) -> None:
+        """Reports a commit outcome from any thread (orchestrator worker threads)."""
+        if self._is_gui_thread():
+            self._apply_show_commit_result(kind, status, item_name, message)
+        else:
+            self._sig_show_commit_result.emit(kind, status, item_name, message)
+
+    def _apply_show_commit_result(
+        self, kind: str, status: str, item_name: str, message: str
+    ) -> None:
+        on_result_card = (
+            self.stack.currentIndex() == IDX_RESULT
+            and self.result_screen.status == "saving"
+            and self.result_screen.kind == kind
+        )
+        if on_result_card:
+            self.result_screen.show_outcome(cast(ResultStatus, status), message)
+            return
+        # User already left the card: fall back to the top banner.
+        verb_th = "นำเข้า" if kind == "checkin" else "นำออก"
+        verb_en = "Checked in" if kind == "checkin" else "Checked out"
+        if status == "success":
+            self.alert_banner.show_success(f"{verb_th}แล้ว: {item_name}", f"{verb_en}: {item_name}")
+        elif status == "queued":
+            self.alert_banner.show_alert(
+                f"บันทึก{verb_th}ไว้ในเครื่อง: {item_name}",
+                "Saved offline — will sync when online",
+                is_critical=False,
+            )
+        elif status == "failed":
+            self.alert_banner.show_alert(
+                f"{verb_th}ไม่สำเร็จ: {item_name}",
+                message or f"{verb_en} failed — please retry",
+                is_critical=True,
+            )
 
     # ==========================================================================
     # Dev / PC Keyboard Navigation Fallback

@@ -33,6 +33,7 @@ from foodwarden_camera.ui.styles import (
 )
 from foodwarden_camera.ui.widgets import (
     FitLabel,
+    countdown_style,
     create_key_guide,
     create_screen_header,
     days_left_badge,
@@ -64,6 +65,13 @@ class CheckInScreen(QWidget):
     The expiry date can never be set earlier than today: AI drafts with a past
     date are clamped on load, every ↓ press is clamped, and the value is
     clamped again at commit (covers the screen staying open past midnight).
+
+    Countdown rules:
+      * No button pressed → countdown runs out → saved directly (``on_confirm``),
+        no confirmation step.
+      * Any button pressed (↑/↓/O) → countdown stops for good, because the user
+        is checking the date and may need time. Finishing the year segment with
+        O hands off to the confirmation screen (``on_review``).
     """
 
     def __init__(
@@ -72,10 +80,13 @@ class CheckInScreen(QWidget):
         on_cancel_callback: Callable[[], None],
         autocomplete_timeout_s: int = 5,
         parent: QWidget | None = None,
+        on_review_callback: Callable[[CheckInDraftResult, str], None] | None = None,
     ) -> None:
         super().__init__(parent)
         self.on_confirm = on_confirm_callback
         self.on_cancel = on_cancel_callback
+        self.on_review = on_review_callback or on_confirm_callback
+        self._manual = False  # True once the user pressed any button on this draft
         self.autocomplete_timeout_s = max(1, autocomplete_timeout_s)
         self._draft: CheckInDraftResult | None = None
         self._is_loading = False
@@ -249,6 +260,20 @@ class CheckInScreen(QWidget):
             # Restart so the next tick is a full second away, not a partial one.
             self._countdown_timer.start(1000)
 
+    def _enter_manual_mode(self) -> None:
+        """First button press on a draft: stop the countdown permanently."""
+        if self._manual:
+            return
+        self._manual = True
+        self._countdown_timer.stop()
+        self.countdown_label.setText("หยุดนับเวลาแล้ว")
+        self.countdown_label.setStyleSheet(countdown_style(COLOR_WAIT_BG, COLOR_WAIT_FG))
+
+    @property
+    def is_manual(self) -> bool:
+        """Whether the user has interacted (countdown stopped)."""
+        return self._manual
+
     def _tick_countdown(self) -> None:
         self._countdown_seconds -= 1
         if self._countdown_seconds <= 0:
@@ -282,6 +307,8 @@ class CheckInScreen(QWidget):
         self._countdown_timer.stop()
         self._is_loading = True
         self._draft = None
+        self._manual = False
+        self.countdown_label.setStyleSheet(countdown_style())
         self._set_preview_image(image_bytes)
 
         self.countdown_label.setText("กำลังรอ AI... (Loading)")
@@ -324,6 +351,8 @@ class CheckInScreen(QWidget):
         self._current_date = self._clamp_to_today(parsed)
 
         self._selected_segment = 0
+        self._manual = False
+        self.countdown_label.setStyleSheet(countdown_style())
         self._refresh_date_display()
         self._reset_countdown_display()
         self._countdown_timer.start(1000)
@@ -365,9 +394,9 @@ class CheckInScreen(QWidget):
             pill_style(bg, fg, font_px=FS_LABEL - 1, pad_v=3, pad_h=10, radius=10)
         )
 
-        # O advances through Day → Month → Year, then saves.
+        # O advances through Day → Month → Year, then opens the confirm step.
         is_last = self._selected_segment >= 2
-        self._set_select_hint("บันทึก" if is_last else "ถัดไป")
+        self._set_select_hint("เสร็จ" if is_last else "ถัดไป")
 
     def _set_select_hint(self, text: str) -> None:
         label = self.pill_o.findChild(QLabel, "CheckInPillOLabel")
@@ -387,7 +416,7 @@ class CheckInScreen(QWidget):
         """Increments highlighted date segment."""
         if self._is_loading or self._draft is None:
             return
-        self._reset_countdown_display()
+        self._enter_manual_mode()
         self._shift_date(+1)
         self._refresh_date_display()
 
@@ -395,20 +424,32 @@ class CheckInScreen(QWidget):
         """Decrements highlighted date segment (never below today)."""
         if self._is_loading or self._draft is None:
             return
-        self._reset_countdown_display()
+        self._enter_manual_mode()
         self._shift_date(-1)
         self._refresh_date_display()
 
     def handle_select(self) -> None:
-        """Advances date segment or commits on final segment."""
-        if self._is_loading:
+        """Advances date segment, or opens the confirm step on the final segment."""
+        if self._is_loading or self._draft is None:
             return
+        self._enter_manual_mode()
         if self._selected_segment < 2:
             self._selected_segment += 1
-            self._reset_countdown_display()
             self._refresh_date_display()
         else:
-            self._commit()
+            self._current_date = self._clamp_to_today(self._current_date)
+            self.on_review(self._draft, self._current_date.strftime("%Y-%m-%d"))
+
+    def resume_editing(self) -> None:
+        """Back from the confirm step (X): start again at the Day segment, no countdown."""
+        self._selected_segment = 0
+        self._refresh_date_display()
+
+    @property
+    def current_pixmap(self) -> QPixmap | None:
+        """Snapshot currently shown, for the confirm summary card."""
+        pixmap = self.image_label.pixmap()
+        return pixmap if pixmap is not None and not pixmap.isNull() else None
 
     def handle_cancel(self) -> None:
         """Cancels check-in without committing."""
@@ -417,6 +458,7 @@ class CheckInScreen(QWidget):
         self.on_cancel()
 
     def _commit(self) -> None:
+        """Auto-confirm path (countdown ran out with no interaction): save directly."""
         self._countdown_timer.stop()
         if self._draft is not None:
             self._current_date = self._clamp_to_today(self._current_date)

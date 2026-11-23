@@ -505,3 +505,63 @@ def test_run_person_safety_check_updates_ui_and_preview_overlay(
     assert boxes_2 == []
     assert "Clear" in test_orchestrator.window.idle_screen.pill_person.text()
     assert test_orchestrator._annotate_person_preview(dummy_frame) is dummy_frame
+
+
+def test_commit_workers_report_outcome_to_result_card(
+    test_orchestrator: GatewayOrchestrator,
+) -> None:
+    from foodwarden_camera.models.cloud_cbs import (
+        CheckInCommitPayload,
+        CheckInCommitResult,
+        CheckOutCommitPayload,
+        CheckOutCommitResult,
+    )
+
+    window = test_orchestrator.window
+    checkin_payload = CheckInCommitPayload(
+        name_th="นมสด",
+        name_en="Milk",
+        category="Dairy",
+        category_th="นม",
+        estimated_shelf_life_days=7,
+        expiry_date="2026-12-01",
+        storage_recommendation_th="แช่เย็น",
+        storage_recommendation_en="Keep cold",
+        image_storage_path="milk.jpg",
+        confidence=0.9,
+    )
+
+    # Success -> "นำเข้าแล้ว"
+    window.result_screen.show_saving("checkin", "นมสด")
+    window.stack.setCurrentIndex(5)
+    test_orchestrator.cloud_client.checkin_commit.return_value = (
+        True,
+        CheckInCommitResult(item_id="i1"),
+        "",
+    )
+    test_orchestrator._run_commit_checkin_worker(checkin_payload, "k1")
+    assert window.result_screen.status == "success"
+    assert "01/12/2026" in window.result_screen.message_label.text()
+
+    # Offline -> buffered for retry and reported as "queued", not as a failure
+    window.result_screen.show_saving("checkin", "นมสด")
+    test_orchestrator.cloud_client.checkin_commit.return_value = (False, None, "Connection refused")
+    test_orchestrator._run_commit_checkin_worker(checkin_payload, "k2")
+    assert window.result_screen.status == "queued"
+    test_orchestrator.sync_manager.enqueue_pending_commit.assert_called_once()
+
+    # Check-out success / failure
+    window.result_screen.show_saving("checkout", "นมสด")
+    test_orchestrator.cloud_client.checkout_commit.return_value = (
+        True,
+        CheckOutCommitResult(item_id="i1"),
+        "",
+    )
+    test_orchestrator._run_commit_checkout_worker(CheckOutCommitPayload(item_id="i1"), "นมสด")
+    assert window.result_screen.status == "success"
+
+    window.result_screen.show_saving("checkout", "นมสด")
+    test_orchestrator.cloud_client.checkout_commit.return_value = (False, None, "HTTP 401")
+    test_orchestrator._run_commit_checkout_worker(CheckOutCommitPayload(item_id="i1"), "นมสด")
+    assert window.result_screen.status == "failed"
+    assert "Token" in window.result_screen.message_label.text()

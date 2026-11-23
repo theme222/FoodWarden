@@ -31,6 +31,8 @@ from foodwarden_camera.ui.styles import (
     COLOR_SURFACE,
     COLOR_SURFACE_2,
     COLOR_TAKE_SOLID,
+    COLOR_WAIT_BG,
+    COLOR_WAIT_FG,
     COLOR_WARN_TEXT,
     FS_BODY,
     FS_LABEL,
@@ -39,6 +41,7 @@ from foodwarden_camera.ui.styles import (
 )
 from foodwarden_camera.ui.widgets import (
     FitLabel,
+    countdown_style,
     create_key_guide,
     create_screen_header,
     days_left_badge,
@@ -124,9 +127,12 @@ class _CandidateRow(QFrame):
 class CheckOutScreen(QWidget):
     """High-contrast Check-Out screen highlighting top FEFO candidates.
 
-    Any change of selected row (Pi-top ↑/↓, keyboard, or touch) restarts the
-    auto-confirm countdown so the user always has the full timeout to read
-    the item they just moved to.
+    Countdown rules:
+      * No button pressed → countdown runs out → the FEFO item (row 1) is
+        removed directly (``on_confirm``), no confirmation step.
+      * The user changes the selected item (Pi-top ↑/↓, keyboard, or touch)
+        → countdown stops for good so they can take their time.
+      * O always opens the confirmation step (``on_review``).
     """
 
     def __init__(
@@ -135,10 +141,13 @@ class CheckOutScreen(QWidget):
         on_cancel_callback: Callable[[], None],
         autocomplete_timeout_s: int = 5,
         parent: QWidget | None = None,
+        on_review_callback: Callable[[CheckOutCandidate], None] | None = None,
     ) -> None:
         super().__init__(parent)
         self.on_confirm = on_confirm_callback
         self.on_cancel = on_cancel_callback
+        self.on_review = on_review_callback or on_confirm_callback
+        self._manual = False  # True once the user changed the selection
         self.autocomplete_timeout_s = max(1, autocomplete_timeout_s)
         self._candidates: list[CheckOutCandidate] = []
         self._rows: list[_CandidateRow] = []
@@ -283,6 +292,20 @@ class CheckOutScreen(QWidget):
             # Restart so the next tick is a full second away, not a partial one.
             self._countdown_timer.start(1000)
 
+    def _enter_manual_mode(self) -> None:
+        """User started choosing: stop the countdown permanently for this list."""
+        if self._manual:
+            return
+        self._manual = True
+        self._countdown_timer.stop()
+        self.countdown_label.setText("หยุดนับเวลาแล้ว")
+        self.countdown_label.setStyleSheet(countdown_style(COLOR_WAIT_BG, COLOR_WAIT_FG))
+
+    @property
+    def is_manual(self) -> bool:
+        """Whether the user has changed the selection (countdown stopped)."""
+        return self._manual
+
     def _tick_countdown(self) -> None:
         self._countdown_seconds -= 1
         if self._countdown_seconds <= 0:
@@ -317,6 +340,8 @@ class CheckOutScreen(QWidget):
         self._is_loading = True
         self._candidates = []
         self._rows = []
+        self._manual = False
+        self.countdown_label.setStyleSheet(countdown_style())
         self._set_preview_image(image_bytes)
 
         self.countdown_label.setText("กำลังรอ AI... (Loading)")
@@ -334,6 +359,8 @@ class CheckOutScreen(QWidget):
         self._countdown_timer.stop()
         self._candidates = candidates
         self._rows = []
+        self._manual = False
+        self.countdown_label.setStyleSheet(countdown_style())
         if image_bytes:
             self._set_preview_image(image_bytes)
 
@@ -385,7 +412,7 @@ class CheckOutScreen(QWidget):
         if self._is_loading or not self._rows:
             return
         self._apply_selection(row)
-        self._reset_countdown_display()
+        self._enter_manual_mode()
 
     def handle_up(self) -> None:
         """Selects previous candidate item."""
@@ -393,9 +420,9 @@ class CheckOutScreen(QWidget):
             return
         current_row = self.list_widget.currentRow()
         if current_row > 0:
-            self.list_widget.setCurrentRow(current_row - 1)  # resets via _on_row_changed
+            self.list_widget.setCurrentRow(current_row - 1)  # stops via _on_row_changed
         else:
-            self._reset_countdown_display()  # still interacting at the top edge
+            self._enter_manual_mode()  # still choosing at the top edge
 
     def handle_down(self) -> None:
         """Selects next candidate item."""
@@ -403,15 +430,32 @@ class CheckOutScreen(QWidget):
             return
         current_row = self.list_widget.currentRow()
         if current_row < self.list_widget.count() - 1:
-            self.list_widget.setCurrentRow(current_row + 1)  # resets via _on_row_changed
+            self.list_widget.setCurrentRow(current_row + 1)  # stops via _on_row_changed
         else:
-            self._reset_countdown_display()  # still interacting at the bottom edge
+            self._enter_manual_mode()  # still choosing at the bottom edge
 
     def handle_select(self) -> None:
-        """Confirms removal of currently selected candidate."""
+        """Opens the confirm step for the selected candidate."""
         if self._is_loading:
             return
-        self._commit()
+        candidate = self.selected_candidate
+        if candidate is None:
+            self.on_cancel()  # "not found" list: O just goes back
+            return
+        self._enter_manual_mode()
+        self.on_review(candidate)
+
+    @property
+    def selected_candidate(self) -> CheckOutCandidate | None:
+        """Currently highlighted candidate, if any."""
+        row = self.list_widget.currentRow()
+        return self._candidates[row] if 0 <= row < len(self._candidates) else None
+
+    @property
+    def current_pixmap(self) -> QPixmap | None:
+        """Snapshot currently shown, for the confirm summary card."""
+        pixmap = self.image_label.pixmap()
+        return pixmap if pixmap is not None and not pixmap.isNull() else None
 
     def handle_cancel(self) -> None:
         """Cancels checkout without committing."""
@@ -420,6 +464,7 @@ class CheckOutScreen(QWidget):
         self.on_cancel()
 
     def _commit(self) -> None:
+        """Auto-confirm path (countdown ran out with no interaction): remove directly."""
         self._countdown_timer.stop()
         row = self.list_widget.currentRow()
         if 0 <= row < len(self._candidates):

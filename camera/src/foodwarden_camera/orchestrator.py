@@ -41,6 +41,21 @@ from foodwarden_camera.vision.detector import VisionDetector, encode_bgr_to_jpeg
 logger = logging.getLogger(__name__)
 
 
+_COMMIT_FAILURE_TH: dict[str, str] = {
+    "offline": "ไม่มีอินเทอร์เน็ต กรุณาลองใหม่เมื่อออนไลน์",
+    "auth": "Token ไม่ถูกต้อง กรุณาตรวจสอบหน้าตั้งค่า",
+    "rate_limited": "ระบบ AI ไม่ว่าง กรุณารอสักครู่แล้วลองใหม่",
+    "rejected": "ระบบปฏิเสธข้อมูล กรุณาลองใหม่",
+    "unidentifiable": "ระบบไม่รู้จักรายการนี้ กรุณาลองใหม่",
+}
+
+
+def _thai_date(iso_date: str) -> str:
+    """'2026-11-25' -> '25/11/2026' for user-facing messages."""
+    parts = iso_date.split("-")
+    return "/".join(reversed(parts)) if len(parts) == 3 else iso_date
+
+
 class GatewayOrchestrator:
     """Coordinates edge subsystems and enforces real-time safety interlocks."""
 
@@ -786,6 +801,7 @@ class GatewayOrchestrator:
         """Commits confirmed check-in item in background so UI stays responsive."""
         if draft.image_storage_path == "local_offline":
             logger.info("Offline check-in already buffered for background draft/commit")
+            self.window.show_commit_result("checkin", "queued", draft.name_th)
             return
 
         payload = CheckInCommitPayload(
@@ -814,15 +830,23 @@ class GatewayOrchestrator:
         ok, res, err = self.cloud_client.checkin_commit(payload, idempotency_key=commit_key)
         if ok and res is not None:
             logger.info("Successfully committed check-in: %s", res.item_id)
+            self.window.show_commit_result(
+                "checkin",
+                "success",
+                payload.name_th,
+                f"บันทึกเข้าตู้เย็นแล้ว · หมดอายุ {_thai_date(payload.expiry_date)}",
+            )
+            return
+
+        err_kind = classify_cloud_error(err)
+        logger.warning("Cloud checkin commit failed (%s): %s", err_kind, err)
+        if err_kind in ("offline", "rate_limited"):
+            # Buffered for store-and-forward retry (E4): the item is not lost.
+            self.sync_manager.enqueue_pending_commit(payload, commit_key)
+            self.window.show_commit_result("checkin", "queued", payload.name_th)
         else:
-            err_kind = classify_cloud_error(err)
-            logger.warning("Cloud checkin commit failed (%s): %s", err_kind, err)
-            if err_kind in ("offline", "rate_limited"):
-                self.sync_manager.enqueue_pending_commit(payload, commit_key)
-            self._show_cloud_error_alert(
-                err_kind,
-                action_th="ตรวจรับเข้า",
-                action_en="check-in",
+            self.window.show_commit_result(
+                "checkin", "failed", payload.name_th, _COMMIT_FAILURE_TH.get(err_kind, "")
             )
 
     def handle_checkout_capture(self) -> None:
@@ -883,16 +907,24 @@ class GatewayOrchestrator:
         payload = CheckOutCommitPayload(item_id=candidate.item_id)
         worker = threading.Thread(
             target=self._run_commit_checkout_worker,
-            args=(payload,),
+            args=(payload, candidate.name_th),
             daemon=True,
             name="CheckOutCommitWorker",
         )
         self._commit_worker_thread = worker
         worker.start()
 
-    def _run_commit_checkout_worker(self, payload: CheckOutCommitPayload) -> None:
+    def _run_commit_checkout_worker(
+        self, payload: CheckOutCommitPayload, item_name: str = ""
+    ) -> None:
         ok, res, err = self.cloud_client.checkout_commit(payload)
         if ok and res is not None:
             logger.info("Successfully checked out item: %s", res.item_id)
+            self.window.show_commit_result("checkout", "success", item_name)
         else:
-            logger.warning("Check-out commit failed: %s", err)
+            err_kind = classify_cloud_error(err)
+            logger.warning("Check-out commit failed (%s): %s", err_kind, err)
+            # Check-outs are not queued offline, so tell the user it didn't happen.
+            self.window.show_commit_result(
+                "checkout", "failed", item_name, _COMMIT_FAILURE_TH.get(err_kind, "")
+            )
