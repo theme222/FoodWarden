@@ -1,0 +1,12 @@
+title = "FoodWarden repository secret protection"
+[extend]
+useDefault = true
+
+[[rules]]
+id = "foodwarden-private-config"
+description = "Private environment and device secret files must not be committed"
+path = '''(?i)(^|/)(\.env(\.[^/]*)?|\.dev\.vars(\.[^/]*)?|secrets\.(h|txt|json))$'''
+regex = '''(?s).+'''
+[[rules.allowlists]]
+description = "Documented example templates contain placeholders"
+paths = ['''(?i)(^|/)(\.env|\.dev\.vars|secrets\.(h|txt|json))\.example$''']

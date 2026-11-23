@@ -1,0 +1,22 @@
+flowchart TB
+    accTitle: FoodWarden cloud components
+    accDescr: The dashboard and hardware authenticate separately. Cloudflare D1 stores SQL records, R2 holds private food photos, and Durable Objects push real-time updates.
+    gateway["C0 · Camera gateway"]
+    user["Phone or computer<br/>FoodWarden dashboard"]
+    auth["Better Auth + Google OAuth<br/>OIDC sign-in and D1 sessions"]
+    worker["Cloudflare Workers + Static Assets<br/>Validate gateway token or user session"]
+    do_ws["Durable Objects · FridgeRoom<br/>SQLite + WebSocket Hibernation"]
+    d1[("Cloudflare D1 (SQLite)<br/>Auth, inventory, telemetry and status")]
+    r2[("Cloudflare R2<br/>Private grocery JPEGs")]
+    gemini["G · Gemini 3.5 Flash Lite<br/>Camera recognition implemented"]
+    line["L · LINE Messaging API<br/>Notifications and Cron digest implemented"]
+
+    gateway -->|"HTTPS Bearer · telemetry, door events and heartbeat"| worker
+    user <-->|"OAuth 2.0 and HttpOnly session"| auth
+    user -->|"Session cookie · REST writes and private photos"| worker
+    user <-->|"WSS real-time push · live reads"| do_ws
+    worker -->|"Read and write SQL records"| d1
+    worker -->|"Broadcast updates"| do_ws
+    worker <-->|"Store and read JPEGs"| r2
+    worker -->|"Identify food and rank candidates"| gemini
+    worker -->|"Expiry and safety alerts"| line

@@ -14,17 +14,17 @@ Before writing or modifying code, familiarize yourself with:
 * **`'C'` — Camera & Gateway:** Pi-top [4] (Raspberry Pi 4) edge processor.
 * **`'F'` — Fridge Sensor:** KidBright32 internal environmental sensor.
 * **`'D'` — Door Closer:** KidBright32 external motorized door closer.
-* **`'S'` — Server:** Firebase backend & Cloud Functions.
+* **`'S'` — Server:** Cloudflare Workers, D1, R2, and Durable Objects.
 * **`'G'` — Gemini API:** Gemini 3.5 Flash Lite multimodal intelligence.
 * **`'L'` — LINE:** Notification service (LINE Messaging API).
 
 ### Repository Directory Structure
 The repository is split into decoupled subprojects and shared interface definitions:
 * **[`interface/`](interface/README.md):** Shared interface contracts defining payloads, packet formats, schemas, and bitwise structures across all system boundaries (`CBD.md`, `FUC.md`, `CBS.md`, `SBG.md`, `SUL.md`). **ASK FOR APPROVAL BEFORE MAKING ANY CHANGES TO FILES IN THIS DIRECTORY**
-* **[`camera/`](camera/README.md) (Node `'C'` — Gateway):** Runs on Pi-top [4] (Raspberry Pi 4) in **Python**. Handles local YOLO11n vision, Mosquitto TLS broker, BLE GATT telemetry decryption & time sync, LCD display UI, and Firebase HTTPS client.
+* **[`camera/`](camera/README.md) (Node `'C'` — Gateway):** Runs on Pi-top [4] (Raspberry Pi 4) in **Python**. Handles local YOLO11n vision, Mosquitto TLS broker, BLE GATT telemetry decryption & time sync, LCD display UI, and Cloudflare HTTPS client.
 * **[`fridge/`](fridge/README.md) (Node `'F'` — Fridge Sensor):** Runs on KidBright32 (ESP32) in **C++/FreeRTOS**. Battery-powered internal sensor using deep sleep, sampling SHT31 (temp), SGP40 (VOC), and LDR (door light), communicating via AES-128-GCM encrypted BLE GATT (calibrating RTC time directly over BLE with zero Wi-Fi required).
 * **[`door/`](door/README.md) (Node `'D'` — Door Closer):** Runs on KidBright32 (ESP32) in **C++/FreeRTOS**. 12V mains-powered actuator driving worm gear motor via TB6612FNG driver, with INA219 current obstruction detection, limit switch ISR, optical IR closed sensor, and MQTT over TLS.
-* **[`server/`](server/README.md) (Server `'S'` — Cloud Backend):** Runs on **Firebase** using **TypeScript**. Cloud Functions orchestrate Gemini 3.5 Flash Lite (`'G'`) with inventory context, manage Firestore database, enforce security rules, and send LINE (`'L'`) alerts.
+* **[`server/`](server/README.md) (Server `'S'` — Cloud Backend):** Runs on **Cloudflare** using **TypeScript**. Cloud Functions orchestrate Gemini 3.5 Flash Lite (`'G'`) with inventory context, manage D1 database, enforce security rules, and send LINE (`'L'`) alerts.
 * **[`resources/`](resources/README.md):** External non-text resource files.
 
 *(Each directory will contain its own localized README, build configuration, and pinout/hardware diagrams.)*
@@ -75,7 +75,7 @@ The AI must program defensively and account for all edge cases and failure modes
 ### C. Strong Typing & Decoupled Reference Interfaces
 * **Single Source of Truth:** All cross-system message contracts, schemas, and byte/bitwise structures must be maintained in [`interface/`](interface/README.md).
 * **Reference Only — No Direct Linking:** Files in `interface/` serve strictly as canonical reference models. Subprojects (`camera/`, `fridge/`, `door/`, `server/`) must **NEVER** directly import or symlink across folders to `interface/`. Each subproject must copy and mirror its required schemas locally into its own directory (converting into Python dataclasses/typing, C++ structs/byte buffers, or local TypeScript modules).
-* **TypeScript:** Strictly type all Firebase Cloud Functions, Firestore data documents, and API responses. Disallow `any`.
+* **TypeScript:** Strictly type all Cloudflare Workers, D1 data documents, and API responses. Disallow `any`.
 * **Python:** Use type hints (`typing`) and runtime data validation (e.g. `pydantic` or `dataclasses`) reflecting `interface/` schemas for Gateway data packets.
 * **Microcontroller C++:** Define explicit struct/byte pack headers matching `interface/` specifications for BLE GATT payloads and MQTT JSON messages.
 

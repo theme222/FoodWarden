@@ -1,11 +1,11 @@
 # CBS: Camera ('C') ↔ Server ('S') Interface Contract
 
-This document defines the HTTPS communication interface between the edge processor and gateway (**Node `'C'`**, Pi-top [4] / Python) and the cloud backend (**Server `'S'`**, Firebase Cloud Functions in TypeScript).
+This document defines the HTTPS communication interface between the edge processor and gateway (**Node `'C'`**, Pi-top [4] / Python) and the cloud backend (**Server `'S'`**, Cloudflare Workers in TypeScript with Hono, D1 SQLite, and private R2 Storage).
 
-* **Endpoints:** Gateway Node `'C'` (Pi-top [4]) ↔ Server Cloud Functions (Node `'S'`)
-* **Directionality:** Bidirectional / Request-Response (`B`)
-* **Transport Protocol:** HTTPS / REST (JSON & Multipart Form-Data)
-* **Security:** Transport-Layer Security (TLS 1.3) with permanent Bearer API token authentication (`GATEWAY_TOKEN` provisioned in the fridge dashboard and verified against `gatewayTokenHash` in Firestore)
+- **Endpoints:** Gateway Node `'C'` (Pi-top [4]) ↔ Cloudflare Worker API (Server `'S'`)
+- **Directionality:** Bidirectional / Request-Response (`B`)
+- **Transport Protocol:** HTTPS / REST (JSON & Multipart Form-Data)
+- **Security:** Transport-Layer Security (TLS 1.3) with permanent Bearer API token authentication (`GATEWAY_TOKEN` provisioned in the fridge dashboard and verified against SHA-256 `gateway_token_hash` in D1 `fridge_secrets`)
 
 > [!NOTE]
 > **Edge Decoupling Principle:**
@@ -13,7 +13,7 @@ This document defines the HTTPS communication interface between the edge process
 
 ---
 
-## 1. Secrets & Authentication
+## 1. Secrets, Authentication & Operation Idempotency
 
 Gateway Node `'C'` authenticates itself using a unique permanent Bearer token. **Because this token uniquely identifies which refrigerator Node `'C'` belongs to**, request bodies do not include a `fridge_id`. The token serves as both the device credential and the tenant identity for all cloud interactions.
 
@@ -23,10 +23,30 @@ All requests from Gateway Node `'C'` to Server `'S'` must include this token in 
 Authorization: Bearer <GATEWAY_TOKEN>
 ```
 
-* **Storage in Node `'C'`:** Defined in `.env` as `GATEWAY_TOKEN` ([`camera/.env.example`](../camera/.env.example)).
-* **Validation in Server `'S'`:** Cloud Functions hash the incoming Bearer token using SHA-256 and look up the matching refrigerator document in Firestore:
-  * If the header is missing: returns `401 Unauthorized` (`UNAUTHORIZED`).
-  * If the token hash does not match any registered fridge: returns `403 Forbidden` (`INVALID_TOKEN`).
+- **Storage in Node `'C'`:** Defined in `.env` as `GATEWAY_TOKEN` ([`camera/.env.example`](../camera/.env.example)).
+- **Validation in Server `'S'`:** The Worker hashes the incoming Bearer token using SHA-256 and looks up the matching refrigerator row in D1 `fridge_secrets`:
+  - If the header is missing: returns `401 Unauthorized` (`UNAUTHORIZED`).
+  - If the token hash does not match any registered fridge: returns `403 Forbidden` (`INVALID_TOKEN`).
+
+### 1.1 Operation Idempotency (`Idempotency-Key` Header)
+
+To prevent duplicate inventory items or repeated Gemini inference charges when a network timeout or lost response occurs after Server `'S'` processes a request, the following three endpoints **require** a UUID v4 `Idempotency-Key` header:
+
+- `POST /api/inventory/checkin/draft`
+- `POST /api/inventory/checkin`
+- `POST /api/inventory/checkout/draft`
+
+```http
+Idempotency-Key: <UUID-v4>
+```
+
+- **Gateway Persistence (E4 Offline Queue):** Gateway `'C'` must generate one UUID v4 per logical user action (separately for draft and commit), persist both keys and resolved draft payload in local SQLite before the first HTTP attempt, and reuse the exact same `Idempotency-Key` across retries and reboots. Once `checkin/draft` succeeds, subsequent retries of `checkin` must not re-run `checkin/draft`.
+- **Server Receipt Rules (`draft_operations` & `inventory_operations` in D1):**
+  - Identical `(fridge_id, operation_kind, idempotency_key)` + identical request hash returns the cached response/status (including `item_id` even if that item was later checked out).
+  - Reusing the same `Idempotency-Key` with different payload or JPEG bytes returns `409 CONFLICT`.
+  - Concurrent or unfinished in-flight requests return `409 OPERATION_PENDING`.
+  - Quota rejections (`429 RATE_LIMITED`) release the draft receipt so the client may safely retry **with the same key** after backoff.
+  - Check-out commit (`POST /api/inventory/checkout`) remains idempotent by explicit `item_id` (returning `404 NOT_FOUND` if already removed).
 
 ---
 
@@ -35,24 +55,26 @@ Authorization: Bearer <GATEWAY_TOKEN>
 ### A. Grocery Check-In Sequence
 
 ```text
-Node 'C' (Edge Gateway)                        Server 'S' (Cloud Functions)
+Node 'C' (Edge Gateway)                        Server 'S' (Cloudflare Worker)
          |                                                   |
  [User presses check-in button]                              |
- [YOLO11n crops grocery bounding box & compresses JPEG]      |
+ [YOLO crops grocery bounding box & compresses JPEG]         |
          |                                                   |
          | === 1. POST /api/inventory/checkin/draft ========>|
          |     Headers: Authorization: Bearer <TOKEN>        |
+         |              Idempotency-Key: <DRAFT_UUID_V4>     |
          |     Body: multipart/form-data [image (JPEG)]      |
          |                                                   |
          |                                      [Identify fridge via Bearer token]
+         |                                      [Check draft_operations receipt & quota]
          |                                      [Call Gemini via SBG.md]
          |                                      [Check confidence >= 0.60 & is_food]
          |                                      +- If confidence < 0.60 or non-food:
          |                                      |  Return 422 UNIDENTIFIABLE
          |                                      +- Else:
-         |                                         [Upload JPEG to Firebase Storage]
+         |                                         [Upload JPEG to private R2 PHOTOS bucket]
+         |                                         [Record draft receipt; zero inventory writes]
          |                                         Return 200 OK (CheckInDraftResult)
-         |                                         (Zero Firestore database writes)
          |                                                   |
          | <== 200 OK or 422 UNIDENTIFIABLE =================|
          |                                                   |
@@ -64,9 +86,10 @@ Node 'C' (Edge Gateway)                        Server 'S' (Cloud Functions)
          |                                                   |
          | === 2. POST /api/inventory/checkin ==============>|
          |     Headers: Authorization: Bearer <TOKEN>        |
+         |              Idempotency-Key: <COMMIT_UUID_V4>    |
          |     Body: application/json [Finalized Item Data]  |
          |                                                   |
-         |                                      [Persist new item to Firestore]
+         |                                      [Persist item + inventory_operations receipt in D1]
          |                                      Return 201 Created { item_id, success }
          |                                                   |
          | <== 201 Created ==================================|
@@ -77,17 +100,19 @@ Node 'C' (Edge Gateway)                        Server 'S' (Cloud Functions)
 ### B. Context-Enriched Grocery Check-Out Sequence
 
 ```text
-Node 'C' (Edge Gateway)                        Server 'S' (Cloud Functions)
+Node 'C' (Edge Gateway)                        Server 'S' (Cloudflare Worker)
          |                                                   |
  [User presses check-out button]                             |
- [YOLO11n crops grocery bounding box & compresses JPEG]      |
+ [YOLO crops grocery bounding box & compresses JPEG]         |
          |                                                   |
          | === 1. POST /api/inventory/checkout/draft ======>|
          |     Headers: Authorization: Bearer <TOKEN>        |
+         |              Idempotency-Key: <DRAFT_UUID_V4>     |
          |     Body: multipart/form-data [image (JPEG)]      |
          |                                                   |
          |                                      [Identify fridge via Bearer token]
-         |                                      [Fetch active inventory from Firestore]
+         |                                      [Check draft_operations receipt & quota]
+         |                                      [Fetch active inventory from D1]
          |                                      [Call Gemini via SBG.md]
          |                                      +- If confidence < 0.60:
          |                                      |  Return 422 UNIDENTIFIABLE
@@ -95,8 +120,8 @@ Node 'C' (Edge Gateway)                        Server 'S' (Cloud Functions)
          |                                      |  Return 200 OK (NO_MATCH, candidates: [])
          |                                      +- Else:
          |                                         [Sort candidates by FEFO with item_ids]
+         |                                         [Record draft receipt; zero inventory mutations]
          |                                         Return 200 OK (CheckOutDraftResult)
-         |                                         (Zero database mutations)
          |                                                   |
          | <== 200 OK or 422 UNIDENTIFIABLE =================|
          |                                                   |
@@ -108,8 +133,8 @@ Node 'C' (Edge Gateway)                        Server 'S' (Cloud Functions)
          |     Headers: Authorization: Bearer <TOKEN>        |
          |     Body: application/json { item_id }            |
          |                                                   |
-         |                                      [Hard-delete item from Firestore]
-         |                                      [Delete item JPEG from Cloud Storage]
+         |                                      [Hard-delete item from D1]
+         |                                      [Retire unreferenced JPEG from R2]
          |                                      Return 200 OK { item_id, status }
          |                                                   |
          | <== 200 OK =======================================|
@@ -123,17 +148,18 @@ Node 'C' (Edge Gateway)                        Server 'S' (Cloud Functions)
 
 ### 3.1 Grocery Check-In Draft (`POST /api/inventory/checkin/draft`)
 
-Processes a cropped food image captured by Node `'C'`, invokes cloud AI classification ([`SBG.md`](SBG.md)), and returns draft bilingual food metadata for LCD display. **This endpoint does not write to the database.**
+Processes a cropped food image captured by Node `'C'`, invokes cloud AI classification ([`SBG.md`](SBG.md)), and returns draft bilingual food metadata for LCD display. **This endpoint does not insert or delete inventory rows**, while recording an idempotency operation receipt (`draft_operations`) and AI quota reservation so retries with the same `Idempotency-Key` return the cached draft without re-running Gemini.
 
-* **Method:** `POST`
-* **Path:** `/api/inventory/checkin/draft`
-* **Content-Type:** `multipart/form-data`
+- **Method:** `POST`
+- **Path:** `/api/inventory/checkin/draft`
+- **Required Headers:** `Authorization: Bearer <GATEWAY_TOKEN>`, `Idempotency-Key: <UUID-v4>`
+- **Content-Type:** `multipart/form-data`
 
 #### Request Fields
 
-| Field Name | Type | Format / Description |
-|---|---|---|
-| `image` | Binary File | Compressed JPEG (`image/jpeg`) image bytes of the cropped grocery item. |
+| Field Name | Type        | Format / Description                                                    |
+| ---------- | ----------- | ----------------------------------------------------------------------- |
+| `image`    | Binary File | Compressed JPEG (`image/jpeg`) image bytes of the cropped grocery item. |
 
 #### Success Response Schema (`200 OK`)
 
@@ -177,7 +203,7 @@ Returned when the item is identified with confidence ≥ 0.60 and `is_food` is `
     },
     "image_storage_path": {
       "type": "string",
-      "description": "Firebase Storage path to the uploaded JPEG crop (e.g. /storage/food_crops/fridge_123/crop_abc.jpg)."
+      "description": "Private R2 storage route to the uploaded JPEG crop (e.g. /storage/food_crops/fridge_123/crop_abc.jpg)."
     },
     "confidence": {
       "type": "number",
@@ -214,11 +240,12 @@ Returned when the AI recognition confidence is strictly below 0.60 or when `is_f
 
 ### 3.2 Grocery Check-In Commit (`POST /api/inventory/checkin`)
 
-Persists a confirmed food item into Firestore under the authenticated refrigerator. Dispatched after the user confirms or adjusts the draft on the Gateway LCD (or after the 5-second countdown timer expires).
+Persists a confirmed food item into Cloudflare D1 (`inventory`) and records an idempotency receipt (`inventory_operations`) under the authenticated refrigerator. Dispatched after the user confirms or adjusts the draft on the Gateway LCD (or after the 5-second countdown timer expires).
 
-* **Method:** `POST`
-* **Path:** `/api/inventory/checkin`
-* **Content-Type:** `application/json`
+- **Method:** `POST`
+- **Path:** `/api/inventory/checkin`
+- **Required Headers:** `Authorization: Bearer <GATEWAY_TOKEN>`, `Idempotency-Key: <UUID-v4>`
+- **Content-Type:** `application/json`
 
 #### Request Payload
 
@@ -251,17 +278,18 @@ Persists a confirmed food item into Firestore under the authenticated refrigerat
 
 ### 3.3 Grocery Check-Out Draft (`POST /api/inventory/checkout/draft`)
 
-Matches a removed food item against active refrigerator inventory using context-enriched multimodal AI ([`SBG.md`](SBG.md)). Returns candidate matches enriched with their unique `item_id`s, ordered by FEFO (earliest expiry first). **This endpoint does not modify or delete items from the database.**
+Matches a removed food item against active refrigerator inventory using context-enriched multimodal AI ([`SBG.md`](SBG.md)). Returns candidate matches enriched with their unique `item_id`s, ordered by FEFO (earliest expiry first). **This endpoint does not modify or delete inventory rows**, while recording a `draft_operations` receipt and AI quota reservation so retries with the same `Idempotency-Key` reuse the cached candidate list.
 
-* **Method:** `POST`
-* **Path:** `/api/inventory/checkout/draft`
-* **Content-Type:** `multipart/form-data`
+- **Method:** `POST`
+- **Path:** `/api/inventory/checkout/draft`
+- **Required Headers:** `Authorization: Bearer <GATEWAY_TOKEN>`, `Idempotency-Key: <UUID-v4>`
+- **Content-Type:** `multipart/form-data`
 
 #### Request Fields
 
-| Field Name | Type | Format / Description |
-|---|---|---|
-| `image` | Binary File | Compressed JPEG (`image/jpeg`) image bytes of the removed grocery item. |
+| Field Name | Type        | Format / Description                                                    |
+| ---------- | ----------- | ----------------------------------------------------------------------- |
+| `image`    | Binary File | Compressed JPEG (`image/jpeg`) image bytes of the removed grocery item. |
 
 #### Success Response Schema (`200 OK`)
 
@@ -281,14 +309,24 @@ Returned when the AI successfully processes the image against inventory with con
       "items": {
         "type": "object",
         "properties": {
-          "item_id": { "type": "string", "description": "Unique Firestore item identifier." },
+          "item_id": {
+            "type": "string",
+            "description": "Unique D1 inventory item identifier."
+          },
           "name_th": { "type": "string" },
           "name_en": { "type": "string" },
           "category": { "type": "string" },
           "category_th": { "type": "string" },
           "estimated_expiry_date": { "type": "string" }
         },
-        "required": ["item_id", "name_th", "name_en", "category", "category_th", "estimated_expiry_date"]
+        "required": [
+          "item_id",
+          "name_th",
+          "name_en",
+          "category",
+          "category_th",
+          "estimated_expiry_date"
+        ]
       },
       "description": "Candidate matches sorted by FEFO (earliest expiry first). Contains 1 item for EXACT_MATCH, 2+ items for AMBIGUOUS_MULTIPLE, and 0 items for NO_MATCH."
     },
@@ -301,12 +339,7 @@ Returned when the AI successfully processes the image against inventory with con
       "description": "Explanation of how candidate matches were determined."
     }
   },
-  "required": [
-    "match_type",
-    "candidate_matches",
-    "confidence",
-    "reasoning"
-  ]
+  "required": ["match_type", "candidate_matches", "confidence", "reasoning"]
 }
 ```
 
@@ -325,11 +358,11 @@ Returned when the AI recognition confidence is strictly below 0.60:
 
 ### 3.4 Grocery Check-Out Commit (`POST /api/inventory/checkout`)
 
-Permanently deletes a specific food item document from Firestore (`/fridges/{fridgeId}/inventory/{item_id}`) and deletes its associated cropped JPEG image (`image_storage_path`) from Firebase Cloud Storage to conserve storage space. Dispatched when the user or Gateway confirms removal of a specific `item_id`.
+Permanently deletes a specific food item row from D1 `inventory` and retires its associated cropped JPEG object from private Cloudflare R2 storage (`PHOTOS`) once no other inventory rows reference that path. Dispatched when the user or Gateway confirms removal of a specific `item_id`.
 
-* **Method:** `POST`
-* **Path:** `/api/inventory/checkout`
-* **Content-Type:** `application/json`
+- **Method:** `POST`
+- **Path:** `/api/inventory/checkout`
+- **Content-Type:** `application/json`
 
 #### Request Payload
 
@@ -356,13 +389,13 @@ Permanently deletes a specific food item document from Firestore (`/fridges/{fri
 
 Ingests batched environmental sensor samples collected by Node `'C'` from Node `'F'` BLE GATT connections ([`FUC.md`](FUC.md)) or flushed from the local offline SQLite queue (E4 store-and-forward).
 
-* **Method:** `POST`
-* **Path:** `/api/telemetry`
-* **Content-Type:** `application/json`
+- **Method:** `POST`
+- **Path:** `/api/telemetry`
+- **Content-Type:** `application/json`
 
 > [!NOTE]
-> **Deduplication Policy:**
-> Cloud Server `'S'` deduplicates incoming telemetry records strictly by `timestamp_s`. Microcontroller packet counters are validated and abstracted away at the Gateway edge (Node `'C'`).
+> **Deduplication & Timestamp Policy:**
+> Cloud Server `'S'` deduplicates incoming telemetry records by composite key `(fridge_id, node_id, timestamp_s)` so distinct sensor nodes (`F0`, `F1`, ...) never collide, and enforces bounded event times (`0 <= timestamp_s <= now_s + 300`, matching `door_events`). Unsynced microcontroller epochs (`< 2020-01-01`) should be normalized to Gateway wall-clock time before upload. Optional `?bypass_cooldown=1` clears LINE alert cooldowns strictly for the authenticated fridge during testing.
 
 #### Request Payload
 
@@ -398,18 +431,19 @@ Ingests batched environmental sensor samples collected by Node `'C'` from Node `
 
 Ingests door safety and actuation events parsed by Gateway Node `'C'`. Rather than forwarding raw microcontroller register dumps, Node `'C'` parses events locally and dispatches a clean, minimal status payload to Server `'S'`.
 
-* **Method:** `POST`
-* **Path:** `/api/door_events`
-* **Content-Type:** `application/json`
+- **Method:** `POST`
+- **Path:** `/api/door_events`
+- **Content-Type:** `application/json`
 
 #### Door Event Status Definitions
-* **`CLOSING`:** Door closer accepted a `CLOSE_DOOR` command and initiated motor drive.
-* **`SUCCESS`:** Door was successfully closed by the closer and confirmed shut.
-* **`OBSTRUCTION_ERROR`:** Obstruction stall detected (motor current spike ≥ 1200 mA or safety limit reached) causing automatic abort and retraction.
-* **`ABORTED`:** Door closing was halted and arm retracted due to vision-detected human approach or manual button trigger.
-* **`TIMEOUT_ERROR`:** Door closer motion exceeded maximum allowable travel time (30s) without confirming closure.
-* **`FAULT_LOCKOUT`:** Door closer entered hardware safety lockout due to an unresponsive INA219 sensor or boot homing failure.
-* **`CONTRADICTION_ERROR`:** Door closer IR sensor reports the door is mechanically shut, but Node `'F'`'s internal light sensor reports elevated light for 3 consecutive readings.
+
+- **`CLOSING`:** Door closer accepted a `CLOSE_DOOR` command and initiated motor drive.
+- **`SUCCESS`:** Door was successfully closed by the closer and confirmed shut.
+- **`OBSTRUCTION_ERROR`:** Obstruction stall detected (motor current spike ≥ 1200 mA or safety limit reached) causing automatic abort and retraction.
+- **`ABORTED`:** Door closing was halted and arm retracted due to vision-detected human approach or manual button trigger.
+- **`TIMEOUT_ERROR`:** Door closer motion exceeded maximum allowable travel time (30s) without confirming closure.
+- **`FAULT_LOCKOUT`:** Door closer entered hardware safety lockout due to an unresponsive INA219 sensor or boot homing failure.
+- **`CONTRADICTION_ERROR`:** Door closer IR sensor reports the door is mechanically shut, but Node `'F'`'s internal light sensor reports elevated light for 3 consecutive readings.
 
 #### Request Payload
 
@@ -440,15 +474,16 @@ Ingests door safety and actuation events parsed by Gateway Node `'C'`. Rather th
 
 Reports the latest contact timestamp (`last_seen_s`) for each physical subsystem observed by Gateway Node `'C'`. Gateway `'C'` is expected to dispatch this heartbeat request **every 60 seconds**.
 
-* **Method:** `POST`
-* **Path:** `/api/status`
-* **Content-Type:** `application/json`
+- **Method:** `POST`
+- **Path:** `/api/status`
+- **Content-Type:** `application/json`
 
 > [!NOTE]
 > **Extensibility & Redundancy:**
-> * The `nodes` array accepts any arbitrary component identifier (`node_id`, e.g. `"C0"`, `"F0"`, `"F1"`, `"D0"`, `"D1"`) to seamlessly support additional or future hardware components without schema changes.
-> * Gateway Node `'C'` (`"C0"`) must explicitly include itself in the `nodes` array on every dispatch (primarily for redundancy alongside request arrival time).
-> * If a configured component has not yet communicated with Gateway `'C'` since boot, its `last_seen_s` value must be transmitted as explicit JSON `null`.
+>
+> - The `nodes` array accepts any arbitrary component identifier (`node_id`, e.g. `"C0"`, `"F0"`, `"F1"`, `"D0"`, `"D1"`) to seamlessly support additional or future hardware components without schema changes.
+> - Gateway Node `'C'` (`"C0"`) must explicitly include itself in the `nodes` array on every dispatch (primarily for redundancy alongside request arrival time).
+> - If a configured component has not yet communicated with Gateway `'C'` since boot, its `last_seen_s` value must be transmitted as explicit JSON `null`.
 
 #### Request Payload
 
@@ -495,13 +530,19 @@ All non-200 responses across this interface return a standardized JSON error env
 
 ### Standard Error Codes
 
-| HTTP Status | Error Code (`error`) | Description & Cause |
-|---|---|---|
-| `401 Unauthorized` | `UNAUTHORIZED` | Missing `Authorization` header or missing Bearer prefix. |
-| `403 Forbidden` | `INVALID_TOKEN` | The provided `GATEWAY_TOKEN` is invalid or does not match any registered refrigerator. |
-| `413 Payload Too Large` | `PAYLOAD_TOO_LARGE` | The uploaded image exceeds the maximum supported size (> 5 MB). |
-| `422 Unprocessable Entity` | `UNIDENTIFIABLE` | Returned by check-in or checkout when the AI vision confidence is strictly below the threshold (`< 0.60`) or when `is_food` is `false`. |
-| `500 Internal Server Error` | `INTERNAL_ERROR` | An unhandled exception or cloud infrastructure failure occurred while processing the request. |
+| HTTP Status                 | Error Code (`error`)  | Description & Cause                                                                                                                                                   |
+| --------------------------- | --------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `400 Bad Request`           | `INVALID_PAYLOAD`     | Malformed JSON/multipart fields or missing/invalid `Idempotency-Key` UUID v4 header.                                                                                  |
+| `401 Unauthorized`          | `UNAUTHORIZED`        | Missing `Authorization` header or missing Bearer prefix.                                                                                                              |
+| `403 Forbidden`             | `INVALID_TOKEN`       | The provided `GATEWAY_TOKEN` is invalid or does not match any registered refrigerator.                                                                                |
+| `404 Not Found`             | `NOT_FOUND`           | Requested item ID does not exist in the authenticated fridge.                                                                                                         |
+| `409 Conflict`              | `CONFLICT`            | Same `Idempotency-Key` reused with a different request body/image hash, or retired photo conflict.                                                                    |
+| `409 Conflict`              | `OPERATION_PENDING`   | Initial request for this `Idempotency-Key` is still in progress or ended in an uncertain state; retry the same key after a short delay rather than minting a new key. |
+| `413 Payload Too Large`     | `PAYLOAD_TOO_LARGE`   | The uploaded image exceeds the maximum supported size (> 5 MB).                                                                                                       |
+| `422 Unprocessable Entity`  | `UNIDENTIFIABLE`      | Returned by check-in or checkout when the AI vision confidence is strictly below the threshold (`< 0.60`) or when `is_food` is `false`.                               |
+| `429 Too Many Requests`     | `RATE_LIMITED`        | Global, per-creator, or per-fridge AI quota exceeded; wait for `Retry-After` and retry with the same `Idempotency-Key`.                                               |
+| `500 Internal Server Error` | `INTERNAL_ERROR`      | An unhandled exception or cloud infrastructure failure occurred while processing the request.                                                                         |
+| `503 Service Unavailable`   | `SERVICE_UNAVAILABLE` | Upstream Gemini API unavailable or Gemini API key missing for the fridge.                                                                                             |
 
 ---
 
@@ -519,7 +560,7 @@ export interface CheckInDraftResult {
   estimated_expiry_date: string; // YYYY-MM-DD
   storage_recommendation_th: string;
   storage_recommendation_en: string;
-  image_storage_path: string;    // Firebase Storage path to uploaded JPEG
+  image_storage_path: string; // Private R2 route path to uploaded JPEG
   confidence: number;
 }
 
@@ -532,7 +573,7 @@ export interface CheckInCommitPayload {
   estimated_expiry_date: string; // YYYY-MM-DD
   storage_recommendation_th: string;
   storage_recommendation_en: string;
-  image_storage_path: string;    // Firebase Storage path to uploaded JPEG
+  image_storage_path: string; // Private R2 route path to uploaded JPEG
   confidence: number;
 }
 
@@ -543,7 +584,7 @@ export interface CheckInCommitResult {
 }
 
 export interface CandidateItem {
-  item_id: string; // Unique Firestore document ID
+  item_id: string; // Unique D1 inventory item ID
   name_th: string;
   name_en: string;
   category: string;
@@ -551,7 +592,8 @@ export interface CandidateItem {
   estimated_expiry_date: string; // YYYY-MM-DD
 }
 
-export type CheckOutMatchType = 'EXACT_MATCH' | 'AMBIGUOUS_MULTIPLE' | 'NO_MATCH';
+export type CheckOutMatchType =
+  "EXACT_MATCH" | "AMBIGUOUS_MULTIPLE" | "NO_MATCH";
 
 export interface CheckOutDraftResult {
   match_type: CheckOutMatchType;
@@ -567,7 +609,7 @@ export interface CheckOutCommitPayload {
 export interface CheckOutCommitResult {
   success: boolean;
   item_id: string;
-  status: 'deleted';
+  status: "deleted";
   message: string;
 }
 
@@ -580,22 +622,22 @@ export interface TelemetrySamplePayload {
 }
 
 export type DoorEventStatus =
-  | 'CLOSING'
-  | 'SUCCESS'
-  | 'OBSTRUCTION_ERROR'
-  | 'ABORTED'
-  | 'TIMEOUT_ERROR'
-  | 'FAULT_LOCKOUT'
-  | 'CONTRADICTION_ERROR';
+  | "CLOSING"
+  | "SUCCESS"
+  | "OBSTRUCTION_ERROR"
+  | "ABORTED"
+  | "TIMEOUT_ERROR"
+  | "FAULT_LOCKOUT"
+  | "CONTRADICTION_ERROR";
 
 export interface DoorEventItem {
-  node_id: string;     // Actuator node identifier (e.g. "D0")
+  node_id: string; // Actuator node identifier (e.g. "D0")
   timestamp_s: number; // uint64 second precision
   status: DoorEventStatus;
 }
 
 export interface NodeStatusItem {
-  node_id: string;            // Component identifier (e.g. "C0", "F0", "D0", or future node IDs)
+  node_id: string; // Component identifier (e.g. "C0", "F0", "D0", or future node IDs)
   last_seen_s: number | null; // uint64 second precision; null if never seen since boot
 }
 
@@ -604,11 +646,17 @@ export interface StatusPayload {
 }
 
 export type ApiErrorCode =
-  | 'UNAUTHORIZED'
-  | 'INVALID_TOKEN'
-  | 'PAYLOAD_TOO_LARGE'
-  | 'UNIDENTIFIABLE'
-  | 'INTERNAL_ERROR';
+  | "INVALID_PAYLOAD"
+  | "UNAUTHORIZED"
+  | "INVALID_TOKEN"
+  | "NOT_FOUND"
+  | "CONFLICT"
+  | "OPERATION_PENDING"
+  | "PAYLOAD_TOO_LARGE"
+  | "UNIDENTIFIABLE"
+  | "RATE_LIMITED"
+  | "INTERNAL_ERROR"
+  | "SERVICE_UNAVAILABLE";
 
 export interface ApiErrorResponse {
   error: ApiErrorCode;

@@ -1,0 +1,5 @@
+pre-commit:
+  commands:
+    secrets:
+      run: bun scripts/check-secrets.ts
+      fail_text: "Secret scan failed. Remove staged credentials; do not bypass the hook."
