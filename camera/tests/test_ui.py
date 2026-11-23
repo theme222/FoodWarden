@@ -424,3 +424,118 @@ def test_loading_states_ignore_select_until_ai_responds(qapp: QApplication) -> N
     button_ctrl.emit_button_press(ButtonType.CANCEL)
     assert window.stack.currentIndex() == 0
     assert cancel_calls == 2
+
+
+def _make_candidates(n: int) -> list[CheckOutCandidate]:
+    return [
+        CheckOutCandidate(
+            item_id=f"cand_{i}",
+            name_th=f"รายการ {i}",
+            name_en=f"Item {i}",
+            category="Dairy",
+            category_th="นม",
+            expiry_date="2026-12-01",
+            confidence=0.9,
+        )
+        for i in range(n)
+    ]
+
+
+def test_checkout_scrolling_resets_autoconfirm_countdown(qapp: QApplication) -> None:
+    button_ctrl = ButtonController()
+    window = FoodWardenMainWindow(button_controller=button_ctrl, autocomplete_timeout_s=5)
+    screen = window.checkout_screen
+    window.show_checkout_candidates(_make_candidates(3))
+
+    # The list must never take keyboard focus, or it would swallow ↑/↓.
+    assert screen.list_widget.focusPolicy() == Qt.FocusPolicy.NoFocus
+
+    for key, expected_row in ((Qt.Key.Key_Down, 1), (Qt.Key.Key_Down, 2), (Qt.Key.Key_Up, 1)):
+        screen._tick_countdown()
+        screen._tick_countdown()
+        assert screen._countdown_seconds == 3
+        window.keyPressEvent(
+            QKeyEvent(QKeyEvent.Type.KeyPress, key, Qt.KeyboardModifier.NoModifier)
+        )
+        assert screen.list_widget.currentRow() == expected_row
+        assert screen._countdown_seconds == 5
+        assert "5" in screen.countdown_label.text()
+
+    # Pressing ↓ at the bottom edge still counts as interaction.
+    button_ctrl.emit_button_press(ButtonType.DOWN)
+    button_ctrl.emit_button_press(ButtonType.DOWN)
+    screen._tick_countdown()
+    button_ctrl.emit_button_press(ButtonType.DOWN)
+    assert screen.list_widget.currentRow() == 2
+    assert screen._countdown_seconds == 5
+
+    # Touch/mouse selection change also resets.
+    screen._tick_countdown()
+    screen.list_widget.setCurrentRow(0)
+    assert screen._countdown_seconds == 5
+    screen.handle_cancel()
+
+
+def test_checkin_expiry_never_before_today(qapp: QApplication) -> None:
+    from datetime import date, timedelta
+
+    button_ctrl = ButtonController()
+    committed: list[str] = []
+    window = FoodWardenMainWindow(
+        button_controller=button_ctrl,
+        on_commit_checkin=lambda _d, date_str: committed.append(date_str),
+    )
+    screen = window.checkin_screen
+    today = date.today()
+
+    draft = CheckInDraftResult(
+        name_th="นมสด",
+        name_en="Milk",
+        category="Dairy",
+        category_th="นม",
+        estimated_shelf_life_days=7,
+        estimated_expiry_date=(today - timedelta(days=10)).isoformat(),
+        storage_recommendation_th="แช่เย็น",
+        storage_recommendation_en="Keep cold",
+        image_storage_path="milk.jpg",
+        confidence=0.95,
+    )
+    # A past AI date is clamped to today on load.
+    window.show_checkin_draft(draft, b"")
+    assert screen._current_date == today
+
+    # Day / Month / Year ↓ can never go below today.
+    for segment in range(3):
+        screen._selected_segment = segment
+        for _ in range(5):
+            button_ctrl.emit_button_press(ButtonType.DOWN)
+            assert screen._current_date >= today
+
+    # From a future date, month/year ↓ stop at today instead of overshooting.
+    screen._current_date = today + timedelta(days=20)
+    screen._selected_segment = 1
+    button_ctrl.emit_button_press(ButtonType.DOWN)
+    assert screen._current_date == today
+    screen._current_date = today + timedelta(days=200)
+    screen._selected_segment = 2
+    button_ctrl.emit_button_press(ButtonType.DOWN)
+    assert screen._current_date == today
+
+    # Up still works and commit sends an ISO date >= today.
+    screen._selected_segment = 0
+    button_ctrl.emit_button_press(ButtonType.UP)
+    assert screen._current_date == today + timedelta(days=1)
+    screen._selected_segment = 2
+    button_ctrl.emit_button_press(ButtonType.SELECT)
+    assert committed == [(today + timedelta(days=1)).isoformat()]
+
+
+def test_add_months_clamps_day_to_month_length() -> None:
+    from datetime import date
+
+    from foodwarden_camera.ui.screens.checkin_screen import _add_months, _add_years
+
+    assert _add_months(date(2026, 1, 31), 1) == date(2026, 2, 28)
+    assert _add_months(date(2026, 12, 15), 1) == date(2027, 1, 15)
+    assert _add_months(date(2027, 1, 15), -1) == date(2026, 12, 15)
+    assert _add_years(date(2028, 2, 29), 1) == date(2029, 2, 28)

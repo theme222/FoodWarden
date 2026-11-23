@@ -20,7 +20,7 @@ class AlertBanner(QFrame):
     def __init__(self, parent: QWidget | None = None) -> None:
         super().__init__(parent)
         self.setObjectName("AlertBanner")
-        self.setFixedHeight(68)
+        self.setFixedHeight(84)
 
         layout = QHBoxLayout(self)
         layout.setContentsMargins(16, 8, 16, 8)
@@ -43,8 +43,8 @@ class AlertBanner(QFrame):
         bg = COLOR_BAD if is_critical else COLOR_SOON
         fg = COLOR_ON_BAD if is_critical else COLOR_ON_SOON
         self.setStyleSheet(card_style("AlertBanner", bg=bg, border=bg, radius=14))
-        self.label_th.setStyleSheet(f"font-size: 18px; font-weight: bold; color: {fg};")
-        self.label_en.setStyleSheet(f"font-size: 13px; font-weight: bold; color: {fg};")
+        self.label_th.setStyleSheet(f"font-size: 24px; font-weight: bold; color: {fg};")
+        self.label_en.setStyleSheet(f"font-size: 17px; font-weight: bold; color: {fg};")
 
     def show_alert(
         self,

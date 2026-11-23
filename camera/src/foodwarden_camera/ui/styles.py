@@ -35,6 +35,15 @@ COLOR_ON_TAKE = "#FFFFFF"
 
 COLOR_WAIT_BG = "#D8E2C2"
 COLOR_WAIT_FG = "#4B5542"
+COLOR_WARN_TEXT = "#B45309"
+
+# Type scale (px) tuned for reading a 5-inch 800x480 LCD from arm's length.
+FS_TITLE = 30  # Screen titles
+FS_HERO = 36  # Primary item name / big values
+FS_VALUE = 26  # Metric values, date segments label rows
+FS_BODY = 21  # Main body text, list rows
+FS_LABEL = 18  # Secondary text, tile titles, key guides
+FS_SMALL = 15  # Status pills in crowded header rows
 
 
 def pill_style(
