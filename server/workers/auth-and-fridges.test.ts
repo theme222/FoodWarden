@@ -378,6 +378,9 @@ describe("Better Auth, fridge RBAC, and inventory CRUD", () => {
     const jpegBase64 = Buffer.from(jpegBytes).toString("base64");
     const itemAId = "11111111-1111-4111-8111-111111111111";
     const itemBId = "22222222-2222-4222-8222-222222222222";
+    const todayBangkok = Date.now() + 7 * 3600_000;
+    const expiryAfter = (days: number) =>
+      new Date(todayBangkok + days * 86_400_000).toISOString().slice(0, 10);
 
     const addA = (payload: Record<string, unknown>) =>
       exports.default.fetch(
@@ -393,7 +396,7 @@ describe("Better Auth, fridge RBAC, and inventory CRUD", () => {
     const resA1 = await addA({
       item_id: itemAId,
       name: "Pasteurized Milk",
-      estimated_expiry_date: "2026-12-10",
+      estimated_expiry_date: expiryAfter(4),
       category: "Dairy",
       jpeg_base64: jpegBase64,
     });
@@ -403,7 +406,7 @@ describe("Better Auth, fridge RBAC, and inventory CRUD", () => {
     const resA2 = await addA({
       item_id: itemAId,
       name: "Pasteurized Milk",
-      estimated_expiry_date: "2026-12-10",
+      estimated_expiry_date: expiryAfter(4),
       category: "Dairy",
       jpeg_base64: jpegBase64,
     });
@@ -413,7 +416,7 @@ describe("Better Auth, fridge RBAC, and inventory CRUD", () => {
     const conflict = await addA({
       item_id: itemAId,
       name: "Different Item",
-      estimated_expiry_date: "2026-12-10",
+      estimated_expiry_date: expiryAfter(4),
       category: "Dairy",
     });
     expect(conflict.status).toBe(409);
@@ -422,10 +425,19 @@ describe("Better Auth, fridge RBAC, and inventory CRUD", () => {
     const resB = await addA({
       item_id: itemBId,
       name: "Yogurt",
-      estimated_expiry_date: "2026-12-01",
+      estimated_expiry_date: expiryAfter(3),
       category: "Dairy",
     });
     expect(resB.status).toBe(201);
+
+    const fridgeList = await exports.default.fetch("http://localhost/api/fridges", {
+      headers: { Cookie: ownerCookie },
+    });
+    const summaries = (await fridgeList.json()) as { fridges: { id: string }[] };
+    expect(summaries.fridges.find((fridge) => fridge.id === fridgeId)).toMatchObject({
+      inventory_count: 2,
+      expiring_soon_count: 1,
+    });
 
     const listRes = await exports.default.fetch(
       `http://localhost/api/fridges/${fridgeId}/inventory`,

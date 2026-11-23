@@ -92,7 +92,7 @@ export function foodStatus(
   const days = daysLeft(food.expiry, nowS);
   if (!Number.isFinite(days)) return "unknown";
   if (days < 0) return "expired";
-  if (days <= 2) return "soon";
+  if (days <= 3) return "soon";
   return "fresh";
 }
 

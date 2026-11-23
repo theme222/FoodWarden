@@ -16,6 +16,8 @@ export interface Fridge {
   role: MemberRole;
   lastSeenS: number;
   latest: Sample | null;
+  inventoryCount?: number | null;
+  expiringSoonCount?: number | null;
 }
 
 export interface Sample {
@@ -148,6 +150,8 @@ function readFridge(id: string, value: unknown): Fridge {
     role: data.role === "owner" ? "owner" : "member",
     lastSeenS: epoch(data.last_seen_s) ?? 0,
     latest: readSample(data.last_telemetry),
+    inventoryCount: number(data.inventory_count),
+    expiringSoonCount: number(data.expiring_soon_count),
   };
 }
 

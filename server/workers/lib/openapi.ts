@@ -102,6 +102,8 @@ const schemas: Record<string, Schema> = {
     role: { type: "string", enum: ["owner", "member"] },
     last_seen_s: timestamp,
     last_telemetry: { anyOf: [ref("TelemetrySample"), { type: "null" }] },
+    inventory_count: { type: "integer", minimum: 0 },
+    expiring_soon_count: { type: "integer", minimum: 0, description: "Items expiring today through three calendar days ahead in Asia/Bangkok." },
   }),
   Settings: object({
     id: text,

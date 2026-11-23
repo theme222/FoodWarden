@@ -8,6 +8,8 @@ export interface FridgeSummary {
   role: MemberRole;
   last_seen_s: number;
   last_telemetry: unknown;
+  inventory_count: number;
+  expiring_soon_count: number;
 }
 
 interface FridgeMemberRow {
@@ -92,7 +94,12 @@ export async function listUserFridges(
 ): Promise<FridgeSummary[]> {
   const { results } = await db
     .prepare(
-      `SELECT f.id, f.name, fm.role, f.last_seen_s, f.last_telemetry_json
+      `SELECT f.id, f.name, fm.role, f.last_seen_s, f.last_telemetry_json,
+              (SELECT COUNT(*) FROM inventory i WHERE i.fridge_id = f.id) AS inventory_count,
+              (SELECT COUNT(*) FROM inventory i
+               WHERE i.fridge_id = f.id
+                 AND i.estimated_expiry_date BETWEEN date('now', '+7 hours')
+                                                 AND date('now', '+7 hours', '+3 days')) AS expiring_soon_count
        FROM fridges f
        INNER JOIN fridge_members fm ON fm.fridge_id = f.id
        WHERE fm.email = ?
@@ -105,6 +112,8 @@ export async function listUserFridges(
       role: MemberRole;
       last_seen_s: number;
       last_telemetry_json: string | null;
+      inventory_count: number;
+      expiring_soon_count: number;
     }>();
 
   return results.map((row) => ({
@@ -113,6 +122,8 @@ export async function listUserFridges(
     role: row.role,
     last_seen_s: row.last_seen_s,
     last_telemetry: parseJsonOrNull(row.last_telemetry_json),
+    inventory_count: row.inventory_count,
+    expiring_soon_count: row.expiring_soon_count,
   }));
 }
 

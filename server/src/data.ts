@@ -90,6 +90,12 @@ export function useFridgeRoom(
   );
   const revalidate = useEffectEvent(() => reloadAll());
 
+  const reloadInventory = useCallback(() => {
+    void mutateInventory().catch(() => {});
+    void mutateCache(`${base}/favorites`).catch(() => {});
+    void mutateCache("/api/fridges").catch(() => {});
+  }, [mutateInventory, mutateCache, base]);
+
   const applyEvent = useEffectEvent(
     (event: ReturnType<typeof parseFridgeRoomEvent>) => {
       if (!event) return;
@@ -134,8 +140,7 @@ export function useFridgeRoom(
           );
           break;
         case "inventory_changed":
-          void mutateCache(`${base}/favorites`);
-          void mutateInventory().catch(() => {});
+          reloadInventory();
           break;
         case "member_revoked":
           setConnectionState("closed");
@@ -225,11 +230,6 @@ export function useFridgeRoom(
       socket?.close(1000, "Cleanup");
     };
   }, [base]);
-
-  const reloadInventory = useCallback(() => {
-    void mutateInventory().catch(() => {});
-    void mutateCache(`${base}/favorites`).catch(() => {});
-  }, [mutateInventory, mutateCache, base]);
 
   const latest = (history.data ?? []).reduce<Sample | null>(
     (best, sample) => (!best || sample.timeS > best.timeS ? sample : best),
