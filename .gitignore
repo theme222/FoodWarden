@@ -8,6 +8,7 @@
 *.vsix
 
 **/.zed/
+**/DS_Store
 # Local development tools
 /.tools/
 
@@ -18,12 +19,5 @@
 **/.dev.vars.*
 !**/.dev.vars.example
 
-# Local reference books
-**/*.epub
-
-
-# Private D1 exports and isolated local copies
-/server/.local-db/
-
-# Local upstream documentation checkouts
-/server/.local-docs/
+scripts/
+RUBRIC-CHECKLIST.md
