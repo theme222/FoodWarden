@@ -66,6 +66,14 @@ def _format_elapsed_short(age_s: float) -> str:
     return f"{hours}h{rem_m:02d}m"
 
 
+_NODE_DISPLAY_NAMES: dict[str, str] = {"F": "Fridge", "D": "Door"}
+
+
+def _node_display_name(node_id: str) -> str:
+    """'F0' -> 'Fridge', 'D0' -> 'Door' (unknown ids are shown as-is)."""
+    return _NODE_DISPLAY_NAMES.get(node_id[:1].upper(), node_id)
+
+
 def format_node_badge(
     node_id: str,
     age_s: float | None,
@@ -75,11 +83,12 @@ def format_node_badge(
 ) -> tuple[str, str, str, str]:
     """Returns (pill_text, detail_text, bg_hex, fg_hex) matching Web Prototype colors."""
     green_max_s, yellow_max_s = _NODE_BADGE_THRESHOLDS.get(node_id, (45.0, 120.0))
+    name = _node_display_name(node_id)
 
     if age_s is None and not is_connected:
         return (
-            f"● {node_id}: Wait",
-            f"{node_id}: รอเชื่อมต่อ",
+            f"● {name}: Wait",
+            f"{name}: รอเชื่อมต่อ",
             COLOR_WAIT_BG,
             COLOR_WAIT_FG,
         )
@@ -88,8 +97,8 @@ def format_node_badge(
 
     if is_offline:
         return (
-            f"● {node_id}: Off {elapsed}",
-            f"{node_id}: หลุด ({elapsed})",
+            f"● {name}: Off {elapsed}",
+            f"{name}: หลุด ({elapsed})",
             COLOR_BAD,
             COLOR_ON_BAD,
         )
@@ -97,23 +106,23 @@ def format_node_badge(
     if is_connected or (age_s is not None and age_s <= green_max_s):
         state_txt = "LIVE" if is_connected and (age_s is None or age_s < 2.0) else elapsed
         return (
-            f"● {node_id}: {state_txt}",
-            f"{node_id}: {state_txt}",
+            f"● {name}: {state_txt}",
+            f"{name}: {state_txt}",
             COLOR_FRESH,
             COLOR_ON_FRESH,
         )
 
     if age_s is not None and age_s <= yellow_max_s:
         return (
-            f"● {node_id}: {elapsed}",
-            f"{node_id}: ช้า ({elapsed})",
+            f"● {name}: {elapsed}",
+            f"{name}: ช้า ({elapsed})",
             COLOR_SOON,
             COLOR_ON_SOON,
         )
 
     return (
-        f"● {node_id}: {elapsed}!",
-        f"{node_id}: ขาด ({elapsed})",
+        f"● {name}: {elapsed}!",
+        f"{name}: ขาด ({elapsed})",
         COLOR_BAD,
         COLOR_ON_BAD,
     )
@@ -326,11 +335,11 @@ class IdleScreen(QWidget):
         self.pill_wifi = QLabel("Wi-Fi: --", self)
         self.pill_wifi.setStyleSheet(pill_style(COLOR_WAIT_BG, COLOR_WAIT_FG, font_px=PILL_PX))
 
-        self.pill_node_f = QLabel("● F: Wait", self)
+        self.pill_node_f = QLabel("● Fridge: Wait", self)
         self.pill_node_f.setStyleSheet(pill_style(COLOR_WAIT_BG, COLOR_WAIT_FG, font_px=PILL_PX))
         self.pill_ble = self.pill_node_f
 
-        self.pill_node_d = QLabel("● D: Wait", self)
+        self.pill_node_d = QLabel("● Door: Wait", self)
         self.pill_node_d.setStyleSheet(pill_style(COLOR_WAIT_BG, COLOR_WAIT_FG, font_px=PILL_PX))
 
         self.btn_settings = _create_header_button("ตั้งค่า", self, self._on_open_settings)
@@ -401,10 +410,15 @@ class IdleScreen(QWidget):
             "TileDoor", "ประตู", "ปิดสนิท", TILE_VALUE_PX, diag_card, pill_text="Door: Closed"
         )
         self.motion_tile = _StatusTile(
-            "TileMotion", "PIR", "รอสัญญาณ PIR", TILE_VALUE_PX, diag_card, pill_text="PIR: --"
+            "TileMotion",
+            "ตรวจจับการเคลื่อนไหว",
+            "รอสัญญาณ",
+            TILE_VALUE_PX,
+            diag_card,
+            pill_text="PIR: --",
         )
         self.person_tile = _StatusTile(
-            "TilePerson", "YOLO", "ไม่พบคน", TILE_VALUE_PX, diag_card, pill_text="Clear"
+            "TilePerson", "ตรวจจับคน", "ไม่พบคน", TILE_VALUE_PX, diag_card, pill_text="Clear"
         )
         for tile in (self.door_tile, self.motion_tile, self.person_tile):
             col.addWidget(tile)
@@ -526,7 +540,9 @@ class IdleScreen(QWidget):
         hw_status: str = "",
     ) -> None:
         """Updates PIR motion sensor badge and concise status label."""
-        hw_suffix = f" ({hw_status})" if hw_status else ""
+        # GPIO binding details ("GPIO 22: HW/Sim") are for developers, not users;
+        # only surface the one state a user needs to know: the sensor is off.
+        hw_suffix = " (ปิดใช้งาน)" if hw_status == "PIR Disabled" else ""
         if has_motion:
             self.motion_tile.set_pill(f"DETECTED{hw_suffix}", COLOR_FRESH, COLOR_ON_FRESH)
             self.motion_tile.set_value(f"พบการเคลื่อนไหว{hw_suffix}", COLOR_FRESH)

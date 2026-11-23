@@ -290,7 +290,7 @@ def test_node_connection_badges_and_display_sleep_overlay(
 
     # Wait -> Fresh Green -> Amber Soon -> Red Critical progression for Node 'F' and Node 'D'
     window.update_node_status("F0", None)
-    assert "Wait" in window.idle_screen.pill_node_f.text()
+    assert "Fridge: Wait" in window.idle_screen.pill_node_f.text()
     assert "#D8E2C2" in window.idle_screen.pill_node_f.styleSheet()
 
     window.update_node_status("F0", 1.0, is_connected=True)
@@ -302,7 +302,7 @@ def test_node_connection_badges_and_display_sleep_overlay(
     assert "#F2A33A" in window.idle_screen.pill_node_f.styleSheet()
 
     window.update_node_status("D0", 25.0, is_offline=True)
-    assert "Off 25s" in window.idle_screen.pill_node_d.text()
+    assert "Door: Off 25s" in window.idle_screen.pill_node_d.text()
     assert "#D6432C" in window.idle_screen.pill_node_d.styleSheet()
 
     # Awake renders pale-lime Web Prototype canvas (#E9F2D2); Sleep renders solid black #000000
@@ -351,12 +351,13 @@ def test_window_controls_and_motion_debug_ui(
     # Motion sensor UI updates (active vs. idle duration + hw status)
     window.update_motion_state(True, 0.0, "GPIO 22: HW")
     assert "DETECTED" in window.idle_screen.pill_motion.text()
-    assert "GPIO 22: HW" in window.idle_screen.pill_motion.text()
+    assert "GPIO" not in window.idle_screen.pill_motion.text()
+    assert "GPIO" not in window.idle_screen.motion_label.text()
     assert "พบการเคลื่อนไหว" in window.idle_screen.motion_label.text()
 
     window.update_motion_state(False, 75.0, "PIR Disabled")
     assert "1m 15s" in window.idle_screen.pill_motion.text()
-    assert "PIR Disabled" in window.idle_screen.motion_label.text()
+    assert "ปิดใช้งาน" in window.idle_screen.motion_label.text()
     assert "1 นาที 15 วินาที" in window.idle_screen.motion_label.text()
 
     # YOLO person detection debug UI updates
