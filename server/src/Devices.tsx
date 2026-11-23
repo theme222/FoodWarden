@@ -8,6 +8,7 @@ import {
   X,
 } from "lucide-react";
 import { useState } from "react";
+import { ReadingTime } from "./components/reading-time";
 import { StatusAlert } from "./components/status-alert";
 import { useNow } from "./data";
 import { localTimestamp } from "./model";
@@ -306,8 +307,7 @@ function DeviceRow({
               <>
                 <dt className="small">{t.lastReport}</dt>
                 <dd className="num">
-                  {localTimestamp(heartbeat.receivedS, language)} (
-                  {Math.max(0, Math.round((now - heartbeat.receivedS) / 60))}m ago)
+                  <ReadingTime timeS={heartbeat.receivedS} now={now} language={language} />
                 </dd>
               </>
             )}
@@ -363,9 +363,10 @@ export function Devices({
           <p className="sub">{t.deviceIntro}</p>
         </div>
         {resolvedHeartbeat && (
-          <span className="pill neutral num">
-            {t.lastReport}: {localTimestamp(resolvedHeartbeat.receivedS, language)}
-          </span>
+          <p className="gateway-report small num">
+            <span>{t.lastReport}</span>
+            <ReadingTime timeS={resolvedHeartbeat.receivedS} now={now} language={language} />
+          </p>
         )}
       </div>
 

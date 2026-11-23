@@ -1,7 +1,8 @@
 import { Thermometer, Wind, Sun, DoorClosed } from "lucide-react";
 import { Link } from "react-router-dom";
+import { ReadingTime } from "./components/reading-time";
 import { useUiVersion } from "./components/ui-version-context";
-import { FRIDGE_SENSOR_STALE_S, localTimestamp } from "./model";
+import { FRIDGE_SENSOR_STALE_S } from "./model";
 import type { DoorEvent, Language, Sample } from "./model";
 import { deriveKpiSummary, LIGHT_OPEN_LDR } from "./state/dashboard-machine";
 import { words } from "./words";
@@ -12,35 +13,6 @@ const icons = {
   light: Sun,
   door: DoorClosed,
 };
-
-export function ReadingTime({
-  timeS,
-  now,
-  language,
-}: {
-  timeS: number;
-  now: number;
-  language: Language;
-}) {
-  const seconds = Math.max(0, now - timeS);
-  const format = new Intl.RelativeTimeFormat(language, { numeric: "always" });
-  const relative =
-    seconds < 60
-      ? language === "th"
-        ? "เมื่อสักครู่"
-        : "Just now"
-      : seconds < 3600
-        ? format.format(-Math.floor(seconds / 60), "minute")
-        : seconds < 86400
-          ? format.format(-Math.floor(seconds / 3600), "hour")
-          : format.format(-Math.floor(seconds / 86400), "day");
-  return (
-    <time dateTime={new Date(timeS * 1000).toISOString()}>
-      {relative}{" "}
-      <span className="small">· {localTimestamp(timeS, language)}</span>
-    </time>
-  );
-}
 
 export function Metrics({
   latest,
