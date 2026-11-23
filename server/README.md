@@ -9,6 +9,8 @@
 - **[`FAMILY-WORKFLOW.md`](FAMILY-WORKFLOW.md):** Thai family setup guide, private favorites, personal/group LINE pairing and rollout requirements.
 - **[`API-REFERENCE.md`](API-REFERENCE.md):** authenticated Scalar UI, OpenAPI coverage, test requests, and CDN/runtime costs.
 - **[`DEV-TOOLS.md`](DEV-TOOLS.md):** shadcn/ui components, SWR status, local agent-browser commands, deepsec setup boundaries, and Vercel OSS fit.
+- [Web UI guide](WEB-UI-GUIDE.md) for the dashboard, browser references, and validation.
+- [UX research and decisions](UX-RESEARCH.md) for the audit, EPUB and Mobbin notes.
 - **[`ARCHITECTURE.md`](ARCHITECTURE.md):** Cloudflare topology, D1 schema, R2 private photo flow, `FridgeRoom` Durable Object WebSockets, React routes, Gemini/LINE pipelines, and security model.
 - **[`GOAL.md`](GOAL.md):** Feature, integration, edge-case, and test verification checklist.
 - **[`wrangler.jsonc`](wrangler.jsonc) & [`migrations/0001_init.sql`](migrations/0001_init.sql):** Cloudflare Worker bindings (`DB`, `PHOTOS`, `FRIDGE_ROOM`, `ASSETS`), Cron Trigger (`0 1 * * *`), and D1 SQLite schema.
@@ -117,3 +119,17 @@ bunx wrangler deploy
 ## 4. Diagrams
 
 Hardware/system reference diagrams remain in [`diagram/`](diagram/Fridge.drawio) and [`diagrams/`](diagrams/fridge.mmd). See [`ARCHITECTURE.md`](ARCHITECTURE.md) for the live Cloudflare Worker topology.
+
+### Work with a private D1 snapshot
+
+Keep SQL exports and isolated local state under `.local-db/`, which the root `.gitignore` covers. Use a new folder for each snapshot. The export reads the remote database and writes a local file. Import and apply pending migrations only with `--local` and the new persistence directory.
+
+From `server/`, after creating a fresh `.local-db/review/` directory and checking it with `git check-ignore .local-db/review/snapshot.sql`:
+
+```sh
+bunx wrangler d1 export foodwarden-db --remote --output .local-db/review/snapshot.sql
+bunx wrangler d1 execute DB --local --persist-to .local-db/review/state --file .local-db/review/snapshot.sql
+bunx wrangler d1 migrations apply DB --local --persist-to .local-db/review/state
+```
+
+The D1 snapshot contains private records and credentials. Keep it on the local machine. R2 photos are stored separately. The history migration adds the inventory activity table and indexes. Existing door and sensor records are queried directly.

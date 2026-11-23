@@ -54,6 +54,9 @@ export interface Food {
   adviceEn: string;
   adviceTh: string;
   hasPhoto: boolean;
+  checkInTimestampS?: number | null;
+  confidence?: number | null;
+  checkInSource?: "CAMERA" | "WEB_MANUAL" | null;
 }
 
 interface FridgeMember {
@@ -198,6 +201,10 @@ export function readStatusResponse(value: unknown): Heartbeat | null {
 
 export function readFood(id: string, value: unknown): Food {
   const data = record(value);
+  const checkInSource =
+    data.check_in_source === "CAMERA" || data.check_in_source === "WEB_MANUAL"
+      ? data.check_in_source
+      : null;
   return {
     id,
     nameEn: text(data.name_en),
@@ -207,6 +214,9 @@ export function readFood(id: string, value: unknown): Food {
     adviceEn: text(data.storage_recommendation_en),
     adviceTh: text(data.storage_recommendation_th),
     hasPhoto: text(data.image_storage_path) !== "",
+    checkInTimestampS: epoch(data.check_in_timestamp_s),
+    confidence: number(data.confidence),
+    checkInSource,
   };
 }
 
@@ -416,6 +426,8 @@ export type ContactState =
   | "waiting"
   | "gatewayMissing";
 
+export const FRIDGE_SENSOR_STALE_S = 600;
+
 export function contactState(
   node: StatusNode,
   heartbeat: Heartbeat | null,
@@ -428,7 +440,7 @@ export function contactState(
   if (!node.reported) return "notIncluded";
   if (node.reportedS === null) return "unreported";
   // A sleeping fridge sensor can normally go five minutes between reports.
-  const maxAge = node.id.startsWith("F") ? 600 : 180;
+  const maxAge = node.id.startsWith("F") ? FRIDGE_SENSOR_STALE_S : 180;
   return nowS - node.reportedS <= maxAge && (node.id !== "C0" || !gatewayStale)
     ? "recent"
     : "stale";

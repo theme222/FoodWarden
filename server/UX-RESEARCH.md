@@ -1,0 +1,77 @@
+# FoodWarden UX research and decisions
+
+This review used the supplied production screenshots and annotations, the FoodWarden browser session, Mobbin's public research and Explore pages, and Wouter de Bres's *Product Design Psychology* EPUB. The first priority was to make it possible to answer three questions from a phone. Is the fridge reporting? What needs attention? What can I do next?
+
+## Audit findings and implementation
+
+| Flow | Evidence | Decision |
+| --- | --- | --- |
+| 1. Choose a fridge | At a 477 CSS px viewport, cards stacked in a single column and each repeated three filled boxes, including one for opening the card. The Add fridge sheet was clipped on the left | Give each fridge one compact link with two readings, a chevron, and sample time. Reset the desktop translation on the mobile sheet |
+| 2. Check the fridge and manage food | Four readings occupied separate cards, red elements competed with safety information, and a tick icon appeared before a selection | Use one readings area and one warning banner. Give each reading an icon and label. Use an empty square for starting selection, native checkboxes for per-item state, and a text action to finish |
+| 3. Select a date or category | The add form repeated the category choices and used labels like “+1 month” for a fixed number of days | Keep one category select, an editable date, and presets that spell out the number of days from today |
+| 4. Inspect sensor values and old events | The chart normalized unrelated units onto one scale. It mixed controls, stats, and door-event cards on the same page | Show a single real-unit series with a threshold, the selected reading, and a collapsible table below. Put detailed door events in History and link there from Charts and Devices |
+| 5. Change personal preferences | Display settings were duplicated across account and fridge settings. Nested backgrounds hid field boundaries and a decorative switch overflowed its row | Give display settings one home under Me. Use a label and border for each select and time input, a real checkbox for notifications, and a consistent button for LINE actions |
+| 6. Manage the fridge | The fridge name appeared twice in the same form. On mobile the bottom navigation consumed extra space and competed with the content | Title the section Fridge details, keep one field label, make the save action adjacent where space permits, and use a compact bottom bar with focus clearance |
+
+The screenshots showed hierarchy, spacing and control boundaries. The repository review found independent style rules for fields, charts, selection and preference tiles. Browser checks cover rendered behavior separately. Native option popups and pickers are drawn by the browser and OS, so the exact popup typography and time display depend on the device.
+
+## Mobbin's dashboard study
+
+Rebekah Bek studies 2,108 dashboard-tagged screens across 536 products using an April 2026 snapshot. The adoption and search statistics describe Mobbin's collection and its audience. They cannot establish that a pattern improved FoodWarden or that end users prefer it.
+
+1. **Purpose of the dashboard.** A dashboard decides which information deserves immediate attention. FoodWarden's landing view should answer what was measured, how long ago, and whether food or a device needs action.
+2. **Search demand.** Dashboard is prominent in both free-text search and web pattern filtering on Mobbin. This explains the focus of the study. It is a discovery metric, separate from product usability.
+3. **Home screen.** The study shows products that lead with recognizable evidence of value. FoodWarden's equivalent is the named fridge and its real latest measurements. Navigation and setup instructions are secondary.
+4. **Interpreting data.** In the study, several products pair the data with context at its point of use. FoodWarden shows the threshold, units and sample timestamp next to the measurement and links onward to detailed readings.
+5. **Useful language.** A familiar term helps people remember what a number means. FoodWarden uses everyday wording for the door and expiry states. Technical units remain visible on the chart and in the table.
+6. **A conclusion before the detail.** A concise warning can explain the action to take. FoodWarden can derive this from sensor rules and timestamps. The reference's examples include AI summaries, but FoodWarden needs no generated explanation to render a threshold alert.
+7. **What can wait.** Detailed history can sit behind a direct link, with a filter and pagination. Keep the chart table near the plot so accessing evidence does not require a different workflow.
+8. **Research boundaries.** Mobbin saves and exports measure designers collecting references. Verify FoodWarden separately with people trying to read a stale measurement, select food, or change notification time.
+
+Read the original study and its linked video. [What good dashboard design looks like](https://mobbin.com/blog/what-good-dashboard-design-looks-like)
+
+## Public Mobbin index reviewed
+
+| Article | Takeaway and relevance |
+| --- | --- |
+| [Dashboard study](https://mobbin.com/blog/what-good-dashboard-design-looks-like) | Put an interpretable status first. Keep detailed evidence one action away. |
+| [Onboarding flows](https://mobbin.com/blog/the-long-onboarding-a-study-of-1-460-flows) | Useful progress and early value make multi-step setup easier to follow. FoodWarden already has distinct hardware and household setup work, so surface the checklist when the hardware still needs setup. |
+| [Streaks](https://mobbin.com/blog/streaks-are-about-losing-a-study-of-859-streak-designs) | Opening an app and making progress are different outcomes. A household fridge app benefits from accurate status and actionable warnings. |
+| [MCP use cases](https://mobbin.com/blog/how-to-use-mobbin-mcp) | Look up the precise screen or flow under design. Use source material to check decisions around controls and navigation. |
+| [Alternatives](https://mobbin.com/blog/best-mobbin-alternatives) | Compare tools by what they let you inspect. The public pages cover enough patterns for this pass. The comparison is published by Mobbin. |
+| [Designer Spotlight](https://mobbin.com/blog/designer-spotlight-one-library-for-all-your-needs) | A compact grid can clarify a group. Removing forced scrolling and excess storytelling helped the example. Preserve normal page scrolling in FoodWarden. |
+| [Homepage process](https://mobbin.com/blog/how-to-ship-a-homepage-in-2026) | Verify AI-supplied evidence and evaluate designs against concrete product goals. FoodWarden uses real sample data and the user's screenshots for this purpose. |
+| [Page Flows comparison](https://mobbin.com/blog/mobbin-vs-page-flows) | A recorded flow and a searchable collection answer different questions. A local walkthrough is best for verifying time selection, keyboard focus and paging. |
+| [Refero comparison](https://mobbin.com/blog/mobbin-vs-refero) | Reference coverage and retrieval differ across libraries. Name the screen and the decision under review before searching for examples. |
+| [Finance+ comparison](https://mobbin.com/blog/mobbin-finance-vs-11-fs-pulse) | Market analysis and pattern research serve different jobs. This project needs interaction references and a food-management usability check. |
+
+## Browse by category
+
+- **Mobile.** Use Categories for IoT or home automation and health-tracking references. Use Screens for the dashboard and account views, UI Elements for bottom navigation and status indicators, and Flows for filtering or changing preferences. The public Explore page exposes patterns such as a tab bar and charts together. [Explore mobile](https://mobbin.com/explore/mobile)
+- **Web.** Look at dashboards, chart controls, filtering and sorting, settings, and history. Compare how labels, units and dates line up at a glance. The public feed includes examples tagged with charts and filtering. [Explore web](https://mobbin.com/explore/web)
+- **Sites.** Use Categories, Sections and Styles for a landing page or sign-in presentation. The gallery is largely marketing material. Its hero and motion patterns are a different task from reading sensor data. [Explore sites](https://mobbin.com/explore/sites)
+- **Glossary.** Use the names for checkbox, button, tab bar, badge, card, divider, and disclosure consistently. A button changes state or executes an action, while a checkbox represents a choice. Reserve a separate surface for a group that genuinely needs one. [Mobbin Glossary](https://mobbin.com/glossary)
+
+## Product Design Psychology
+
+The locally supplied EPUB describes how familiar controls, visible cues and grouping influence what people see and do. The following are notes on the chapters most relevant to the annotated screens.
+
+| Chapter or theme | Application in FoodWarden |
+| --- | --- |
+| False consensus and the curse of knowledge | An engineer recognizes a time picker or “+7” preset by context. A family member needs a visible field boundary and a label naming the result. |
+| First impressions and defaults | Start with the freshest useful data and a 24-hour temperature chart. Distinguish a cached reading from a live connection. |
+| Discoverability and familiarity | Standard selects, date inputs, checkboxes and labelled tab links retain known mouse and keyboard interactions. |
+| Cognitive load, memory and consistency | Give a preference one home. Show one data filter row beside the chart and put secondary evidence in a readable table below. Use the same control treatment throughout. |
+| Visual grouping | Keep label, value and status together. Use dividers between related metrics rather than nested backgrounds for every label. |
+| Localization | Check Thai and English with the same real data and at small widths. Use explicit Bangkok timestamps and let native pickers honor the device format. |
+| Evidence and organizational memory | Record what was tried, the implementation rationale, and what should be tested. Judge progress by completing real household tasks with minimal explanation. |
+
+See the [implementation and MDN reference guide](WEB-UI-GUIDE.md) for the specific standards and contributor checks.
+
+
+## Verification notes
+
+- The initial mobile sheet position was reproduced on Chromium, Firefox and WebKit. Production CSS optimization turned the two reset properties into one declaration while the desktop utility still shifted the sheet. The dialog now uses one transform for desktop positioning and one mobile reset.
+- The dashboard fits without horizontal scrolling at the tested widths. At 360 × 740 CSS pixels, its Add food action is above the bottom navigation even with aged sensor and door records. Long lists and forms use normal vertical scrolling.
+- The local D1 export contained 7 fridges, 1,253 sensor readings and 2,253 door events. The history view used those real records for filtering and paging. The inventory change tests used isolated Workers fixtures to verify create, edit, remove, duplicate requests and tied timestamps.
+- The desktop browser engines exercise responsive sizing, keyboard controls, the chart, and the paginated tables. Native mobile Safari and Android picker UI still require device testing.

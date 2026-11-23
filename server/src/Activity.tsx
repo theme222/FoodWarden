@@ -1,0 +1,305 @@
+import { useState } from "react";
+import { DoorClosed, Package, Thermometer } from "lucide-react";
+import { Link, useSearchParams } from "react-router-dom";
+import useSWR from "swr";
+import { StatusAlert } from "./components/status-alert";
+import { getJson, swrOptions } from "./lib/api";
+import { localTimestamp, readDoorEventList, readSample } from "./model";
+import type { DoorEvent, Language, Sample } from "./model";
+import { words } from "./words";
+
+const kinds = ["inventory", "door", "sensor"] as const;
+type Kind = (typeof kinds)[number];
+const icons = { inventory: Package, door: DoorClosed, sensor: Thermometer };
+type ActivityRow =
+  | {
+      id: number;
+      time: number;
+      kind: "inventory";
+      action: "created" | "updated" | "deleted";
+      nameTh: string;
+      nameEn: string;
+      source: "CAMERA" | "WEB_MANUAL" | null;
+    }
+  | { id: number; time: number; kind: "door"; event: DoorEvent }
+  | { id: number; time: number; kind: "sensor"; sample: Sample };
+
+function parsePage(value: unknown, kind: Kind) {
+  if (
+    !value ||
+    typeof value !== "object" ||
+    !("rows" in value) ||
+    !Array.isArray(value.rows)
+  ) {
+    throw new Error("Invalid activity response");
+  }
+  const rows = (value.rows as unknown[]).flatMap((row): ActivityRow[] => {
+    if (
+      !row ||
+      typeof row !== "object" ||
+      !("id" in row) ||
+      typeof row.id !== "number"
+    )
+      return [];
+    const id = row.id;
+    if (kind === "door") {
+      const [event] = readDoorEventList({ events: [row] });
+      return event ? [{ id, time: event.timestampS, kind, event }] : [];
+    }
+    if (kind === "sensor") {
+      const sample = readSample(row);
+      return sample ? [{ id, time: sample.timeS, kind, sample }] : [];
+    }
+    if (
+      !("action" in row) ||
+      (row.action !== "created" &&
+        row.action !== "updated" &&
+        row.action !== "deleted") ||
+      !("timestamp_s" in row) ||
+      typeof row.timestamp_s !== "number" ||
+      !("name_th" in row) ||
+      typeof row.name_th !== "string" ||
+      !("name_en" in row) ||
+      typeof row.name_en !== "string"
+    )
+      return [];
+    return [
+      {
+        id,
+        time: row.timestamp_s,
+        kind,
+        action: row.action,
+        nameTh: row.name_th,
+        nameEn: row.name_en,
+        source:
+          "source" in row &&
+          (row.source === "CAMERA" || row.source === "WEB_MANUAL")
+            ? row.source
+            : null,
+      },
+    ];
+  });
+  const next =
+    "next" in value && typeof value.next === "string" ? value.next : null;
+  return { rows, next };
+}
+
+function ActivityDetail({
+  row,
+  language,
+}: {
+  row: ActivityRow;
+  language: Language;
+}) {
+  const th = language === "th";
+  if (row.kind === "door")
+    return (
+      <>
+        {words[language][`door_${row.event.status}`]} · {row.event.nodeId}
+      </>
+    );
+  if (row.kind === "sensor") {
+    const { nodeId, temperature, voc, light } = row.sample;
+    return (
+      <>
+        <strong>{nodeId}</strong>
+        <br />
+        {temperature ?? "—"} °C · {voc ?? "—"} VOC · {light ?? "—"} LDR
+      </>
+    );
+  }
+  const action = th
+    ? { created: "เพิ่ม", updated: "แก้ไข", deleted: "นำออก" }
+    : { created: "Added", updated: "Edited", deleted: "Removed" };
+  const name = th ? row.nameTh || row.nameEn : row.nameEn || row.nameTh;
+  const source =
+    row.source === "CAMERA"
+      ? th
+        ? "กล้อง"
+        : "Camera"
+      : row.source === "WEB_MANUAL"
+        ? th
+          ? "เว็บ"
+          : "Web"
+        : null;
+  return (
+    <>
+      {action[row.action]} <strong>{name}</strong>
+      {source && <span className="small"> · {source}</span>}
+    </>
+  );
+}
+
+function ActivityResults({
+  fridgeId,
+  kind,
+  date,
+  language,
+}: {
+  fridgeId: string;
+  kind: Kind;
+  date: string;
+  language: Language;
+}) {
+  const th = language === "th";
+  const [cursors, setCursors] = useState<string[]>([]);
+  const cursor = cursors.at(-1);
+  const query = new URLSearchParams({ kind });
+  if (date) query.set("date", date);
+  if (cursor) query.set("before", cursor);
+  const state = useSWR(
+    "/api/fridges/" +
+      encodeURIComponent(fridgeId) +
+      "/activity?" +
+      query.toString(),
+    (url: string) => getJson(url, (value) => parsePage(value, kind)),
+    swrOptions,
+  );
+  const Icon = icons[kind];
+  const next = state.data?.next;
+
+  return (
+    <>
+      {state.error && (
+        <StatusAlert
+          action={
+            <button
+              className="btn sm"
+              type="button"
+              onClick={() => void state.mutate()}
+            >
+              {th ? "ลองใหม่" : "Retry"}
+            </button>
+          }
+        >
+          {th ? "โหลดประวัติไม่ได้" : "Could not load activity"}
+        </StatusAlert>
+      )}
+      {state.isLoading && <output>{th ? "กำลังโหลด…" : "Loading…"}</output>}
+      {(next || cursor) && (
+        <div className="history-pagination">
+          <button
+            type="button"
+            className="btn sm"
+            disabled={!cursor}
+            onClick={() => setCursors(cursors.slice(0, -1))}
+          >
+            {th ? "ใหม่กว่า" : "Newer"}
+          </button>
+          <output>
+            {th ? "หน้า" : "Page"} {cursors.length + 1}
+          </output>
+          <button
+            type="button"
+            className="btn sm"
+            disabled={!next}
+            onClick={() => {
+              if (next) setCursors([...cursors, next]);
+            }}
+          >
+            {th ? "เก่ากว่า" : "Older"}
+          </button>
+        </div>
+      )}
+      {state.data &&
+        (state.data.rows.length ? (
+          <table className="history-table activity-table">
+            <thead>
+              <tr>
+                <th scope="col">{th ? "เหตุการณ์" : "Activity"}</th>
+                <th scope="col">{th ? "เวลา (ไทย)" : "Time (Bangkok)"}</th>
+              </tr>
+            </thead>
+            <tbody>
+              {state.data.rows.map((row) => (
+                <tr key={row.id}>
+                  <td>
+                    <Icon aria-hidden="true" size={17} />
+                    <span>
+                      <ActivityDetail row={row} language={language} />
+                    </span>
+                  </td>
+                  <td>
+                    <time dateTime={new Date(row.time * 1000).toISOString()}>
+                      {localTimestamp(row.time, language)}
+                    </time>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        ) : (
+          <p className="empty-state">
+            {th ? "ไม่มีรายการในช่วงนี้" : "No activity for this selection."}
+          </p>
+        ))}
+    </>
+  );
+}
+
+export function Activity({
+  fridgeId,
+  language,
+}: {
+  fridgeId: string;
+  language: Language;
+}) {
+  const th = language === "th";
+  const [params, setParams] = useSearchParams();
+  const [date, setDate] = useState("");
+  const kind =
+    kinds.find((value) => value === params.get("kind")) ?? "inventory";
+  const labels = th
+    ? { inventory: "อาหาร", door: "ประตู", sensor: "เซนเซอร์" }
+    : { inventory: "Food", door: "Door", sensor: "Sensors" };
+
+  return (
+    <section className="chart-page">
+      <div className="page-head">
+        <h1>{th ? "ประวัติ" : "Activity history"}</h1>
+        {kind === "sensor" && (
+          <Link
+            className="btn sm"
+            to={"/fridges/" + encodeURIComponent(fridgeId) + "/charts"}
+          >
+            {th ? "ดูกราฟ" : "View charts"}
+          </Link>
+        )}
+      </div>
+      <div className="chart-filters">
+        <label>
+          {th ? "ประเภท" : "Type"}
+          <select
+            value={kind}
+            onChange={(event) => setParams({ kind: event.target.value })}
+          >
+            {kinds.map((value) => (
+              <option key={value} value={value}>
+                {labels[value]}
+              </option>
+            ))}
+          </select>
+        </label>
+        <label>
+          {th ? "วันที่ (ไม่ระบุ = ทุกวัน)" : "Date (blank for all days)"}
+          <input
+            type="date"
+            value={date}
+            onChange={(event) => setDate(event.target.value)}
+          />
+        </label>
+      </div>
+      {kind === "inventory" && (
+        <p className="small">
+          {th
+            ? "แสดงการเปลี่ยนแปลงหลังเปิดใช้การบันทึกประวัติ"
+            : "Shows changes recorded after activity logging was enabled."}
+        </p>
+      )}
+      <ActivityResults
+        key={JSON.stringify([fridgeId, kind, date])}
+        {...{ fridgeId, kind, date, language }}
+      />
+    </section>
+  );
+}

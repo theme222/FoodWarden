@@ -1,3 +1,4 @@
+import { listActivity } from "./lib/activity";
 import {
   requireOperationId,
   runDraftOperation,
@@ -270,6 +271,14 @@ app.get("/api/auth/config", (c) => {
     googleEnabled: isGoogleAuthEnabled(c.env),
     devLoginEnabled: isDevBypassEnabled(c.env),
   });
+});
+
+app.get("/api/ui/config", (c) => {
+  c.header("Cache-Control", "private, no-store");
+  const raw = c.env.UI_VERSION?.trim().toLowerCase();
+  const defaultVersion = raw === "v1" ? "v1" : "v2";
+  const locked = c.env.UI_VERSION_LOCK?.trim().toLowerCase() === "true";
+  return c.json({ defaultVersion, locked });
 });
 
 app.post("/api/auth/dev-login", async (c) => {
@@ -760,6 +769,7 @@ app.delete("/api/fridges/:fridgeId/inventory/:itemId", async (c) => {
     c.env.PHOTOS,
     auth.fridgeId,
     itemId,
+    "WEB_MANUAL",
   );
   if (!deleted) {
     return c.json<ApiErrorEnvelope>(
@@ -828,6 +838,23 @@ app.get("/api/fridges/:fridgeId/status", async (c) => {
 
   const status = await getLatestStatus(c.env.DB, auth.fridgeId);
   return c.json({ status });
+});
+
+app.get("/api/fridges/:fridgeId/activity", async (c) => {
+  const auth = await requireFridgeRole(c, "any");
+  if (auth instanceof Response) return auth;
+  const page = await listActivity(
+    c.env.DB, auth.fridgeId, c.req.query("kind") ?? "inventory",
+    c.req.query("date"), c.req.query("before"),
+  );
+  if (!page) {
+    return c.json<ApiErrorEnvelope>(
+      { error: "INVALID_PAYLOAD", message: "Invalid activity filter." },
+      400,
+    );
+  }
+  c.header("Cache-Control", "private, no-store");
+  return c.json(page);
 });
 
 app.get("/api/fridges/:fridgeId/door_events", async (c) => {
@@ -1086,6 +1113,7 @@ app.all("/api/inventory/checkout", async (c) => {
     c.env.PHOTOS,
     auth,
     payload.item_id,
+    "CAMERA",
   );
   if (!deleted) {
     return c.json<ApiErrorEnvelope>(

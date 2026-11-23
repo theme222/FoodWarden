@@ -4,12 +4,21 @@ import {
   Network,
   UserRound,
   Settings2,
+  Plus,
+  RotateCcw,
+  ChevronRight,
+  ArrowLeft,
+  History,
 } from "lucide-react";
 import useSWR from "swr";
 import { SessionCache } from "./components/session-cache";
 import { ConfirmationProvider } from "./components/confirmation";
 import { StatusAlert } from "./components/status-alert";
 import { Toaster } from "./components/ui/sonner";
+import {
+  UiVersionProvider,
+  useUiVersion,
+} from "./components/ui-version-context";
 import {
   StrictMode,
   lazy,
@@ -44,12 +53,21 @@ import { Devices } from "./Devices";
 import { AddFood, FoodDetail } from "./Food";
 import { Inventory } from "./Inventory";
 import { FridgeLogo } from "./icons";
-import { Metrics } from "./Metrics";
+import { Metrics, ReadingTime } from "./Metrics";
+import { Sheet } from "./Sheet";
+import { FRIDGE_SENSOR_STALE_S } from "./model";
 import type { Fridge, Language } from "./model";
-
+import {
+  deriveTelemetryAlerts,
+  summarizeDeviceHealth,
+} from "./state/dashboard-machine";
+import type { ColorTheme } from "./state/dashboard-machine";
+import { applyColorTheme, readStoredColorTheme } from "./theme";
 import { words } from "./words";
 import "./style.css";
 import "./dashboard-theme.css";
+import "./v1-classic.css";
+
 const Settings = lazy(() =>
   import("./Settings").then((module) => ({ default: module.Settings })),
 );
@@ -58,13 +76,75 @@ const GatewaySimulatorPage = lazy(() =>
     default: module.GatewaySimulatorPage,
   })),
 );
-
 const MyAccount = lazy(() =>
   import("./MyAccount").then((module) => ({ default: module.MyAccount })),
 );
+const Activity = lazy(() => import("./Activity").then((module) => ({ default: module.Activity })));
 const Charts = lazy(() =>
   import("./Charts").then((module) => ({ default: module.Charts })),
 );
+
+function TelemetryAlerts({
+  room,
+  language,
+  now,
+}: {
+  room: FridgeRoomState;
+  language: Language;
+  now: number;
+}) {
+  const th = language === "th";
+  if (!room.latest || now - room.latest.timeS > FRIDGE_SENSOR_STALE_S) return null;
+  const alerts = deriveTelemetryAlerts(room.latest);
+
+  return (
+    <>
+      {alerts.length > 0 && (
+        <StatusAlert variant="warning">
+          {alerts.includes("warm") && (th ? "ตู้เย็นร้อนเกินเกณฑ์ ตรวจว่าประตูปิดสนิท" : "High temperature. Check that the door is shut.")}
+          {alerts.length > 1 && " "}
+          {alerts.includes("spoil") && (th ? "ค่า VOC สูง ลองตรวจอาหารในตู้" : "High VOC. Check the food in the fridge.")}
+        </StatusAlert>
+      )}
+    </>
+  );
+}
+
+function DeviceHealthBar({
+  base,
+  room,
+  now,
+  language,
+}: {
+  base: string;
+  room: FridgeRoomState;
+  now: number;
+  language: Language;
+}) {
+  const th = language === "th";
+  const deviceSummary = summarizeDeviceHealth(room.heartbeat ?? null, now);
+  const dotClass = deviceSummary.allOk
+    ? "ok"
+    : deviceSummary.degradedNodeIds.length > 0
+      ? "warn"
+      : "";
+  const text = deviceSummary.allOk
+    ? th
+      ? "อุปกรณ์ทั้งหมดออนไลน์ปกติ (C0 · F0 · D0)"
+      : "All 3 devices online (C0 · F0 · D0)"
+    : th
+      ? `สถานะอุปกรณ์: ออนไลน์ ${deviceSummary.healthyCount}/3`
+      : `Devices: ${deviceSummary.healthyCount}/3 online`;
+
+  return (
+    <Link to={`${base}/devices`} className="devbar">
+      <span className={`dot ${dotClass}`} aria-hidden="true" />
+      <Network size={18} aria-hidden="true" />
+      <span className="devbar-text">{text}</span>
+      <ChevronRight size={16} aria-hidden="true" />
+    </Link>
+  );
+}
 
 function Dashboard({
   fridge,
@@ -75,8 +155,10 @@ function Dashboard({
   room: FridgeRoomState;
   language: Language;
 }) {
+  const th = language === "th";
   const now = useNow();
   const t = words[language];
+  const { version } = useUiVersion();
   const location = useLocation();
   const state: unknown = location.state;
   const added =
@@ -84,24 +166,44 @@ function Dashboard({
     state !== null &&
     "added" in state &&
     state.added === true;
+  const base = `/fridges/${encodeURIComponent(fridge.id)}`;
 
   return (
-    <>
-      <h1>{fridge.name}</h1>
-      {added && (
-        <p role="status" className="notice">
-          {t.saved}
-        </p>
-      )}
+    <div className="flex flex-col gap-4">
+      <div className="page-head">
+        <div className="page-head-copy">
+          <h1>{fridge.name}</h1>
+        </div>
+      </div>
+
+      {added && <output className="pill accent">{t.saved}</output>}
+
+      <TelemetryAlerts room={room} language={language} now={now} />
+
       <Metrics
         latest={room.latest}
-        history={room.history ?? []}
         now={now}
         language={language}
         failed={room.error}
+        fridgeId={fridge.id}
+        doorEvents={room.doorEvents ?? []}
       />
+
+      {version === "v2" && (
+        <DeviceHealthBar base={base} room={room} now={now} language={language} />
+      )}
+
       {room.error ? (
-        <StatusAlert>{t.failed}</StatusAlert>
+        <StatusAlert
+          action={
+            <button type="button" className="btn sm" onClick={room.reloadAll}>
+              <RotateCcw size={15} aria-hidden="true" />
+              {th ? "ลองใหม่" : "Retry"}
+            </button>
+          }
+        >
+          {t.failed}
+        </StatusAlert>
       ) : room.inventory ? (
         <Inventory
           fridgeId={fridge.id}
@@ -110,9 +212,9 @@ function Dashboard({
           language={language}
         />
       ) : (
-        <p role="status">{t.loading}</p>
+        <output className="sub">{t.loading}</output>
       )}
-    </>
+    </div>
   );
 }
 
@@ -127,8 +229,20 @@ function ItemPage({
 }) {
   const { itemId = "" } = useParams();
   const t = words[language];
-  if (room.error) return <p role="alert">{t.failed}</p>;
-  if (!room.inventory) return <p role="status">{t.loading}</p>;
+  if (room.error) {
+    return (
+      <StatusAlert
+        action={
+          <button type="button" className="btn sm" onClick={room.reloadAll}>
+            {language === "th" ? "ลองใหม่" : "Retry"}
+          </button>
+        }
+      >
+        {t.failed}
+      </StatusAlert>
+    );
+  }
+  if (!room.inventory) return <output className="sub">{t.loading}</output>;
   return (
     <FoodDetail
       itemId={itemId}
@@ -155,13 +269,294 @@ function connectionLabel(
   }
 }
 
+interface WorkspaceNavItem {
+  to: string;
+  end: boolean;
+  icon: typeof Utensils;
+  label: string;
+  fullLabel: string;
+}
+
+function buildNavItems(
+  fridge: Fridge,
+  base: string,
+  language: Language,
+): WorkspaceNavItem[] {
+  const th = language === "th";
+  const t = words[language];
+  const items: WorkspaceNavItem[] = [
+    {
+      to: base,
+      end: true,
+      icon: Utensils,
+      label: th ? "อาหาร" : "Food",
+      fullLabel: t.food,
+    },
+    {
+      to: base + "/charts",
+      end: false,
+      icon: ChartNoAxesCombined,
+      label: th ? "กราฟ" : "Charts",
+      fullLabel: th ? "กราฟ" : "Charts",
+    },
+    {
+      to: base + "/history",
+      end: false,
+      icon: History,
+      label: th ? "ประวัติ" : "History",
+      fullLabel: th ? "ประวัติ" : "History",
+    },
+    {
+      to: base + "/devices",
+      end: false,
+      icon: Network,
+      label: t.devices,
+      fullLabel: t.devices,
+    },
+    {
+      to: base + "/me",
+      end: false,
+      icon: UserRound,
+      label: th ? "ของฉัน" : "Me",
+      fullLabel: th ? "ของฉัน" : "Me",
+    },
+  ];
+  if (fridge.role === "owner") {
+    items.push({
+      to: base + "/settings",
+      end: false,
+      icon: Settings2,
+      label: t.settings,
+      fullLabel: t.settings,
+    });
+  }
+  return items;
+}
+
+function FridgeNavBar({
+  fridge,
+  fridges,
+  navItems,
+  connectionState,
+  language,
+}: {
+  fridge: Fridge;
+  fridges: Fridge[];
+  navItems: WorkspaceNavItem[];
+  connectionState: SocketConnectionState;
+  language: Language;
+}) {
+  const th = language === "th";
+  const t = words[language];
+  const navigate = useNavigate();
+
+  return (
+    <div className="fridge-bar">
+      <div className="fridge-bar-left">
+        <Link to="/fridges" className="btn sm">
+          <ArrowLeft size={16} aria-hidden="true" />
+          {th ? "ทุกตู้" : "All fridges"}
+        </Link>
+        {fridges.length > 1 && (
+          <select
+            className="fridge-select"
+            aria-label={t.fridgeName}
+            value={fridge.id}
+            onChange={(event) =>
+              navigate(`/fridges/${encodeURIComponent(event.target.value)}`)
+            }
+          >
+            {fridges.map((entry) => (
+              <option key={entry.id} value={entry.id}>
+                {entry.name}
+              </option>
+            ))}
+          </select>
+        )}
+        <nav className="tabs" aria-label={fridge.name}>
+          {navItems.map((item) => {
+            const Icon = item.icon;
+            return (
+              <NavLink key={item.to} to={item.to} end={item.end}>
+                <Icon size={18} aria-hidden="true" />
+                {item.fullLabel}
+              </NavLink>
+            );
+          })}
+        </nav>
+      </div>
+      <span className={`ws-pill ws-${connectionState}`} aria-live="polite">
+        <span aria-hidden="true" />
+        {connectionLabel(connectionState, language)}
+      </span>
+    </div>
+  );
+}
+
+function FridgeBottomNav({
+  fridgeName,
+  navItems,
+}: {
+  fridgeName: string;
+  navItems: WorkspaceNavItem[];
+}) {
+  return (
+    <nav className="bnav" aria-label={fridgeName}>
+      {navItems.map((item) => {
+        const Icon = item.icon;
+        return (
+          <NavLink key={item.to} to={item.to} end={item.end}>
+            <span className="bnav-ic">
+              <Icon size={20} aria-hidden="true" />
+            </span>
+            <span>{item.label}</span>
+          </NavLink>
+        );
+      })}
+    </nav>
+  );
+}
+
+function FridgeWorkspaceRoutes({
+  fridge,
+  base,
+  room,
+  language,
+  colorTheme,
+  onLanguageChange,
+  onColorThemeChange,
+  onFridgesChanged,
+}: {
+  fridge: Fridge;
+  base: string;
+  room: FridgeRoomState;
+  language: Language;
+  colorTheme: ColorTheme;
+  onLanguageChange: (next: Language) => void;
+  onColorThemeChange: (next: ColorTheme) => void;
+  onFridgesChanged: () => void;
+}) {
+  const t = words[language];
+  const isOwner = fridge.role === "owner";
+
+  return (
+    <Routes>
+      <Route
+        index
+        element={<Dashboard fridge={fridge} room={room} language={language} />}
+      />
+      <Route
+        path="me"
+        element={
+          <Suspense fallback={<output>{t.loading}</output>}>
+            <MyAccount
+              language={language}
+              fridgeId={fridge.id}
+              colorTheme={colorTheme}
+              onLanguageChange={onLanguageChange}
+              onColorThemeChange={onColorThemeChange}
+            />
+          </Suspense>
+        }
+      />
+      <Route
+        path="charts"
+        element={
+          <Suspense fallback={<output>{t.loading}</output>}>
+            <Charts
+              language={language}
+              fridgeId={fridge.id}
+              latest={room.latest}
+            />
+          </Suspense>
+        }
+      />
+      <Route
+        path="history"
+        element={
+          <Suspense fallback={<output>{t.loading}</output>}>
+            <Activity fridgeId={fridge.id} language={language} />
+          </Suspense>
+        }
+      />
+      <Route
+        path="devices"
+        element={
+          <Devices
+            fridgeId={fridge.id}
+            heartbeat={room.heartbeat}
+            doorEvents={room.doorEvents}
+            error={room.error}
+            language={language}
+          />
+        }
+      />
+      <Route
+        path="food/add"
+        element={
+          <AddFood
+            key={fridge.id}
+            fridgeId={fridge.id}
+            language={language}
+            onAdded={room.reloadInventory}
+          />
+        }
+      />
+      <Route
+        path="food/:itemId"
+        element={<ItemPage fridge={fridge} room={room} language={language} />}
+      />
+      <Route
+        path="settings"
+        element={
+          isOwner ? (
+            <Suspense fallback={<output>{t.loading}</output>}>
+              <Settings
+                fridgeId={fridge.id}
+                language={language}
+                onFridgesChanged={onFridgesChanged}
+                hasDevices={Boolean(room.heartbeat?.nodes.length)}
+              />
+            </Suspense>
+          ) : (
+            <Navigate to={base} replace />
+          )
+        }
+      />
+      <Route
+        path="sim"
+        element={
+          isOwner ? (
+            <Suspense fallback={<output>{t.loading}</output>}>
+              <GatewaySimulatorPage fridgeId={fridge.id} language={language} />
+            </Suspense>
+          ) : (
+            <Navigate to={base} replace />
+          )
+        }
+      />
+      <Route
+        path="simulator"
+        element={<Navigate to={base + "/sim"} replace />}
+      />
+      <Route path="*" element={<Navigate to={base} replace />} />
+    </Routes>
+  );
+}
+
 function FridgePage({
   fridges,
   language,
+  colorTheme,
+  onLanguageChange,
+  onColorThemeChange,
   onFridgesChanged,
 }: {
   fridges: Fridge[];
   language: Language;
+  colorTheme: ColorTheme;
+  onLanguageChange: (next: Language) => void;
+  onColorThemeChange: (next: ColorTheme) => void;
   onFridgesChanged: () => void;
 }) {
   const { fridgeId } = useParams();
@@ -174,13 +569,29 @@ function FridgePage({
     navigate("/fridges", { replace: true });
   }, [navigate, onFridgesChanged]);
 
-  if (!fridge) return <p role="alert">{t.missingFridge}</p>;
+  if (!fridge) {
+    return (
+      <StatusAlert
+        action={
+          <Link className="btn sm" to="/fridges">
+            {language === "th" ? "กลับหน้าตู้เย็นทั้งหมด" : "All fridges"}
+          </Link>
+        }
+      >
+        {t.missingFridge}
+      </StatusAlert>
+    );
+  }
 
   return (
     <FridgeWorkspace
       key={fridge.id}
       fridge={fridge}
+      fridges={fridges}
       language={language}
+      colorTheme={colorTheme}
+      onLanguageChange={onLanguageChange}
+      onColorThemeChange={onColorThemeChange}
       onFridgesChanged={onFridgesChanged}
       onAccessLost={handleAccessLost}
     />
@@ -189,15 +600,24 @@ function FridgePage({
 
 function FridgeWorkspace({
   fridge,
+  fridges,
   language,
+  colorTheme,
+  onLanguageChange,
+  onColorThemeChange,
   onFridgesChanged,
   onAccessLost,
 }: {
   fridge: Fridge;
+  fridges: Fridge[];
   language: Language;
+  colorTheme: ColorTheme;
+  onLanguageChange: (next: Language) => void;
+  onColorThemeChange: (next: ColorTheme) => void;
   onFridgesChanged: () => void;
   onAccessLost: () => void;
 }) {
+  const th = language === "th";
   const t = words[language];
   const location = useLocation();
   const room = useFridgeRoom(fridge.id, fridge.latest, onAccessLost);
@@ -214,138 +634,45 @@ function FridgeWorkspace({
     return <Navigate to={base + "/sim"} replace />;
   }
 
+  const navItems = buildNavItems(fridge, base, language);
+  const needsReconnect =
+    room.connectionState === "reconnecting" || room.connectionState === "closed";
+
   return (
     <>
-      {(room.connectionState === "reconnecting" ||
-        room.connectionState === "closed") && (
-        <StatusAlert>
+      {needsReconnect && (
+        <StatusAlert
+          action={
+            <button type="button" className="btn sm" onClick={room.reloadAll}>
+              <RotateCcw size={15} aria-hidden="true" />
+              {th ? "เชื่อมต่อใหม่" : "Refresh"}
+            </button>
+          }
+        >
           {t.failed} · {connectionLabel(room.connectionState, language)}
         </StatusAlert>
       )}
-      <div className="fridge-bar">
-        <nav className="tabs" aria-label={fridge.name}>
-          <NavLink to={base} end>
-            <Utensils size={18} aria-hidden="true" />
-            {t.food}
-          </NavLink>
-          <NavLink to={base + "/charts"}>
-            <ChartNoAxesCombined size={18} aria-hidden="true" />
-            {language === "th" ? "กราฟ" : "Charts"}
-          </NavLink>
-          <NavLink to={base + "/devices"}>
-            <Network size={18} aria-hidden="true" />
-            {t.devices}
-          </NavLink>
-          <NavLink to={base + "/me"}>
-            <UserRound size={18} aria-hidden="true" />
-            {language === "th" ? "ของฉัน" : "Me"}
-          </NavLink>
-          {fridge.role === "owner" && (
-            <NavLink to={base + "/settings"}>
-              <Settings2 size={18} aria-hidden="true" />
-              {t.settings}
-            </NavLink>
-          )}
-        </nav>
-        <span
-          className={`ws-pill ws-${room.connectionState}`}
-          aria-live="polite"
-        >
-          <span aria-hidden="true" />
-          {connectionLabel(room.connectionState, language)}
-        </span>
-      </div>
-      <Routes>
-        <Route
-          index
-          element={
-            <Dashboard fridge={fridge} room={room} language={language} />
-          }
-        />
-        <Route
-          path="me"
-          element={
-            <Suspense fallback={<output>{t.loading}</output>}>
-              <MyAccount language={language} fridgeId={fridge.id} />
-            </Suspense>
-          }
-        />
-        <Route
-          path="charts"
-          element={
-            <Suspense fallback={<output>{t.loading}</output>}>
-              <Charts
-                language={language}
-                fridgeId={fridge.id}
-                latest={room.latest}
-                doorEvents={room.doorEvents ?? []}
-              />
-            </Suspense>
-          }
-        />
-        <Route
-          path="devices"
-          element={
-            <Devices
-              heartbeat={room.heartbeat}
-              doorEvents={room.doorEvents}
-              error={room.error}
-              language={language}
-            />
-          }
-        />
-        <Route
-          path="food/add"
-          element={
-            <AddFood
-              key={fridge.id}
-              fridgeId={fridge.id}
-              language={language}
-              onAdded={room.reloadInventory}
-            />
-          }
-        />
-        <Route
-          path="food/:itemId"
-          element={<ItemPage fridge={fridge} room={room} language={language} />}
-        />
-        <Route
-          path="settings"
-          element={
-            fridge.role === "owner" ? (
-              <Suspense fallback={<output>{t.loading}</output>}>
-                <Settings
-                  fridgeId={fridge.id}
-                  language={language}
-                  onFridgesChanged={onFridgesChanged}
-                />
-              </Suspense>
-            ) : (
-              <Navigate to={base} replace />
-            )
-          }
-        />
-        <Route
-          path="sim"
-          element={
-            fridge.role === "owner" ? (
-              <Suspense fallback={<output>{t.loading}</output>}>
-                <GatewaySimulatorPage
-                  fridgeId={fridge.id}
-                  language={language}
-                />
-              </Suspense>
-            ) : (
-              <Navigate to={base} replace />
-            )
-          }
-        />
-        <Route
-          path="simulator"
-          element={<Navigate to={base + "/sim"} replace />}
-        />
-        <Route path="*" element={<Navigate to={base} replace />} />
-      </Routes>
+
+      <FridgeNavBar
+        fridge={fridge}
+        fridges={fridges}
+        navItems={navItems}
+        connectionState={room.connectionState}
+        language={language}
+      />
+
+      <FridgeWorkspaceRoutes
+        fridge={fridge}
+        base={base}
+        room={room}
+        language={language}
+        colorTheme={colorTheme}
+        onLanguageChange={onLanguageChange}
+        onColorThemeChange={onColorThemeChange}
+        onFridgesChanged={onFridgesChanged}
+      />
+
+      <FridgeBottomNav fridgeName={fridge.name} navItems={navItems} />
     </>
   );
 }
@@ -359,8 +686,11 @@ function FridgeHub({
   language: Language;
   onCreated: () => void;
 }) {
+  const th = language === "th";
+  const now = useNow();
   const t = words[language];
   const navigate = useNavigate();
+  const [openCreate, setOpenCreate] = useState(false);
   const [name, setName] = useState("");
   const [creating, setCreating] = useState(false);
   const [error, setError] = useState(false);
@@ -381,6 +711,7 @@ function FridgeHub({
       if (!res.ok) throw new Error("Create failed");
       const created = (await res.json()) as { id: string };
       setName("");
+      setOpenCreate(false);
       onCreated();
       navigate("/fridges/" + encodeURIComponent(created.id));
     } catch {
@@ -391,65 +722,161 @@ function FridgeHub({
   }
 
   return (
-    <>
-      <h1>{t.home}</h1>
+    <div className="flex flex-col gap-4">
+      <div className="page-head">
+        <div className="page-head-copy">
+          <h1>{t.home}</h1>
+          <p className="sub">
+            {th
+              ? "เลือกตู้เย็นที่ต้องการดู หรือเพิ่มตู้เย็นใหม่สำหรับครอบครัว"
+              : "Pick a fridge to inspect, or add a new one for your household."}
+          </p>
+        </div>
+        <button
+          type="button"
+          className="primary big"
+          onClick={() => {
+            setError(false);
+            setOpenCreate(true);
+          }}
+        >
+          <Plus size={19} aria-hidden="true" />
+          {t.createFridge}
+        </button>
+      </div>
+
       {fridges.length === 0 ? (
-        <p className="surface">{t.emptyFridges}</p>
+        <div className="empty-state">
+          <p className="sub">{t.emptyFridges}</p>
+          <button
+            type="button"
+            className="primary big"
+            onClick={() => setOpenCreate(true)}
+          >
+            <Plus size={18} aria-hidden="true" />
+            {t.createFridge}
+          </button>
+        </div>
       ) : (
-        <ul className="food-list">
-          {fridges.map((fridge) => (
-            <li key={fridge.id}>
-              <Link to={"/fridges/" + encodeURIComponent(fridge.id)}>
-                <div>
-                  <strong>{fridge.name}</strong>
-                  <span className="small">
+        <div className="hub-grid">
+          {fridges.map((fridge) => {
+            const temp = fridge.latest?.temperature ?? null;
+            const voc = fridge.latest?.voc ?? null;
+            const warm = temp !== null && temp > 8;
+            const spoil = voc !== null && voc > 250;
+            const statusText =
+              fridge.lastSeenS > 0
+                ? th
+                  ? "พร้อมใช้งาน"
+                  : "Connected"
+                : th
+                  ? "รอเชื่อมต่ออุปกรณ์"
+                  : "Waiting for devices";
+            return (
+              <Link
+                key={fridge.id}
+                className="fcard"
+                to={"/fridges/" + encodeURIComponent(fridge.id)}
+              >
+                <div className="fcard-top">
+                  <div>
+                    <h2>{fridge.name}</h2>
+                    <p className="small">{fridge.latest ? <ReadingTime timeS={fridge.latest.timeS} now={now} language={language} /> : statusText}</p>
+                  </div>
+                  <span
+                    className={`pill ${fridge.role === "owner" ? "accent" : "neutral"}`}
+                  >
                     {fridge.role === "owner" ? t.ownerBadge : t.memberBadge}
                   </span>
                 </div>
-                <span className="chevron" aria-hidden="true">
-                  ›
-                </span>
+                <div className="fcard-stats">
+                  <div className="stat">
+                    <span className="k">{t.temperature}</span>
+                    <span className={`v${warm ? " bad" : ""}`}>
+                      {temp === null ? "—" : `${temp.toFixed(1)}°C`}
+                    </span>
+                  </div>
+                  <div className="stat">
+                    <span className="k">VOC</span>
+                    <span className={`v${spoil ? " warn" : ""}`}>
+                      {voc === null ? "—" : Math.round(voc)}
+                    </span>
+                  </div>
+                  <ChevronRight size={18} aria-hidden="true" />
+                </div>
               </Link>
-            </li>
-          ))}
-        </ul>
+            );
+          })}
+        </div>
       )}
-      <section className="surface create-fridge" aria-labelledby="create-title">
-        <h2 id="create-title">{t.createFridge}</h2>
-        {error && <StatusAlert>{t.actionFailed}</StatusAlert>}
-        <form
-          className="create-fridge-form"
-          onSubmit={(event) => void handleCreate(event)}
-        >
-          <input
-            value={name}
-            onChange={(event) => setName(event.target.value)}
-            placeholder={t.fridgeNamePlaceholder}
-            aria-label={t.fridgeName}
-            maxLength={80}
-            required
-            disabled={creating}
-          />
-          <button className="primary" disabled={creating} type="submit">
-            {creating ? t.creating : t.createFridge}
-          </button>
+
+      <Sheet
+        open={openCreate}
+        onOpenChange={setOpenCreate}
+        title={t.createFridge}
+      >
+        <form className="add-form" onSubmit={(event) => void handleCreate(event)}>
+          {error && <StatusAlert>{t.actionFailed}</StatusAlert>}
+          <fieldset disabled={creating}>
+            <label>
+              {t.fridgeName}
+              <input
+                value={name}
+                onChange={(event) => setName(event.target.value)}
+                placeholder={t.fridgeNamePlaceholder}
+                maxLength={80}
+                required
+              />
+            </label>
+          </fieldset>
+          <div className="form-actions">
+            <button className="primary big" disabled={creating} type="submit">
+              {creating ? t.creating : t.createFridge}
+            </button>
+            <button
+              type="button"
+              className="btn big"
+              onClick={() => setOpenCreate(false)}
+            >
+              {t.cancel}
+            </button>
+          </div>
         </form>
-      </section>
-    </>
+      </Sheet>
+    </div>
   );
 }
 
 function SignedIn({
   user,
   language,
+  colorTheme,
+  onLanguageChange,
+  onColorThemeChange,
 }: {
   user: SessionUser;
   language: Language;
+  colorTheme: ColorTheme;
+  onLanguageChange: (next: Language) => void;
+  onColorThemeChange: (next: ColorTheme) => void;
 }) {
   const t = words[language];
   const live = useFridges(user.id);
-  if (live.error) return <p role="alert">{t.failed}</p>;
-  if (!live.data) return <p role="status">{t.loading}</p>;
+  if (live.error) {
+    return (
+      <StatusAlert
+        action={
+          <button type="button" className="btn sm" onClick={live.reload}>
+            <RotateCcw size={15} aria-hidden="true" />
+            {language === "th" ? "ลองใหม่" : "Retry"}
+          </button>
+        }
+      >
+        {t.failed}
+      </StatusAlert>
+    );
+  }
+  if (!live.data) return <output className="sub">{t.loading}</output>;
   return (
     <Routes>
       <Route
@@ -468,6 +895,9 @@ function SignedIn({
           <FridgePage
             fridges={live.data}
             language={language}
+            colorTheme={colorTheme}
+            onLanguageChange={onLanguageChange}
+            onColorThemeChange={onColorThemeChange}
             onFridgesChanged={live.reload}
           />
         }
@@ -476,7 +906,12 @@ function SignedIn({
         path="/me"
         element={
           <Suspense fallback={<output>{t.loading}</output>}>
-            <MyAccount language={language} />
+            <MyAccount
+              language={language}
+              colorTheme={colorTheme}
+              onLanguageChange={onLanguageChange}
+              onColorThemeChange={onColorThemeChange}
+            />
           </Suspense>
         }
       />
@@ -498,17 +933,79 @@ function SignInPanel({
   onGoogle: () => Promise<void>;
   onDev: () => Promise<void>;
 }) {
+  const th = language === "th";
   const t = words[language];
-  if (!config?.googleEnabled && !config?.devLoginEnabled)
-    return <p className="surface">{t.setup}</p>;
+  const { version } = useUiVersion();
+  if (!config?.googleEnabled && !config?.devLoginEnabled) {
+    return <p className="panel">{t.setup}</p>;
+  }
+
+  const bullets = th
+    ? [
+        "รู้ทันทีว่าอาหารชิ้นไหนใกล้หมดอายุ (FEFO)",
+        "ติดตามอุณหภูมิ กลิ่น และการปิดประตูแบบเรียลไทม์",
+        "แจ้งเตือนผ่าน LINE ทั้งกลุ่มครอบครัวและส่วนตัว",
+        "ใช้งานง่ายทั้งมือถือและคอมพิวเตอร์",
+      ]
+    : [
+        "Spot expiring food at a glance with FEFO priority",
+        "Live fridge temperature, VOC air quality, and door safety",
+        "Instant family and personal LINE notifications",
+        "Built for every family member on phone or desktop",
+      ];
+
+  const heroTitle = th
+    ? "รู้ทันของในตู้เย็น ก่อนหมดอายุ"
+    : "Know what’s fresh before it spoils";
+
+  if (version === "v1") {
+    return (
+      <div className="login">
+        <section className="panel flex flex-col gap-4">
+          <h1>{heroTitle}</h1>
+          <p className="sub">{t.welcome}</p>
+          {config?.googleEnabled && (
+            <button
+              className="primary big"
+              type="button"
+              onClick={() => void onGoogle()}
+              disabled={signingIn}
+            >
+              {signingIn ? t.loading : t.signIn}
+            </button>
+          )}
+          {config?.devLoginEnabled && (
+            <button
+              className="btn big"
+              type="button"
+              onClick={() => void onDev()}
+              disabled={signingIn}
+            >
+              {signingIn ? t.loading : t.devSignIn}
+            </button>
+          )}
+        </section>
+      </div>
+    );
+  }
+
   return (
-    <section className="surface welcome">
-      <h1>FoodWarden</h1>
-      <p>{t.welcome}</p>
-      <div className="form-actions">
+    <div className="login">
+      <section className="login-hero">
+        <h1>{heroTitle}</h1>
+        <p className="login-lead">{t.welcome}</p>
+        <ul className="login-bullets">
+          {bullets.map((line) => (
+            <li key={line}>{line}</li>
+          ))}
+        </ul>
+      </section>
+
+      <section className="signin-card">
+        <h2>{th ? "เข้าสู่ระบบเพื่อเริ่มต้น" : "Sign in to your fridge"}</h2>
         {config?.googleEnabled && (
           <button
-            className="primary"
+            className="gbtn"
             type="button"
             onClick={() => void onGoogle()}
             disabled={signingIn}
@@ -518,7 +1015,7 @@ function SignInPanel({
         )}
         {config?.devLoginEnabled && (
           <button
-            className="secondary"
+            className={config?.googleEnabled ? "gbtn alt" : "gbtn"}
             type="button"
             onClick={() => void onDev()}
             disabled={signingIn}
@@ -526,8 +1023,13 @@ function SignInPanel({
             {signingIn ? t.loading : t.devSignIn}
           </button>
         )}
-      </div>
-    </section>
+        <p className="signin-note">
+          {th
+            ? "ใช้บัญชี Google ของคุณเพื่อเข้าถึงตู้เย็นที่แชร์ร่วมกันในบ้าน"
+            : "Use your Google account to view fridges shared with your household."}
+        </p>
+      </section>
+    </div>
   );
 }
 
@@ -543,33 +1045,22 @@ function DashboardHeader({
   onSignOut: () => Promise<void>;
 }) {
   const t = words[language];
+  const initial = (user?.name || user?.email || "F").slice(0, 1).toUpperCase();
   return (
-    <header className="header">
-      <div className="header-inner">
+    <header className="top">
+      <div className="top-in">
         <Link to="/fridges" className="brand">
           <FridgeLogo /> FoodWarden
         </Link>
+        <span className="spacer" />
         <div className="header-actions">
           {user && (
-            <Link
-              className="user-link"
-              to="/me"
-              aria-label={
-                language === "th"
-                  ? "บัญชีและการแจ้งเตือนของฉัน"
-                  : "My account and notifications"
-              }
-            >
-              {user.name || user.email}
-            </Link>
-          )}
-          {user && (
-            <a href="/api/reference" className="small">
+            <a href="/api/reference" className="btn sm api-ref-link">
               {language === "th" ? "เอกสาร API" : "API reference"}
             </a>
           )}
           <button
-            className="secondary"
+            className="btn sm"
             type="button"
             onClick={onLanguageChange}
             lang={language === "th" ? "en" : "th"}
@@ -577,8 +1068,24 @@ function DashboardHeader({
             {language === "th" ? "English" : "ภาษาไทย"}
           </button>
           {user && (
+            <Link
+              className="user-pill"
+              to="/me"
+              aria-label={
+                language === "th"
+                  ? "บัญชีและการแจ้งเตือนของฉัน"
+                  : "My account and notifications"
+              }
+            >
+              <span className="user-avatar" aria-hidden="true">
+                {initial}
+              </span>
+              <span className="user-name">{user.name || user.email}</span>
+            </Link>
+          )}
+          {user && (
             <button
-              className="secondary"
+              className="btn sm"
               type="button"
               onClick={() => void onSignOut()}
             >
@@ -595,6 +1102,9 @@ function App() {
   const [language, setLanguage] = useState<Language>(() =>
     localStorage.getItem("foodwarden_locale") === "en" ? "en" : "th",
   );
+  const [colorTheme, setColorTheme] = useState<ColorTheme>(readStoredColorTheme);
+  const { version: uiVersion, locked: uiLocked, setVersion: setUiVersion } =
+    useUiVersion();
   const auth = useSWR("foodwarden-auth", () => fetchAuthState(), {
     errorRetryCount: 2,
   });
@@ -607,11 +1117,16 @@ function App() {
   const [failed, setFailed] = useState(false);
   const [signingIn, setSigningIn] = useState(false);
   const t = words[language];
+  const th = language === "th";
 
   useEffect(() => {
     document.documentElement.lang = language;
     localStorage.setItem("foodwarden_locale", language);
   }, [language]);
+
+  useEffect(() => {
+    applyColorTheme(colorTheme);
+  }, [colorTheme]);
 
   const refreshAuth = async () => {
     await auth.mutate();
@@ -664,13 +1179,50 @@ function App() {
         onLanguageChange={() => setLanguage(language === "th" ? "en" : "th")}
         onSignOut={handleSignOut}
       />
-      <main>
-        {failed && <StatusAlert>{t.failed}</StatusAlert>}
+      <main className="wrap">
+        {uiVersion === "v1" && !uiLocked && (
+          <output className="v1-banner">
+            <span>
+              {th
+                ? "กำลังใช้หน้าตาแบบเดิม (v1 Classic)"
+                : "Using classic v1 rollback interface"}
+            </span>
+            <button
+              type="button"
+              className="btn sm"
+              onClick={() => setUiVersion("v2")}
+            >
+              {th ? "กลับไปใช้ v2" : "Switch back to v2"}
+            </button>
+          </output>
+        )}
+        {failed && (
+          <StatusAlert
+            action={
+              <button
+                type="button"
+                className="btn sm"
+                onClick={() => void refreshAuth()}
+              >
+                <RotateCcw size={15} aria-hidden="true" />
+                {th ? "ลองใหม่" : "Retry"}
+              </button>
+            }
+          >
+            {t.failed}
+          </StatusAlert>
+        )}
         {user === undefined ? (
-          <p role="status">{t.loading}</p>
+          <output className="sub">{t.loading}</output>
         ) : user ? (
           <SessionCache key={user.id}>
-            <SignedIn user={user} language={language} />
+            <SignedIn
+              user={user}
+              language={language}
+              colorTheme={colorTheme}
+              onLanguageChange={setLanguage}
+              onColorThemeChange={setColorTheme}
+            />
           </SessionCache>
         ) : (
           <SignInPanel
@@ -692,7 +1244,9 @@ if (!root) throw new Error("Dashboard root is missing");
 createRoot(root).render(
   <StrictMode>
     <BrowserRouter>
-      <App />
+      <UiVersionProvider>
+        <App />
+      </UiVersionProvider>
     </BrowserRouter>
   </StrictMode>,
 );

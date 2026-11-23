@@ -27,6 +27,7 @@ const EXPECTED_TABLES = [
   "fridge_secrets",
   "fridges",
   "inventory",
+  "inventory_activity",
   "line_alert_events",
   "line_outbox",
   "photo_gc_claims",
@@ -57,6 +58,15 @@ describe("worker scaffold and D1 schema", () => {
     const response = await exports.default.fetch("http://localhost/api/health");
     expect(response.status).toBe(200);
     expect(await response.json()).toEqual({ ok: true, database: "ok" });
+  });
+
+  it("returns default UI version flag from GET /api/ui/config", async () => {
+    const response = await exports.default.fetch("http://localhost/api/ui/config");
+    expect(response.status).toBe(200);
+    expect(await response.json()).toEqual({
+      defaultVersion: "v2",
+      locked: false,
+    });
   });
 
   it("returns JSON 404 envelope for unknown /api/* routes", async () => {

@@ -191,7 +191,7 @@ test("inventory search, private favorites and bulk removal use real scoped endpo
   expect(calls).not.toContain("DELETE /api/fridges/kitchen/inventory/apple");
 });
 
-test("charts keep sensor histories separate, support scrubbing and retain one visible series", async () => {
+test("charts keep sensor histories separate, support scrubbing and show the selected metric", async () => {
   const { Charts } = await import("@/Charts");
   const urls: string[] = [];
   const now = Math.floor(Date.now() / 1000);
@@ -228,6 +228,7 @@ test("charts keep sensor histories separate, support scrubbing and retain one vi
   );
   const { container } = render(
     <SWRConfig value={{ provider: () => new Map(), dedupingInterval: 0 }}>
+<MemoryRouter>
       <Charts
         fridgeId="kitchen"
         language="en"
@@ -238,32 +239,28 @@ test("charts keep sensor histories separate, support scrubbing and retain one vi
           voc: 250,
           light: 200,
         }}
-        doorEvents={[]}
       />
+</MemoryRouter>
     </SWRConfig>,
   );
   const user = userEvent.setup({ document });
   const sensor = await screen.findByRole("combobox", { name: "Sensor" });
-  expect(container.querySelector(".chart-readout")?.textContent).toContain(
+  expect(container.querySelector(".reading-selected")?.textContent).toContain(
     "Temperature: 20",
   );
   await user.selectOptions(sensor, "F0");
-  expect(container.querySelector(".chart-readout")?.textContent).toContain(
+  expect(container.querySelector(".reading-selected")?.textContent).toContain(
     "Temperature: 6",
   );
   fireEvent.change(screen.getByRole("slider", { name: "Choose a reading" }), {
     target: { value: "0" },
   });
-  expect(container.querySelector(".chart-readout")?.textContent).toContain(
+  expect(container.querySelector(".reading-selected")?.textContent).toContain(
     "Temperature: 4",
   );
-  await user.click(screen.getByRole("button", { name: "VOC" }));
-  await user.click(screen.getByRole("button", { name: "Light" }));
-  expect(
-    (screen.getByRole("button", { name: "Temperature" }) as HTMLButtonElement)
-      .disabled,
-  ).toBe(true);
-  await user.click(screen.getByRole("button", { name: "7d" }));
+  await user.selectOptions(screen.getByRole("combobox", { name: "Metric" }), "light");
+  expect((screen.getByRole("combobox", { name: "Metric" }) as HTMLSelectElement).value).toBe("light");
+  await user.selectOptions(screen.getByRole("combobox", { name: "Time range" }), "7d");
   await waitFor(() =>
     expect(urls.some((url) => url.endsWith("range=7d"))).toBe(true),
   );

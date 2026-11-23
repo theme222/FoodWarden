@@ -44,5 +44,7 @@
   "vars": {
     "APP_ENV": "production",
     "BETTER_AUTH_URL": "https://foodwarden.newisnooby.workers.dev",
+    "UI_VERSION": "v2",
+    "UI_VERSION_LOCK": "false",
   },
 }

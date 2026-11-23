@@ -19,13 +19,22 @@ import {
 } from "@/components/ui/alert-dialog";
 import type { Language } from "@/model";
 import { words } from "@/words";
+
+type ConfirmTone = "destructive" | "take";
 type Request = {
   message: string;
   label: string;
+  tone: ConfirmTone;
   resolve: (accepted: boolean) => void;
 };
-type Confirm = (message: string, label: string) => Promise<boolean>;
+type Confirm = (
+  message: string,
+  label: string,
+  tone?: ConfirmTone,
+) => Promise<boolean>;
+
 const ConfirmationContext = createContext<Confirm | null>(null);
+
 export function ConfirmationProvider({
   children,
   language,
@@ -41,10 +50,10 @@ export function ConfirmationProvider({
     setRequest(null);
   }, []);
   const confirm = useCallback<Confirm>(
-    (message, label) =>
+    (message, label, tone = "destructive") =>
       new Promise((resolve) => {
         pending.current?.resolve(false);
-        const next = { message, label, resolve };
+        const next = { message, label, tone, resolve };
         pending.current = next;
         setRequest(next);
       }),
@@ -74,6 +83,7 @@ export function ConfirmationProvider({
           <AlertDialogFooter>
             <AlertDialogCancel
               type="button"
+              variant="secondary"
               className="min-h-11"
               onClick={() => settle(false)}
             >
@@ -81,7 +91,7 @@ export function ConfirmationProvider({
             </AlertDialogCancel>
             <AlertDialogAction
               type="button"
-              variant="destructive"
+              variant={request?.tone === "take" ? "take" : "destructive"}
               className="min-h-11"
               onClick={() => settle(true)}
             >
@@ -93,6 +103,7 @@ export function ConfirmationProvider({
     </ConfirmationContext>
   );
 }
+
 export function useConfirm(): Confirm {
   const confirm = useContext(ConfirmationContext);
   if (!confirm) throw new Error("ConfirmationProvider is required.");

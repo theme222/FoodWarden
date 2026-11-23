@@ -1,161 +1,164 @@
-import { chartPoints } from "./chart";
-import type { ReactNode } from "react";
-import { localTimestamp } from "./model";
-import type { Language, Sample } from "./model";
+import { Thermometer, Wind, Sun, DoorClosed } from "lucide-react";
+import { Link } from "react-router-dom";
+import { useUiVersion } from "./components/ui-version-context";
+import { FRIDGE_SENSOR_STALE_S, localTimestamp } from "./model";
+import type { DoorEvent, Language, Sample } from "./model";
+import { deriveKpiSummary, LIGHT_OPEN_LDR } from "./state/dashboard-machine";
 import { words } from "./words";
 
-const metrics = [
-  {
-    key: "temperature",
-    label: "temperature",
-    unit: "°C",
-    icon: (
-      <>
-        <path d="M10 13.5V5a2 2 0 0 1 4 0v8.5a4 4 0 1 1-4 0Z" />
-        <path d="M12 9v7" />
-      </>
-    ),
-  },
-  {
-    key: "voc",
-    label: "voc",
-    unit: "VOC",
-    icon: (
-      <>
-        <path d="M3 8h13a2 2 0 1 0-2-2M3 12h16a2 2 0 1 1-2 2M3 16h9a2 2 0 1 1-2 2" />
-      </>
-    ),
-  },
-  {
-    key: "light",
-    label: "light",
-    unit: "LDR",
-    icon: (
-      <>
-        <circle cx="12" cy="12" r="4" />
-        <path d="M12 2v2m0 16v2M2 12h2m16 0h2M5 5l1.5 1.5m11 11L19 19M5 19l1.5-1.5m11-11L19 5" />
-      </>
-    ),
-  },
-] as const;
+const icons = {
+  temperature: Thermometer,
+  voc: Wind,
+  light: Sun,
+  door: DoorClosed,
+};
 
-const numberFormats = {
-  th: [
-    new Intl.NumberFormat("th", { maximumFractionDigits: 0 }),
-    new Intl.NumberFormat("th", { maximumFractionDigits: 1 }),
-  ],
-  en: [
-    new Intl.NumberFormat("en", { maximumFractionDigits: 0 }),
-    new Intl.NumberFormat("en", { maximumFractionDigits: 1 }),
-  ],
-} as const;
-
-function SensorIcon({ children }: { children: ReactNode }) {
+export function ReadingTime({
+  timeS,
+  now,
+  language,
+}: {
+  timeS: number;
+  now: number;
+  language: Language;
+}) {
+  const seconds = Math.max(0, now - timeS);
+  const format = new Intl.RelativeTimeFormat(language, { numeric: "always" });
+  const relative =
+    seconds < 60
+      ? language === "th"
+        ? "เมื่อสักครู่"
+        : "Just now"
+      : seconds < 3600
+        ? format.format(-Math.floor(seconds / 60), "minute")
+        : seconds < 86400
+          ? format.format(-Math.floor(seconds / 3600), "hour")
+          : format.format(-Math.floor(seconds / 86400), "day");
   return (
-    <svg
-      aria-hidden="true"
-      viewBox="0 0 24 24"
-      fill="none"
-      stroke="currentColor"
-      strokeWidth="1.8"
-      strokeLinecap="round"
-      strokeLinejoin="round"
-    >
-      {children}
-    </svg>
+    <time dateTime={new Date(timeS * 1000).toISOString()}>
+      {relative}{" "}
+      <span className="small">· {localTimestamp(timeS, language)}</span>
+    </time>
   );
 }
 
 export function Metrics({
   latest,
-  history,
   now,
   language,
   failed,
+  fridgeId,
+  doorEvents = [],
 }: {
   latest: Sample | null;
-  history: Sample[];
   now: number;
   language: Language;
   failed: boolean;
+  fridgeId?: string;
+  doorEvents?: DoorEvent[];
 }) {
+  const th = language === "th";
   const t = words[language];
-  const currentHistory = latest
-    ? history.filter((sample) => sample.nodeId === latest.nodeId)
-    : [];
+  const { version } = useUiVersion();
+  const tiles = deriveKpiSummary(latest, doorEvents, now, language);
+  const labels = {
+    temperature: t.temperature,
+    voc: t.voc,
+    light: t.light,
+    door: th ? "ประตูล่าสุด" : "Last door event",
+  };
+  const base = "/fridges/" + encodeURIComponent(fridgeId ?? "");
+
   return (
-    <section aria-label={t.history}>
-      <div className="metrics">
-        {metrics.map(({ key, label, unit, icon }) => {
-          const value = latest?.[key] ?? null;
-          const segments = chartPoints(currentHistory, key, now);
-          return (
-            <article className={"metric metric-" + key} key={key}>
-              <h2>
-                <SensorIcon>{icon}</SensorIcon>
-                {t[label]}
-              </h2>
-              <p className="metric-value">
-                {value === null
-                  ? "—"
-                  : numberFormats[language][
-                      key === "temperature" ? 1 : 0
-                    ].format(value)}{" "}
-                <span>{unit}</span>
-              </p>
-              {segments.length ? (
-                <svg
-                  className="sparkline"
-                  viewBox="0 0 240 46"
-                  role="img"
-                  aria-label={t[label] + " · " + t.history}
-                >
-                  <path d="M4 43h232" fill="none" stroke="var(--border)" />
-                  {segments.map((points, index) =>
-                    points.length === 1 ? (
-                      <circle
-                        key={index}
-                        cx={points[0]?.[0]}
-                        cy={points[0]?.[1]}
-                        r="3"
-                        fill="currentColor"
-                      />
-                    ) : (
-                      <polyline
-                        key={index}
-                        points={points.map(([x, y]) => x + "," + y).join(" ")}
-                        fill="none"
-                        stroke="currentColor"
-                        strokeWidth="2.5"
-                        vectorEffect="non-scaling-stroke"
-                      />
-                    ),
-                  )}
-                </svg>
-              ) : (
-                <p className="chart-empty">{t.noHistory}</p>
-              )}
-            </article>
-          );
-        })}
-      </div>
-      {failed ? (
-        <p role="status">{t.failed}</p>
-      ) : (
+    <section
+      className="sensor-summary"
+      aria-label={th ? "ข้อมูลล่าสุด" : "Latest readings"}
+    >
+      <div className="sensor-summary-heading">
+        <h2>{th ? "ข้อมูลล่าสุด" : "Latest readings"}</h2>
         <p className="small">
-          {latest
-            ? t.sensor +
-              " " +
-              latest.nodeId +
-              " · " +
-              t.lastReading +
-              " " +
-              localTimestamp(latest.timeS, language) +
-              " · " +
-              t.history
-            : t.waitingReadings}
+          {failed ? (
+            t.failed
+          ) : latest ? (
+            <>
+              {now - latest.timeS > FRIDGE_SENSOR_STALE_S &&
+                (th ? "ข้อมูลเก่า · " : "Stale · ")}
+              <ReadingTime timeS={latest.timeS} now={now} language={language} />
+            </>
+          ) : (
+            t.waitingReadings
+          )}
         </p>
-      )}
+      </div>
+      <ul className="sensor-metrics">
+        {tiles
+          .filter((tile) => version === "v2" || tile.id !== "door")
+          .map((tile) => {
+            const Icon = icons[tile.id];
+            const content = (
+              <>
+                <span className="sensor-metric-label">
+                  <Icon size={17} aria-hidden="true" />
+                  {labels[tile.id]}
+                </span>
+                {tile.id === "door" ? (
+                  doorEvents[0] ? (
+                    <>
+                      <strong
+                        className={
+                          tile.alert ? "sensor-metric-alert" : undefined
+                        }
+                      >
+                        {t[`door_${doorEvents[0].status}`]}
+                      </strong>
+                      <span className="small">
+                        <ReadingTime
+                          timeS={doorEvents[0].timestampS}
+                          now={now}
+                          language={language}
+                        />
+                      </span>
+                    </>
+                  ) : (
+                    <span className="small">{t.emptyDoorEvents}</span>
+                  )
+                ) : (
+                  <>
+                    <strong>
+                      {tile.reading} {tile.unit}
+                    </strong>
+                    <span
+                      className={tile.alert ? "sensor-metric-alert" : "small"}
+                    >
+                      {tile.id !== "light" || latest?.light == null
+                        ? tile.verdict
+                        : latest.light > LIGHT_OPEN_LDR
+                          ? th
+                            ? "ตรวจพบแสง"
+                            : "Light detected"
+                          : th
+                            ? "ภายในมืด"
+                            : "Dark inside"}
+                    </span>
+                  </>
+                )}
+              </>
+            );
+            const target =
+              tile.id === "door"
+                ? base + "/history?kind=door"
+                : base + "/charts?metric=" + tile.id;
+            return (
+              <li key={tile.id}>
+                {fridgeId ? (
+                  <Link to={target}>{content}</Link>
+                ) : (
+                  <div>{content}</div>
+                )}
+              </li>
+            );
+          })}
+      </ul>
     </section>
   );
 }

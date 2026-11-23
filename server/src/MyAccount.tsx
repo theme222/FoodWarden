@@ -1,20 +1,24 @@
 import { useState } from "react";
 import type { FormEvent } from "react";
+import { Star, Heart, Clock } from "lucide-react";
+import { toast } from "sonner";
 import type { Language } from "./model";
 import { LineConnection } from "./LineConnection";
 import { useLineStatus, useFavorites, lineAction } from "./line-data";
 import type { Favorite } from "./line-data";
 import { categoryLabel, categories } from "./words";
 import { StatusAlert } from "./components/status-alert";
-import { toast } from "sonner";
-import { Star, Heart, Clock } from "lucide-react";
+import { ThemeLanguagePicker } from "./components/theme-picker";
+import type { ColorTheme } from "./state/dashboard-machine";
 
 const copy = {
   th: {
     title: "ของฉัน",
-    description: "LINE ของโปรด และการแจ้งเตือนเฉพาะคุณ การเปลี่ยนที่นี่ไม่กระทบคนอื่นในบ้าน",
+    description:
+      "LINE ของโปรด และการแจ้งเตือนเฉพาะคุณ การเปลี่ยนที่นี่ไม่กระทบคนอื่นในบ้าน",
     favorites: "ของโปรดของฉันในตู้นี้",
-    private: "มีเพียงคุณที่เห็นรายการนี้ ทุกคนในครอบครัวเลือกของโปรดได้ต่างกัน",
+    private:
+      "มีเพียงคุณที่เห็นรายการนี้ ทุกคนในครอบครัวเลือกของโปรดได้ต่างกัน",
     types: "หมวดอาหารโปรด",
     foods: "อาหารโปรด",
     loading: "กำลังโหลด…",
@@ -70,6 +74,7 @@ const copy = {
     saveError: "Could not save preferences",
   },
 };
+
 type Preferences = {
   morning_enabled: boolean;
   morning_time: string;
@@ -83,6 +88,7 @@ function useFavoritePreferences(fridgeId: string, language: Language) {
   const [busy, setBusy] = useState(false);
   const t = copy[language];
   const base = `/api/fridges/${encodeURIComponent(fridgeId)}/favorites`;
+
   async function update(
     path: string,
     method: string,
@@ -100,6 +106,7 @@ function useFavoritePreferences(fridgeId: string, language: Language) {
       setBusy(false);
     }
   }
+
   function toggle(category: string) {
     if (!state.data) return;
     const selected = new Set(state.data.categories);
@@ -112,12 +119,16 @@ function useFavoritePreferences(fridgeId: string, language: Language) {
       t.categoryError,
     );
   }
+
   function remove(key: string) {
     return update("/" + key, "DELETE", undefined, t.removeError);
   }
+
   return { state, busy, toggle, remove };
 }
+
 type FavoritePreferences = ReturnType<typeof useFavoritePreferences>;
+
 function FavoriteFoodRow({
   item,
   language,
@@ -135,20 +146,21 @@ function FavoriteFoodRow({
     <li>
       <div>
         <strong>{name}</strong>
-        <span className="small">{item.count ? count : t.outOfStock}</span>
+        <p className="small">{item.count ? count : t.outOfStock}</p>
       </div>
       <button
         type="button"
-        className="secondary"
+        className="btn sm"
         disabled={preferences.busy}
         aria-label={t.remove + name}
         onClick={() => void preferences.remove(item.item_key)}
       >
-        <Star fill="currentColor" size={20} aria-hidden="true" />
+        <Star fill="currentColor" size={18} aria-hidden="true" />
       </button>
     </li>
   );
 }
+
 function FavoriteContents({
   language,
   preferences,
@@ -158,17 +170,34 @@ function FavoriteContents({
 }) {
   const { state, busy, toggle } = preferences;
   const t = copy[language];
-  if (state.error) return <StatusAlert>{t.loadError}</StatusAlert>;
-  if (!state.data) return <output>{t.loading}</output>;
+  if (state.error) {
+    return (
+      <StatusAlert
+        action={
+          <button
+            type="button"
+            className="btn sm"
+            onClick={() => void state.mutate()}
+          >
+            {language === "th" ? "ลองใหม่" : "Retry"}
+          </button>
+        }
+      >
+        {t.loadError}
+      </StatusAlert>
+    );
+  }
+  if (!state.data) return <output className="sub">{t.loading}</output>;
   const selected = new Set(state.data.categories);
   return (
-    <>
+    <div className="flex flex-col gap-3">
       <h3>{t.types}</h3>
       <div className="category-chips">
         {Object.keys(categories).map((category) => (
           <button
             key={category}
             type="button"
+            className="chip"
             aria-pressed={selected.has(category)}
             disabled={busy}
             onClick={() => void toggle(category)}
@@ -180,7 +209,7 @@ function FavoriteContents({
       </div>
       <h3>{t.foods}</h3>
       {!state.data.items.length ? (
-        <p className="empty-note">{t.empty}</p>
+        <p className="sub">{t.empty}</p>
       ) : (
         <ul className="favorite-list">
           {state.data.items.map((item) => (
@@ -193,9 +222,10 @@ function FavoriteContents({
           ))}
         </ul>
       )}
-    </>
+    </div>
   );
 }
+
 function FavoriteCategories({
   fridgeId,
   language,
@@ -206,15 +236,16 @@ function FavoriteCategories({
   const preferences = useFavoritePreferences(fridgeId, language);
   const t = copy[language];
   return (
-    <section className="surface">
-      <h2>
-        <Heart size={22} aria-hidden="true" /> {t.favorites}
+    <section className="panel flex flex-col gap-3">
+      <h2 className="flex items-center gap-2">
+        <Heart size={20} aria-hidden="true" /> {t.favorites}
       </h2>
-      <p className="small">{t.private}</p>
+      <p className="sub">{t.private}</p>
       <FavoriteContents language={language} preferences={preferences} />
     </section>
   );
 }
+
 function useNotificationPreferences(language: Language) {
   const profile = useLineStatus("/api/me/line");
   const [draft, setDraft] = useState<Preferences | null>(null);
@@ -227,9 +258,11 @@ function useNotificationPreferences(language: Language) {
     inst_warm: profile.data?.inst_warm ?? true,
     inst_spoil: profile.data?.inst_spoil ?? true,
   };
+
   function change<K extends keyof Preferences>(key: K, next: Preferences[K]) {
     setDraft({ ...value, [key]: next });
   }
+
   async function save(event: FormEvent) {
     event.preventDefault();
     if (busy) return;
@@ -245,8 +278,10 @@ function useNotificationPreferences(language: Language) {
       setBusy(false);
     }
   }
+
   return { profile, value, busy, change, save };
 }
+
 function NotificationPreferences({ language }: { language: Language }) {
   const { profile, value, busy, change, save } =
     useNotificationPreferences(language);
@@ -256,67 +291,91 @@ function NotificationPreferences({ language }: { language: Language }) {
     ["inst_warm", t.warm],
     ["inst_spoil", t.spoil],
   ] as const;
+
   return (
     <form
       onSubmit={(event) => void save(event)}
-      className="surface notification-preferences"
+      className="panel notification-preferences flex flex-col gap-3"
     >
-      <h2>
-        <Clock size={22} aria-hidden="true" /> {t.notifications}
+      <h2 className="flex items-center gap-2">
+        <Clock size={20} aria-hidden="true" /> {t.notifications}
       </h2>
       <fieldset disabled={busy || !profile.data}>
-        <legend>{t.morning}</legend>
-        <label className="toggle-row">
-          <span>{t.morningEnabled}</span>
-          <input
-            type="checkbox"
-            checked={value.morning_enabled}
-            onChange={(e) => change("morning_enabled", e.target.checked)}
-          />
-        </label>
-        <label>
-          {t.time}
-          <input
-            type="time"
-            value={value.morning_time}
-            disabled={!value.morning_enabled}
-            onChange={(e) => change("morning_time", e.target.value)}
-            required
-          />
-        </label>
-        <p className="small">{t.morningHelp}</p>
-        <h3>{t.instant}</h3>
-        {alerts.map(([key, label]) => (
-          <label className="toggle-row" key={key}>
-            <span>{label}</span>
+        <div className="subblock">
+          <h3>{t.morning}</h3>
+          <label className="chk">
+            <span>{t.morningEnabled}</span>
             <input
               type="checkbox"
-              checked={value[key]}
-              onChange={(e) => change(key, e.target.checked)}
+              checked={value.morning_enabled}
+              onChange={(e) => change("morning_enabled", e.target.checked)}
             />
           </label>
-        ))}
-        <button type="submit" className="primary">
-          {busy ? t.saving : t.save}
-        </button>
+          <label className="flex flex-col gap-1.5 font-medium">
+            {t.time}
+            <input
+              type="time"
+              value={value.morning_time}
+              disabled={!value.morning_enabled}
+              onChange={(e) => change("morning_time", e.target.value)}
+              required
+            />
+          </label>
+          <p className="small">{t.morningHelp}</p>
+        </div>
+
+        <div className="subblock">
+          <h3>{t.instant}</h3>
+          {alerts.map(([key, label]) => (
+            <label className="chk" key={key}>
+              <span>{label}</span>
+              <input
+                type="checkbox"
+                checked={value[key]}
+                onChange={(e) => change(key, e.target.checked)}
+              />
+            </label>
+          ))}
+        </div>
+
+        <div>
+          <button type="submit" className="primary">
+            {busy ? t.saving : t.save}
+          </button>
+        </div>
       </fieldset>
     </form>
   );
 }
+
 export function MyAccount({
   language,
   fridgeId,
+  colorTheme = "green",
+  onLanguageChange,
+  onColorThemeChange,
 }: {
   language: Language;
   fridgeId?: string;
+  colorTheme?: ColorTheme;
+  onLanguageChange?: (next: Language) => void;
+  onColorThemeChange?: (next: ColorTheme) => void;
 }) {
   const t = copy[language];
   return (
-    <div className="account-page">
-      <div className="page-heading">
-        <h1>{t.title}</h1>
-        <p>{t.description}</p>
+    <div className="settings">
+      <div className="page-head">
+        <div className="page-head-copy">
+          <h1>{t.title}</h1>
+          <p className="sub">{t.description}</p>
+        </div>
       </div>
+      <ThemeLanguagePicker
+        language={language}
+        colorTheme={colorTheme}
+        onLanguageChange={onLanguageChange}
+        onColorThemeChange={onColorThemeChange}
+      />
       <LineConnection language={language} />
       <NotificationPreferences language={language} />
       {fridgeId && (

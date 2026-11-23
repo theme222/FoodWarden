@@ -1,0 +1,131 @@
+/*
+ * Classic v1 Emergency Rollback Theme
+ * Activated only when <html data-ui="v1"> is set via server/query/storage flag.
+ */
+:root[data-ui="v1"] {
+  --bg: #f4f7f4;
+  --surface: #ffffff;
+  --surface-2: #edf2ee;
+  --ink: #173229;
+  --muted-ink: #4f655a;
+  --lime: #bfe0cb;
+  --lime-ink: #0f3629;
+  --lime-soft: #e0eee5;
+  --hero-bg: #ffffff;
+  --leaf: #17654d;
+  --dark: #17654d;
+  --on-dark: #ffffff;
+  --on-dark-2: #d1fae5;
+  --rule: #d4ded7;
+  --group: #e7eee9;
+
+  --mini-dark-bg: #ffffff;
+  --mini-dark-fg: #173229;
+  --mini-dark-sub: #4f655a;
+  --mini-dark-ic-bg: #e0eee5;
+  --mini-dark-ic-fg: #17654d;
+
+  --mini-limey-bg: #ffffff;
+  --mini-limey-fg: #173229;
+  --mini-limey-sub: #4f655a;
+  --mini-limey-ic-bg: #e0eee5;
+  --mini-limey-ic-fg: #17654d;
+
+  --mini-soft-bg: #ffffff;
+  --mini-soft-fg: #173229;
+  --mini-soft-sub: #4f655a;
+  --mini-soft-ic-bg: #edf2ee;
+  --mini-soft-ic-fg: #17654d;
+
+  --mini-mint-bg: #ffffff;
+  --mini-mint-fg: #173229;
+  --mini-mint-sub: #4f655a;
+  --mini-mint-ic-bg: #e0eee5;
+  --mini-mint-ic-fg: #17654d;
+
+  --fresh: #17654d;
+  --on-fresh: #ffffff;
+  --fresh-surface: #ecfdf3;
+  --fresh-border: #abefc6;
+  --fresh-ink: #065f46;
+
+  --soon: #c47a0e;
+  --soon-pill-bg: #fef0c7;
+  --on-soon: #5c3700;
+  --soon-surface: #fffaeb;
+  --soon-border: #fedf89;
+  --soon-ink: #7a4b00;
+  --soon-soft: #fef0c7;
+
+  --bad: #b42318;
+  --on-bad: #ffffff;
+  --bad-surface: #fef3f2;
+  --bad-border: #fecdca;
+  --bad-ink: #912018;
+  --bad-soft: #fee4e2;
+
+  --take: #b84214;
+  --take-hover: #9c360f;
+  --take-soft: #fbe9e1;
+  --take-ink: #8e300c;
+  --edit-soft: #f9eecc;
+  --edit-ink: #694600;
+
+  --radius: 15px;
+  --r: 15px;
+  --r-sm: 10px;
+}
+
+:root[data-ui="v1"] .top {
+  background: #ffffff;
+  border-bottom: 1px solid var(--rule);
+}
+
+:root[data-ui="v1"] .panel,
+:root[data-ui="v1"] .surface,
+:root[data-ui="v1"] .fcard,
+:root[data-ui="v1"] .item,
+:root[data-ui="v1"] .dev {
+  border-radius: 15px;
+  border: 1px solid var(--rule);
+}
+
+:root[data-ui="v1"] .login {
+  grid-template-columns: 1fr;
+  max-width: 540px;
+  margin-inline: auto;
+}
+
+:root[data-ui="v1"] .login-hero {
+  background: #ffffff;
+  color: var(--ink);
+  border: 1px solid var(--rule);
+  border-radius: 15px;
+}
+
+:root[data-ui="v1"] .v1-banner {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 10px 16px;
+  border-radius: 14px;
+  background: var(--lime-soft);
+  border: 1px solid var(--rule);
+  color: var(--ink);
+  font-size: 0.92rem;
+  font-weight: 500;
+}
+
+@media (max-width: 720px) {
+  :root[data-ui="v1"] .tabs {
+    display: inline-flex;
+  }
+  :root[data-ui="v1"] .bnav {
+    display: none;
+  }
+  :root[data-ui="v1"] .wrap {
+    padding-bottom: 36px;
+  }
+}

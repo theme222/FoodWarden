@@ -256,6 +256,24 @@ route(
   },
 );
 route(
+  "/api/ui/config",
+  get,
+  "Read default dashboard UI version and emergency lock flag",
+  "Authentication",
+  {
+    security: [],
+    responses: {
+      "200": response(
+        "UI version feature flag configuration",
+        object({
+          defaultVersion: { type: "string", enum: ["v1", "v2"] },
+          locked: { type: "boolean" },
+        }),
+      ),
+    },
+  },
+);
+route(
   "/api/auth/dev-login",
   post,
   "Create a local development session",
@@ -526,6 +544,41 @@ route(
         "Latest status, or null before first report",
         object({ status: { anyOf: [ref("Status"), { type: "null" }] } }),
       ),
+    },
+  },
+);
+route(
+  "/api/fridges/{fridgeId}/activity",
+  get,
+  "Read paginated fridge activity",
+  "Monitoring",
+  {
+    parameters: [
+      { in: "query", name: "kind", schema: { type: "string", enum: ["inventory", "door", "sensor"], default: "inventory" } },
+      { in: "query", name: "date", schema: { type: "string", format: "date" }, description: "Calendar date in Asia/Bangkok. Omit to browse all dates." },
+      { in: "query", name: "before", schema: { type: "string" }, description: "Opaque next cursor from the previous page." },
+    ],
+    responses: {
+      "200": response("Up to 15 activities in newest-first order", object({
+        rows: {
+          type: "array",
+          maxItems: 15,
+          items: { anyOf: [
+            { allOf: [ref("DoorEvent"), object({ id: { type: "integer" } })] },
+            { allOf: [ref("TelemetrySample"), object({ id: { type: "integer" } })] },
+            object({
+              id: { type: "integer" },
+              timestamp_s: timestamp,
+              action: { type: "string", enum: ["created", "updated", "deleted"] },
+              name_th: text,
+              name_en: text,
+              source: { enum: ["CAMERA", "WEB_MANUAL", null] },
+            }),
+          ] },
+        },
+        next: { type: ["string", "null"] },
+      })),
+      "400": response("Invalid activity filter", ref("Error")),
     },
   },
 );

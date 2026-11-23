@@ -341,13 +341,19 @@ export async function deleteInventoryItem(
   photos: R2Bucket,
   fridgeId: string,
   itemId: string,
+  source: "WEB_MANUAL" | "CAMERA" = "WEB_MANUAL",
 ): Promise<boolean> {
-  const row = await db
-    .prepare(
+  const [, deleted] = await db.batch<{ image_storage_path: string | null }>([
+    db.prepare(
+      `INSERT INTO inventory_activity (fridge_id, timestamp_s, action, name_th, name_en, source)
+       SELECT fridge_id, unixepoch(), 'deleted', name_th, name_en, ?
+       FROM inventory WHERE id = ? AND fridge_id = ?`,
+    ).bind(source, itemId, fridgeId),
+    db.prepare(
       "DELETE FROM inventory WHERE id = ? AND fridge_id = ? RETURNING image_storage_path",
-    )
-    .bind(itemId, fridgeId)
-    .first<{ image_storage_path: string | null }>();
+    ).bind(itemId, fridgeId),
+  ]);
+  const row = deleted?.results[0];
 
   if (!row) return false;
 
