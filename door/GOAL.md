@@ -10,27 +10,30 @@
 ---
 
 ## 1. Core Features
-- [ ] **FreeRTOS Multi-Task Architecture (E1):** Implement discrete prioritized tasks (`vCurrentMonitorTask` at priority 4 for safety stall monitoring, `vMotorControlTask` at priority 3, `vMqttCommTask` at priority 2) communicating via queues, semaphores, or direct task notifications.
-- [ ] **Interrupt-Driven Safety Inputs (E2):** Configure `IRAM_ATTR` hardware ISRs for the Home Limit Switch (`GPIO 33`) and Emergency Stop Button (`S1` / `GPIO 16`) with deferred task notification (`vTaskNotifyGiveFromISR`).
-- [ ] **TB6612FNG Worm Gear Motor Control:** Drive JGY-370 12V worm gear motor via `PWMA` (`GPIO 26`), `AIN1` (`GPIO 27`), and `AIN2` (`GPIO 25`) with soft-start PWM ramping and active short-braking.
-- [ ] **INA219 Stall & Obstruction Cutoff:** Continuously sample motor current (`I2C1`: `GPIO 4/5`, `0x40`) at `≥ 50 Hz` while moving and trigger immediate motor reversal/retraction when current exceeds the obstruction threshold.
-- [ ] **Close-Range IR Door Shut Detection:** Monitor the digital IR obstacle sensor (`GPIO 32`) to detect full door closure, stop forward push, retract arm to the limit switch, and report `SUCCESS`.
-- [ ] **MQTT over TLS Client ([`CBD.md`](../interface/CBD.md), E4, E5):** Maintain a persistent TLS connection to Gateway `'C'` (`port 8883`), subscribe to `CLOSE_DOOR` and `ABORT` commands, and publish status/safety events.
+- [x] **FreeRTOS Multi-Task Architecture (E1):** Implement discrete prioritized tasks (`vCurrentMonitorTask` at priority 4 for safety stall monitoring, `vMotorControlTask` at priority 3, `vMqttCommTask` at priority 2) communicating via queues (`xIncomingMsgQueue`, `xOutgoingMsgQueue`), `portMUX_TYPE` spinlock for `g_doorStatus`, and direct task notifications (`xTaskNotify`).
+- [x] **Interrupt-Driven Safety & Debug Inputs (E2):** Configure `IRAM_ATTR` hardware ISRs for the Home Limit Switch (`GPIO 33`), Emergency Stop Button (`S1` / `GPIO 16`), and Manual Debug Close Button (`S2` / `GPIO 14`) with deferred task notification (`xTaskNotifyFromISR`).
+- [x] **TB6612FNG Worm Gear Motor Control:** Drive JGY-370 12V worm gear motor via `PWMA` (`IO23`), `AIN1` (`IO19`), and `AIN2` (`IO18`) with soft-start PWM ramping and active short-braking: **Clockwise (CW)** for door closing push, **Counter-Clockwise (CCW)** for arm retraction.
+- [x] **INA219 Stall & Obstruction Cutoff:** Continuously sample motor current (`I2C1`: `IO4/IO5` or `I2C0`: `IO21/IO22`, `0x40`) at `≥ 50 Hz` while moving with 150 ms inrush blanking; trigger immediate motor reversal/retraction on closing stall, and instant cutoff + lockout on retraction jam.
+- [x] **16×8 LED Dot Matrix Current Display (`HT16K33`):** Display live motor current readings (`mA`) on the onboard KidBright32 16×8 LED dot matrix (`I2C0`: `IO21/IO22`, `0x70`) while the motor is running.
+- [x] **Close-Range IR Door Shut Detection:** Monitor the digital IR obstacle sensor (`GPIO 32`) to detect full door closure, stop forward push, retract arm to the limit switch, and report `SUCCESS`.
+- [x] **MQTT over TLS Client ([`CBD.md`](../interface/CBD.md), E4, E5):** Maintain a persistent TLS connection to Gateway `'C'` (`port 8883`), subscribe to `CLOSE_DOOR` and `ABORT` commands, and publish status/safety events.
 
 ---
 
 ## 2. Use Cases
-- [ ] **Normal Automated Door Closure:** Receive `CLOSE_DOOR` command → sound audible buzzer warning → drive arm forward until IR sensor (`GPIO 32`) detects door closed → retract arm until Limit Switch (`GPIO 33`) ISR fires → publish `SUCCESS`.
-- [ ] **Physical Obstruction Reflex:** While closing, user's hand or object blocks the door → INA219 current spikes above threshold → immediately brake and reverse arm back to the Home Limit Switch → publish `OBSTRUCTION_ERROR`.
-- [ ] **Vision Human-Approach Software Abort:** Gateway `'C'` detects a person approaching via YOLO and sends `ABORT` over MQTTS → Node `'D'` immediately halts forward push, retracts arm to the Home Limit Switch, and acknowledges abort.
+- [x] **Normal Automated Door Closure:** Receive `CLOSE_DOOR` command → sound audible buzzer warning → drive arm forward until IR sensor (`GPIO 32`) detects door closed (+ 75 ms gasket seal) → retract arm until Limit Switch (`GPIO 33`) ISR fires → publish `SUCCESS`.
+- [x] **Manual Debug Door Closure (`S2` / `GPIO 14`):** Pressing onboard button `S2` (`GPIO 14`) triggers the exact same door-closing sequence locally for hardware debugging, strictly enforcing all safety rules (INA219 current stall cutoff, IR door-closed stop, Limit Switch ISR, and 30-second motion timeout).
+- [x] **Physical Obstruction Reflex:** While closing, user's hand or object blocks the door → INA219 current spikes above threshold (`≥ 225 mA`) → immediately brake and reverse arm back to the Home Limit Switch → publish `OBSTRUCTION_ERROR`.
+- [x] **Vision Human-Approach Software Abort:** Gateway `'C'` detects a person approaching via YOLO and sends `ABORT` over MQTTS → Node `'D'` immediately halts forward push, retracts arm to the Home Limit Switch, and acknowledges abort.
 
 ---
 
 ## 3. Edge Cases & Failure Mode Handlers
-- [ ] **Power Interruption / Reboot Recovery:** On boot, if the Limit Switch (`GPIO 33`) is not depressed, automatically enter `HOMING_ON_BOOT` state and slowly retract the arm until the Limit Switch trips (or timeout) so the arm never blocks the fridge door after a power outage.
-- [ ] **Hard Motion Timeout Fail-Safe:** Enforce a strict maximum duration of `30 seconds` for any forward closing or reverse retracting motion; if neither the IR sensor nor the Limit Switch trips before timeout, cut motor power immediately, publish `TIMEOUT_ERROR`, and enter `FAULT_LOCKOUT`.
-- [ ] **Wi-Fi / MQTTS Disconnection During Motion:** If Wi-Fi or MQTTS drops while the arm is moving forward, immediately halt forward push and retract to the Home Limit Switch (safe fail-safe default, as vision-based human abort is severed).
-- [ ] **Unplugged INA219 Sensor Defense:** Verify INA219 I2C connectivity before starting motor movement; refuse to drive the motor forward (`FAULT_LOCKOUT`) if the current sensor is unresponsive on `I2C1`.
+- [x] **Power Interruption / Reboot Recovery:** On boot, if the Limit Switch (`GPIO 33`) is not depressed, automatically enter `HOMING_ON_BOOT` state and slowly retract the arm until the Limit Switch trips (or timeout) so the arm never blocks the fridge door after a power outage.
+- [x] **Retraction Mechanical Jam Reflex:** If INA219 current spikes (`≥ 225 mA`) while the arm is reversing (`RETRACTING` or `HOMING_ON_BOOT`), immediately cut motor power (`motorCoastStop()`), enter `FAULT` state, and enqueue `FAULT_LOCKOUT` with `"RETRACTION_MECHANICAL_JAM"`.
+- [x] **Hard Motion Timeout Fail-Safe:** Enforce a strict maximum duration of `30 seconds` for any forward closing or reverse retracting motion; if neither the IR sensor nor the Limit Switch trips before timeout, cut motor power immediately, publish `TIMEOUT_ERROR`, and enter `FAULT_LOCKOUT`.
+- [x] **Wi-Fi / MQTTS Disconnection During Motion:** If Wi-Fi or MQTTS drops while the arm is moving forward, immediately halt forward push and retract to the Home Limit Switch (safe fail-safe default, as vision-based human abort is severed).
+- [x] **Unplugged INA219 Sensor Defense:** Verify INA219 I2C connectivity before starting motor movement; refuse to drive the motor forward (`FAULT_LOCKOUT`) if the current sensor is unresponsive on `I2C0`.
 
 ---
 
