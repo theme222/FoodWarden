@@ -18,13 +18,6 @@ import useSWR from "swr";
 import { LineConnection } from "./LineConnection";
 import { useConfirm } from "./components/confirmation";
 import { StatusAlert } from "./components/status-alert";
-import {
-  Select,
-  SelectTrigger,
-  SelectValue,
-  SelectContent,
-  SelectItem,
-} from "./components/ui/select";
 import { getJson, swrOptions, isAccessError } from "./lib/api";
 import { useLineStatus } from "./line-data";
 import { readFridgeSettings } from "./model";
@@ -344,7 +337,7 @@ function FamilySetupGuide({ view }: { view: SettingsView }) {
         {stepList.map((step) => (
           <li
             key={step.label}
-            className={`setup-step${step.done ? " done" : ""}`}
+            className={`setup-step${step.done ? "done" : ""}`}
           >
             {step.done ? (
               <CheckCircle2 size={18} aria-hidden="true" />
@@ -363,9 +356,15 @@ function GeneralSettings({ view }: { view: SettingsView }) {
   const { t, busy, name, setName, saveGeneral } = view;
   const th = view.language === "th";
   return (
-    <section className="panel flex flex-col gap-3" aria-labelledby="general-title">
+    <section
+      className="panel flex flex-col gap-3"
+      aria-labelledby="general-title"
+    >
       <h2 id="general-title">{th ? "ข้อมูลตู้เย็น" : "Fridge details"}</h2>
-      <form className="add-form fridge-name-form" onSubmit={(event) => void saveGeneral(event)}>
+      <form
+        className="add-form fridge-name-form"
+        onSubmit={(event) => void saveGeneral(event)}
+      >
         <fieldset disabled={busy}>
           <label>
             {t.fridgeName}
@@ -405,14 +404,11 @@ function GatewayTokenAccordionItem({
     copied,
     copyToken,
     rotateToken,
-    language,
   } = view;
-  const th = language === "th";
   const maskedToken =
     settings.gatewayToken.slice(0, 10) +
     "••••••••••••••••" +
     settings.gatewayToken.slice(-4);
-  const toggleLabel = expanded ? (th ? "ปิด" : "Close") : th ? "จัดการ" : "Manage";
 
   return (
     <div className="conn">
@@ -422,15 +418,12 @@ function GatewayTokenAccordionItem({
         aria-expanded={expanded}
         onClick={onToggle}
       >
-        <span className="conn-ic" aria-hidden="true">
+        <span className="connection-icon" aria-hidden="true">
           <Camera size={20} />
         </span>
         <span className="min-w-0 flex-1">
           <strong className="block">{t.gatewayToken}</strong>
           <span className="small">{t.gatewayTokenHelp}</span>
-        </span>
-        <span className="text-sm font-semibold text-[var(--leaf)]">
-          {toggleLabel}
         </span>
         {expanded ? (
           <ChevronDown size={18} aria-hidden="true" />
@@ -441,32 +434,33 @@ function GatewayTokenAccordionItem({
 
       {expanded && (
         <div className="conn-body">
-          <div className="token">
-            <code>{showToken ? settings.gatewayToken : maskedToken}</code>
+          <code className="connection-token">
+            {showToken ? settings.gatewayToken : maskedToken}
+          </code>
+          <div className="form-actions">
             <button
               type="button"
-              className="btn sm"
+              className="text-action"
               onClick={() => setShowToken((prev) => !prev)}
             >
-              <KeyRound size={15} aria-hidden="true" />
+              <KeyRound size={16} aria-hidden="true" />
               {showToken ? t.hideToken : t.showToken}
             </button>
             <button
               type="button"
-              className="btn sm"
+              className="text-action"
               onClick={() => void copyToken()}
             >
-              <Copy size={15} aria-hidden="true" />
+              <Copy size={16} aria-hidden="true" />
               {copied ? t.copied : t.copyToken}
             </button>
-          </div>
-          <div>
             <button
               type="button"
-              className="danger sm"
+              className="text-action text-action-danger"
               disabled={busy}
               onClick={() => void rotateToken()}
             >
+              <RotateCcw size={16} aria-hidden="true" />
               {t.rotateToken}
             </button>
           </div>
@@ -501,13 +495,6 @@ function GeminiKeyAccordionItem({
     : th
       ? "ยังไม่ตั้งค่าคีย์ส่วนตัว"
       : "No custom key saved";
-  const badgeLabel = settings.hasGeminiApiKey
-    ? th
-      ? "ตั้งค่าแล้ว"
-      : "Saved"
-    : th
-      ? "ไม่บังคับ"
-      : "Optional";
 
   return (
     <div className="conn">
@@ -517,15 +504,12 @@ function GeminiKeyAccordionItem({
         aria-expanded={expanded}
         onClick={onToggle}
       >
-        <span className="conn-ic" aria-hidden="true">
+        <span className="connection-icon" aria-hidden="true">
           <Sparkles size={20} />
         </span>
         <span className="min-w-0 flex-1">
           <strong className="block">{t.geminiKey}</strong>
           <span className="small">{statusSubtitle}</span>
-        </span>
-        <span className={`pill ${settings.hasGeminiApiKey ? "fresh" : "neutral"}`}>
-          {badgeLabel}
         </span>
         {expanded ? (
           <ChevronDown size={18} aria-hidden="true" />
@@ -559,7 +543,7 @@ function GeminiKeyAccordionItem({
             {settings.hasGeminiApiKey && (
               <button
                 type="button"
-                className="danger-ghost sm"
+                className="text-action text-action-danger"
                 disabled={busy}
                 onClick={() => void clearGeminiKey()}
               >
@@ -624,7 +608,10 @@ function MemberSettings({ view }: { view: SettingsView }) {
   } = view;
   const ownerCount = settings.members.filter((m) => m.role === "owner").length;
   return (
-    <section className="panel flex flex-col gap-3" aria-labelledby="members-title">
+    <section
+      className="panel flex flex-col gap-3"
+      aria-labelledby="members-title"
+    >
       <div className="page-head">
         <div>
           <h2 id="members-title">{t.members}</h2>
@@ -671,18 +658,17 @@ function MemberSettings({ view }: { view: SettingsView }) {
             <li key={member.email} className="member-row">
               <div className="flex flex-wrap items-center gap-2">
                 <strong>{member.email}</strong>
-                <span
-                  className={`pill ${member.role === "owner" ? "accent" : "neutral"}`}
-                >
+                <span className="small">
                   {member.role === "owner" ? t.ownerBadge : t.memberBadge}
                 </span>
               </div>
               <button
                 type="button"
-                className="danger-ghost sm"
+                className="text-action text-action-danger"
                 disabled={busy || isLastOwner}
                 onClick={() => void removeMember(member.email)}
               >
+                <Trash2 size={16} aria-hidden="true" />
                 {t.removeMember}
               </button>
             </li>
@@ -694,30 +680,53 @@ function MemberSettings({ view }: { view: SettingsView }) {
         className="invite-form"
         onSubmit={(event) => void inviteMember(event)}
       >
-        <input
-          type="email"
-          value={inviteEmail}
-          onChange={(event) => setInviteEmail(event.target.value)}
-          aria-label={t.inviteEmail}
-          placeholder={t.inviteEmail}
-          required
-        />
-        <Select
-          value={inviteRole}
-          onValueChange={(value) =>
-            setInviteRole(value === "owner" ? "owner" : "member")
-          }
-        >
-          <SelectTrigger aria-label={t.inviteRole}>
-            <SelectValue>
-              {inviteRole === "owner" ? t.ownerBadge : t.memberBadge}
-            </SelectValue>
-          </SelectTrigger>
-          <SelectContent>
-            <SelectItem value="member">{t.memberBadge}</SelectItem>
-            <SelectItem value="owner">{t.ownerBadge}</SelectItem>
-          </SelectContent>
-        </Select>
+        <label className="invite-email">
+          {t.inviteEmail}
+          <input
+            type="email"
+            value={inviteEmail}
+            onChange={(event) => setInviteEmail(event.target.value)}
+            autoComplete="email"
+            required
+          />
+        </label>
+        <fieldset className="visible-choices invite-role" disabled={busy}>
+          <legend>{t.inviteRole}</legend>
+          <div>
+            <label>
+              <input
+                type="radio"
+                name="invite-role"
+                checked={inviteRole === "member"}
+                onChange={() => setInviteRole("member")}
+              />
+              <span>
+                {t.memberBadge}
+                <small>
+                  {language === "th"
+                    ? "ดูและจัดการอาหาร"
+                    : "View and manage food"}
+                </small>
+              </span>
+            </label>
+            <label>
+              <input
+                type="radio"
+                name="invite-role"
+                checked={inviteRole === "owner"}
+                onChange={() => setInviteRole("owner")}
+              />
+              <span>
+                {t.ownerBadge}
+                <small>
+                  {language === "th"
+                    ? "จัดการสมาชิกและการตั้งค่าด้วย"
+                    : "Also manage members and settings"}
+                </small>
+              </span>
+            </label>
+          </div>
+        </fieldset>
         <button className="primary" disabled={busy} type="submit">
           {t.inviteMember}
         </button>
@@ -729,7 +738,10 @@ function MemberSettings({ view }: { view: SettingsView }) {
 function DangerZone({ view }: { view: SettingsView }) {
   const { t, busy, removeFridge, language } = view;
   return (
-    <section className="panel flex flex-col gap-3" aria-labelledby="danger-title">
+    <section
+      className="panel flex flex-col gap-3"
+      aria-labelledby="danger-title"
+    >
       <h2 id="danger-title" className="text-[var(--bad)]">
         {t.dangerZone}
       </h2>
@@ -798,7 +810,9 @@ export function Settings(props: {
       {notice && <output className="pill accent">{notice}</output>}
       {error && <StatusAlert>{error}</StatusAlert>}
       <GeneralSettings view={view} />
-      {uiVersion === "v2" && !view.hasDevices && <FamilySetupGuide view={view} />}
+      {uiVersion === "v2" && !view.hasDevices && (
+        <FamilySetupGuide view={view} />
+      )}
       <MemberSettings view={view} />
       <LineConnection
         language={props.language}

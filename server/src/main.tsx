@@ -2,14 +2,16 @@ import {
   Utensils,
   ChartNoAxesCombined,
   Network,
-  UserRound,
   Settings2,
   Plus,
   RotateCcw,
   ChevronRight,
   ArrowLeft,
   History,
+  Languages,
+  LogOut,
 } from "lucide-react";
+import { Tooltip } from "@base-ui/react/tooltip";
 import useSWR from "swr";
 import { SessionCache } from "./components/session-cache";
 import { ConfirmationProvider } from "./components/confirmation";
@@ -27,7 +29,7 @@ import {
   useEffect,
   useState,
 } from "react";
-import type { FormEvent } from "react";
+import type { FormEvent, ReactElement } from "react";
 import { createRoot } from "react-dom/client";
 import {
   BrowserRouter,
@@ -51,9 +53,11 @@ import { useFridgeRoom, useFridges, useNow } from "./data";
 import type { FridgeRoomState, SocketConnectionState } from "./data";
 import { Devices } from "./Devices";
 import { AddFood, FoodDetail } from "./Food";
+import { FridgeFavorites } from "./FridgeFavorites";
 import { Inventory } from "./Inventory";
 import { FridgeLogo } from "./icons";
-import { Metrics, ReadingTime } from "./Metrics";
+import { Metrics } from "./Metrics";
+import { ReadingTime } from "./components/reading-time";
 import { Sheet } from "./Sheet";
 import { FRIDGE_SENSOR_STALE_S } from "./model";
 import type { Fridge, Language } from "./model";
@@ -214,6 +218,7 @@ function Dashboard({
       ) : (
         <output className="sub">{t.loading}</output>
       )}
+      <FridgeFavorites fridgeId={fridge.id} language={language} />
     </div>
   );
 }
@@ -313,13 +318,6 @@ function buildNavItems(
       label: t.devices,
       fullLabel: t.devices,
     },
-    {
-      to: base + "/me",
-      end: false,
-      icon: UserRound,
-      label: th ? "ของฉัน" : "Me",
-      fullLabel: th ? "ของฉัน" : "Me",
-    },
   ];
   if (fridge.role === "owner") {
     items.push({
@@ -353,7 +351,7 @@ function FridgeNavBar({
   return (
     <div className="fridge-bar">
       <div className="fridge-bar-left">
-        <Link to="/fridges" className="btn sm">
+        <Link to="/fridges" className="fridge-back">
           <ArrowLeft size={16} aria-hidden="true" />
           {th ? "ทุกตู้" : "All fridges"}
         </Link>
@@ -422,18 +420,12 @@ function FridgeWorkspaceRoutes({
   base,
   room,
   language,
-  colorTheme,
-  onLanguageChange,
-  onColorThemeChange,
   onFridgesChanged,
 }: {
   fridge: Fridge;
   base: string;
   room: FridgeRoomState;
   language: Language;
-  colorTheme: ColorTheme;
-  onLanguageChange: (next: Language) => void;
-  onColorThemeChange: (next: ColorTheme) => void;
   onFridgesChanged: () => void;
 }) {
   const t = words[language];
@@ -444,20 +436,6 @@ function FridgeWorkspaceRoutes({
       <Route
         index
         element={<Dashboard fridge={fridge} room={room} language={language} />}
-      />
-      <Route
-        path="me"
-        element={
-          <Suspense fallback={<output>{t.loading}</output>}>
-            <MyAccount
-              language={language}
-              fridgeId={fridge.id}
-              colorTheme={colorTheme}
-              onLanguageChange={onLanguageChange}
-              onColorThemeChange={onColorThemeChange}
-            />
-          </Suspense>
-        }
       />
       <Route
         path="charts"
@@ -547,16 +525,10 @@ function FridgeWorkspaceRoutes({
 function FridgePage({
   fridges,
   language,
-  colorTheme,
-  onLanguageChange,
-  onColorThemeChange,
   onFridgesChanged,
 }: {
   fridges: Fridge[];
   language: Language;
-  colorTheme: ColorTheme;
-  onLanguageChange: (next: Language) => void;
-  onColorThemeChange: (next: ColorTheme) => void;
   onFridgesChanged: () => void;
 }) {
   const { fridgeId } = useParams();
@@ -589,9 +561,6 @@ function FridgePage({
       fridge={fridge}
       fridges={fridges}
       language={language}
-      colorTheme={colorTheme}
-      onLanguageChange={onLanguageChange}
-      onColorThemeChange={onColorThemeChange}
       onFridgesChanged={onFridgesChanged}
       onAccessLost={handleAccessLost}
     />
@@ -602,18 +571,12 @@ function FridgeWorkspace({
   fridge,
   fridges,
   language,
-  colorTheme,
-  onLanguageChange,
-  onColorThemeChange,
   onFridgesChanged,
   onAccessLost,
 }: {
   fridge: Fridge;
   fridges: Fridge[];
   language: Language;
-  colorTheme: ColorTheme;
-  onLanguageChange: (next: Language) => void;
-  onColorThemeChange: (next: ColorTheme) => void;
   onFridgesChanged: () => void;
   onAccessLost: () => void;
 }) {
@@ -666,9 +629,6 @@ function FridgeWorkspace({
         base={base}
         room={room}
         language={language}
-        colorTheme={colorTheme}
-        onLanguageChange={onLanguageChange}
-        onColorThemeChange={onColorThemeChange}
         onFridgesChanged={onFridgesChanged}
       />
 
@@ -723,18 +683,11 @@ function FridgeHub({
 
   return (
     <div className="flex flex-col gap-4">
-      <div className="page-head">
-        <div className="page-head-copy">
-          <h1>{t.home}</h1>
-          <p className="sub">
-            {th
-              ? "เลือกตู้เย็นที่ต้องการดู หรือเพิ่มตู้เย็นใหม่สำหรับครอบครัว"
-              : "Pick a fridge to inspect, or add a new one for your household."}
-          </p>
-        </div>
+      <div className="hub-heading">
+        <h1>{t.home}</h1>
         <button
           type="button"
-          className="primary big"
+          className="primary"
           onClick={() => {
             setError(false);
             setOpenCreate(true);
@@ -746,17 +699,7 @@ function FridgeHub({
       </div>
 
       {fridges.length === 0 ? (
-        <div className="empty-state">
-          <p className="sub">{t.emptyFridges}</p>
-          <button
-            type="button"
-            className="primary big"
-            onClick={() => setOpenCreate(true)}
-          >
-            <Plus size={18} aria-hidden="true" />
-            {t.createFridge}
-          </button>
-        </div>
+        <p className="empty-state">{t.emptyFridges}</p>
       ) : (
         <div className="hub-grid">
           {fridges.map((fridge) => {
@@ -783,9 +726,7 @@ function FridgeHub({
                     <h2>{fridge.name}</h2>
                     <p className="small">{fridge.latest ? <ReadingTime timeS={fridge.latest.timeS} now={now} language={language} /> : statusText}</p>
                   </div>
-                  <span
-                    className={`pill ${fridge.role === "owner" ? "accent" : "neutral"}`}
-                  >
+                  <span className="fcard-role small">
                     {fridge.role === "owner" ? t.ownerBadge : t.memberBadge}
                   </span>
                 </div>
@@ -802,8 +743,18 @@ function FridgeHub({
                       {voc === null ? "—" : Math.round(voc)}
                     </span>
                   </div>
-                  <ChevronRight size={18} aria-hidden="true" />
+                  <div className="stat">
+                    <span className="k">{th ? "อาหารทั้งหมด" : "Food items"}</span>
+                    <span className="v">{fridge.inventoryCount ?? "—"}</span>
+                  </div>
+                  <div className="stat">
+                    <span className="k">{th ? "หมดอายุใน 3 วัน" : "Expiring within 3 days"}</span>
+                    <span className={`v${fridge.expiringSoonCount ? " warn" : ""}`}>
+                      {fridge.expiringSoonCount ?? "—"}
+                    </span>
+                  </div>
                 </div>
+                <ChevronRight className="fcard-chevron" size={18} aria-hidden="true" />
               </Link>
             );
           })}
@@ -889,15 +840,13 @@ function SignedIn({
           />
         }
       />
+      <Route path="/fridges/:fridgeId/me" element={<Navigate to="/me" replace />} />
       <Route
         path="/fridges/:fridgeId/*"
         element={
           <FridgePage
             fridges={live.data}
             language={language}
-            colorTheme={colorTheme}
-            onLanguageChange={onLanguageChange}
-            onColorThemeChange={onColorThemeChange}
             onFridgesChanged={live.reload}
           />
         }
@@ -1033,6 +982,19 @@ function SignInPanel({
   );
 }
 
+function ToolbarHint({ label, control }: { label: string; control: ReactElement }) {
+  return (
+    <Tooltip.Root>
+      <Tooltip.Trigger render={control} aria-label={label} />
+      <Tooltip.Portal>
+        <Tooltip.Positioner side="bottom" sideOffset={5} className="toolbar-hint-position">
+          <Tooltip.Popup className="toolbar-hint">{label}</Tooltip.Popup>
+        </Tooltip.Positioner>
+      </Tooltip.Portal>
+    </Tooltip.Root>
+  );
+}
+
 function DashboardHeader({
   user,
   language,
@@ -1045,53 +1007,51 @@ function DashboardHeader({
   onSignOut: () => Promise<void>;
 }) {
   const t = words[language];
+  const th = language === "th";
   const initial = (user?.name || user?.email || "F").slice(0, 1).toUpperCase();
   return (
     <header className="top">
       <div className="top-in">
-        <Link to="/fridges" className="brand">
-          <FridgeLogo /> FoodWarden
+        <Link to="/fridges" className="brand" aria-label="FoodWarden">
+          <FridgeLogo />
+          <span className="brand-name">FoodWarden</span>
         </Link>
-        <span className="spacer" />
         <div className="header-actions">
           {user && (
             <a href="/api/reference" className="btn sm api-ref-link">
-              {language === "th" ? "เอกสาร API" : "API reference"}
+              {th ? "เอกสาร API" : "API reference"}
             </a>
           )}
-          <button
-            className="btn sm"
-            type="button"
-            onClick={onLanguageChange}
-            lang={language === "th" ? "en" : "th"}
-          >
-            {language === "th" ? "English" : "ภาษาไทย"}
-          </button>
-          {user && (
-            <Link
-              className="user-pill"
-              to="/me"
-              aria-label={
-                language === "th"
-                  ? "บัญชีและการแจ้งเตือนของฉัน"
-                  : "My account and notifications"
+          <Tooltip.Provider>
+            <ToolbarHint
+              label={th ? "เปลี่ยนเป็นภาษาอังกฤษ" : "Switch to Thai"}
+              control={
+                <button className="toolbar-icon" type="button" onClick={onLanguageChange}>
+                  <Languages size={21} aria-hidden="true" />
+                </button>
               }
-            >
-              <span className="user-avatar" aria-hidden="true">
-                {initial}
-              </span>
-              <span className="user-name">{user.name || user.email}</span>
-            </Link>
-          )}
-          {user && (
-            <button
-              className="btn sm"
-              type="button"
-              onClick={() => void onSignOut()}
-            >
-              {t.signOut}
-            </button>
-          )}
+            />
+            {user && (
+              <>
+                <ToolbarHint
+                  label={th ? "บัญชีและการแจ้งเตือนของฉัน" : "My account and notifications"}
+                  control={
+                    <Link className="toolbar-icon toolbar-account" to="/me">
+                      <span className="user-avatar" aria-hidden="true">{initial}</span>
+                    </Link>
+                  }
+                />
+                <ToolbarHint
+                  label={t.signOut}
+                  control={
+                    <button className="toolbar-icon" type="button" onClick={() => void onSignOut()}>
+                      <LogOut size={21} aria-hidden="true" />
+                    </button>
+                  }
+                />
+              </>
+            )}
+          </Tooltip.Provider>
         </div>
       </div>
     </header>

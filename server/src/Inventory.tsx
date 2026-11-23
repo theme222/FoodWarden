@@ -138,26 +138,6 @@ function useInventory({
     });
   }
 
-  async function toggleFavoriteCategory(cat: string) {
-    if (busy || !favorites.data) return;
-    setBusy(true);
-    try {
-      const next = new Set(favorites.data.categories);
-      if (next.has(cat)) next.delete(cat);
-      else next.add(cat);
-      await lineAction(
-        `/api/fridges/${encodeURIComponent(fridgeId)}/favorites/categories`,
-        "PUT",
-        { categories: [...next] },
-      );
-      await favorites.mutate();
-    } catch {
-      toast.error(th ? "บันทึกหมวดโปรดไม่สำเร็จ" : "Could not update category favorite");
-    } finally {
-      setBusy(false);
-    }
-  }
-
   async function mutateItems(
     method: "DELETE" | "PATCH",
     body?: Record<string, string>,
@@ -327,7 +307,6 @@ function useInventory({
     hasActiveFilters,
     resetFilters,
     toggleGroup,
-    toggleFavoriteCategory,
     takeOutSingle,
     remove,
     edit,
@@ -479,7 +458,7 @@ function InventoryFilters({ view }: { view: InventoryView }) {
 }
 
 function FavoritesShelves({ view }: { view: InventoryView }) {
-  const { th, now, fridgeId, language, shelves, toggleFavoriteCategory } = view;
+  const { th, now, fridgeId, language, shelves } = view;
   if (!shelves.length) return null;
   return (
     <div className="favwrap">
@@ -493,19 +472,6 @@ function FavoritesShelves({ view }: { view: InventoryView }) {
               <span>{categoryLabel(group.category, language)}</span>
               <span className="fg-c">{group.entries.length}</span>
             </div>
-            <button
-              type="button"
-              className="chip"
-              aria-pressed={group.categoryStarred}
-              onClick={() => void toggleFavoriteCategory(group.category)}
-            >
-              <Star
-                size={14}
-                fill={group.categoryStarred ? "currentColor" : "none"}
-                aria-hidden="true"
-              />
-              {th ? "ทั้งหมวด" : "Whole type"}
-            </button>
           </div>
           <div className="shelf">
             {group.entries.map((entry) => {

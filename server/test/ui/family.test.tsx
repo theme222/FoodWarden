@@ -268,6 +268,7 @@ test("charts keep sensor histories separate, support scrubbing and show the sele
 
 test("private account preferences save selected values and favorite changes stay scoped", async () => {
   const { MyAccount } = await import("@/MyAccount");
+  const { FridgeFavorites } = await import("@/FridgeFavorites");
   const changes: { url: string; method: string; body: unknown }[] = [];
   let preferences = {
     morning_enabled: true,
@@ -323,7 +324,8 @@ test("private account preferences save selected values and favorite changes stay
   render(
     <SWRConfig value={{ provider: () => new Map(), dedupingInterval: 0 }}>
       <ConfirmationProvider language="en">
-        <MyAccount fridgeId="kitchen" language="en" />
+        <MyAccount language="en" />
+        <FridgeFavorites fridgeId="kitchen" language="en" />
       </ConfirmationProvider>
     </SWRConfig>,
   );
@@ -346,6 +348,7 @@ test("private account preferences save selected values and favorite changes stay
       inst_spoil: true,
     }),
   );
+  await user.click(await screen.findByText("Favorite food types"));
   await user.click(await screen.findByRole("button", { name: "Dairy (0)" }));
   expect(changes.find((change) => change.method === "PUT")).toEqual({
     url: "/api/fridges/kitchen/favorites/categories",
