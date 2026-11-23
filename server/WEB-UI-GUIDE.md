@@ -6,12 +6,12 @@ Use this guide when changing the dashboard. Read the [design research and audit]
 
 | Screen | Primary task | Source |
 | --- | --- | --- |
-| My fridges | Pick a fridge and see when it last provided a reading | [FridgeHub](src/main.tsx) |
-| Food | Check current sensor values, see what expires soon, and add or take out food | [Metrics](src/Metrics.tsx), [Inventory](src/Inventory.tsx) |
-| Charts | Select a sensor metric and time window, inspect a reading, or open the readings table beside the chart | [Charts](src/Charts.tsx) |
+| My fridges | Compare food totals, upcoming expiry and sensor freshness, then open a fridge | [FridgeHub](src/main.tsx) |
+| Food | Check current sensor values, see what expires soon, and add or take out food, and manage private favorites below inventory | [Metrics](src/Metrics.tsx), [Inventory](src/Inventory.tsx), [FridgeFavorites](src/FridgeFavorites.tsx) |
+| Charts | Choose sensor metrics and one time window, inspect a reading, or open the readings table beside the chart | [Charts](src/Charts.tsx) |
 | History | Find a past food change, door event, or sensor reading by date and type | [Activity](src/Activity.tsx), [history query](workers/lib/activity.ts) |
 | Devices | Identify a device that needs attention. Show recent door events and link to the complete history | [Devices](src/Devices.tsx) |
-| Me | Appearance, personal LINE notifications, and fridge-specific favorites when viewing a fridge | [MyAccount](src/MyAccount.tsx) |
+| Me | Appearance and personal LINE notifications through the header account link | [MyAccount](src/MyAccount.tsx) |
 | Settings | Fridge name, household members, shared LINE connection, and hardware setup | [Settings](src/Settings.tsx) |
 
 ## Layout and interaction
@@ -19,11 +19,33 @@ Use this guide when changing the dashboard. Read the [design research and audit]
 - Keep the first view focused on the current fridge, sensor freshness, and food actions. Let content grow vertically at narrow widths and large text sizes. Keep one page scrollbar and reserve room for the phone navigation and keyboard focus.
 - Group related readings into one surface. Use a visible label and icon for each value. Use dividers and spacing for grouping. Keep red for fault, destructive, and expired states. Pair color with text.
 - Prefer native `select`, `input`, `button`, `label`, `details`, and `table` for standard tasks. Use the shared font, field border, focus outline, and spacing. Preserve the browser's date and time pickers and checkbox states. Retain the existing dialog primitive for confirmations.
-- Use links for navigation and buttons for actions. Name controls in Thai and English, give icon-only actions an accessible name, and keep focus visible on keyboard navigation. A text label and a border should identify an actionable field before interaction.
-- Keep one data series per chart with its real unit and threshold. Keep missing readings as gaps. Show the selected value and time outside hover, and put the optional table below the plot. Load Recharts only on the Charts route.
+- Use links for navigation and buttons for actions. Name controls in Thai and English, give icon-only actions an accessible name, and keep focus visible on keyboard navigation. Use a visible label and field boundary for text entry and pickers. Use a clear verb and a familiar icon for quiet standalone buttons. Use stronger text contrast and a subtle surface tint on hover. Keep underlines for inline links where they distinguish links from prose.
+- Give each selected sensor metric its own labeled plot, unit, and threshold. Align the time windows across plots and keep one shared reading selector and readings table. Keep missing readings as gaps. Show the selected value and time outside hover, and put the optional table below the plot. Load Recharts only on the Charts route.
 - Readings show elapsed time and the exact Bangkok time. For date-only filters, query midnight to midnight in Asia/Bangkok, independent of the browser timezone. Keep source event and sensor timestamps distinct from the time a web view last refreshed.
 - History reads 15 rows per request. The cursor combines the timestamp and row ID so tied timestamps remain pageable. Use the existing telemetry and door records. Inventory events start when the migration is applied and capture actual changes. Previous edits and removals cannot be reconstructed from the current inventory table.
 - Use [dashboard-theme.css](src/dashboard-theme.css) for component layouts, [ui-theme.css](src/ui-theme.css) for tokens and themes, and [style.css](src/style.css) for shared base styles. Trace each selector to its JSX before adding another styling path.
+
+## Choosing a control
+
+| FoodWarden task | Control | Reason |
+| --- | --- | --- |
+| Invite a member or owner | Native radio group with role descriptions | The permission choices should be available for comparison before inviting. Member is the default. |
+| Show temperature, VOC, or light | Native checkboxes | Every choice is independent. Users can add, remove, or clear metrics in place and see which are enabled. A link from a dashboard reading sets the initial metric. |
+| Change the chart period | Native range input with four labeled stops | The periods are ordered and bounded. Show the exact active value and expose it to assistive technology. Keep the reading cursor separate. |
+| Switch fridges, sensors, or food categories | Native select | One choice is active, the list can grow, and showing it all would push the main task down the page. |
+| Set language, palette, layout, sort order, or history type | Native select | These are compact one-of-several choices. The active choice stays visible and the shared control keeps the form short. |
+| Pick a date or notification time | Native date or time input | The browser owns the picker and chooses the visible format from its locale. The notification value is stored as HH:mm and uses Bangkok time. When the native picker falls back to text, the field shows the HH:mm hint and validates 24-hour input. |
+| Expand hardware connections | Button with a title, chevron, and expanded state | Users can recognize the subject and disclosure affordance. A neutral icon identifies the connection and a divider groups the rows. |
+| Copy a token or remove access | Quiet text button with an icon | A clear verb and icon identify the action. Keep keyboard focus, a full hit area, and confirmation for consequential actions. |
+
+Visible options support recognition and comparison, especially for choices with different consequences. A select saves space when the full list has low value on screen. Use the data model to decide whether selection is exclusive or independent. [MDN radio group](https://developer.mozilla.org/en-US/docs/Web/HTML/Reference/Elements/input/radio), [MDN checkbox](https://developer.mozilla.org/en-US/docs/Web/HTML/Reference/Elements/input/checkbox), [MDN select](https://developer.mozilla.org/en-US/docs/Web/HTML/Reference/Elements/select), [MDN time input](https://developer.mozilla.org/en-US/docs/Web/HTML/Reference/Elements/input/time), [MDN range input](https://developer.mozilla.org/en-US/docs/Web/HTML/Reference/Elements/input/range).
+
+
+## Compact navigation
+
+- Keep the brand and header actions on one line. In viewports at or below 380 CSS pixels, the brand shows the fridge mark with its accessible name. Language and sign-out use labeled icon buttons. The account link uses a round avatar inside a transparent touch target.
+- Show icon descriptions on pointer hover and keyboard focus. A tap opens an account, changes language, or signs out in one action. Give a back link such as All fridges visible destination text and an arrow because its meaning depends on the current page.
+- Keep a light boundary around a fridge card when the whole card is the navigation target. Use the fridge name and chevron to show where it goes. Role and gateway freshness are information and use plain text. Keep field boundaries and strong actions visible.
 
 ## Reference index for contributors and agents
 

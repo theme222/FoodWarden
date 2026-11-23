@@ -75,3 +75,28 @@ See the [implementation and MDN reference guide](WEB-UI-GUIDE.md) for the specif
 - The dashboard fits without horizontal scrolling at the tested widths. At 360 × 740 CSS pixels, its Add food action is above the bottom navigation even with aged sensor and door records. Long lists and forms use normal vertical scrolling.
 - The local D1 export contained 7 fridges, 1,253 sensor readings and 2,253 door events. The history view used those real records for filtering and paging. The inventory change tests used isolated Workers fixtures to verify create, edit, remove, duplicate requests and tied timestamps.
 - The desktop browser engines exercise responsive sizing, keyboard controls, the chart, and the paginated tables. Native mobile Safari and Android picker UI still require device testing.
+
+## Follow-up annotations
+
+The member role menu was a custom popup with a different shape and interaction. Radio choices now expose both permission levels and their effects before invitation. The connection rows had an outer panel, colored icon tiles and a dark token container. A divider and neutral icons now provide structure, with underlined buttons for revealing, copying, rotating or removing access.
+
+Chart checkboxes let users compare multiple metrics at once. Matching time scales align the plots, while independent Y axes keep units and threshold lines meaningful. The four range choices remain visible as radios. See the [control decisions](WEB-UI-GUIDE.md#choosing-a-control).
+
+## Fridge hub, account ownership and chart navigation
+
+| Observation | FoodWarden decision |
+| --- | --- |
+| Both account routes showed appearance, personal LINE and the same notification settings. | The header account link opens the global account. Legacy per-fridge account links redirect there. Favorites belong below inventory because they are scoped to a fridge, while the account preferences apply across fridges. |
+| The empty hub repeated Add fridge and the explanatory sentence forced the header action onto another line. | Give the header one Add fridge action and a dedicated right-hand column. Allow the heading to wrap within its column as the viewport narrows. The brand mark grows within a bounded range and keeps the existing compact header behavior. |
+| The favorites section and the inventory Favorites filter looked like another overlap. | Keep the filter for browsing favorites. Its shelf tiles link to stock details or the add-food form. The section below inventory is the single place to change favorite categories and remove saved foods. |
+| Personal and fridge settings use similar LINE screens. History and Devices both show some door events. | Share the LINE connection UI and distinguish personal delivery from the household connection. Devices shows recent door events as context and links to the filtered history. History owns the full paginated record. |
+| Repeated underlines made neighboring gateway actions compete for attention. | Give standalone actions visible verbs, icons where useful, and consistent touch targets. Use a subtle tint and stronger text on hover, retain the focus ring for keyboard use, and show an arrow with the All fridges label. |
+| The fridge card showed two sensor metrics but offered no inventory context. | Show total inventory entries and entries that expire from today through three days ahead using the Bangkok calendar. Already expired entries remain part of the total. Each count uses the same membership-filtered fridge response and refreshes when the inventory changes. |
+| A time-window selector and a reading cursor both affect the chart. | Use a native four-stop range input with every label visible for the window. Expose the actual period with accessible value text and keep the separate reading cursor for inspecting a timestamp. Keep independent metrics as checkboxes and longer single-choice lists as native selects. |
+| Empty Chart and History screens used deep padding and large rounded panels for a single line. | Apply the shared flat empty state with a 6 px radius and compact padding. Keep a visible boundary where it identifies a form field or a complete actionable fridge card. |
+
+The period stops are categories in order of duration, with equal spacing for navigation. The exact duration stays visible because each step represents a different span of time. shadcn documents a component for controlled values and richer slider interactions. The browser's range input provides the single thumb, keyboard handling and touch input needed here. [MDN range input](https://developer.mozilla.org/en-US/docs/Web/HTML/Reference/Elements/input/range), [shadcn Slider](https://ui.shadcn.com/docs/components/base/slider), [WAI slider pattern](https://www.w3.org/WAI/ARIA/apg/patterns/slider/).
+
+Recognition is easier when option labels, destinations and action verbs stay visible. Responsive reflow allows ordinary content to grow down the page while navigation and primary actions stay reachable. The same Bangkok date boundary is applied before both inventory and hub comparisons. [NN/g recognition and recall](https://www.nngroup.com/articles/recognition-and-recall/), [WCAG reflow](https://www.w3.org/WAI/WCAG22/Understanding/reflow.html), [SQLite date modifiers](https://www.sqlite.org/lang_datefunc.html).
+
+The follow-up build was checked in Chromium, Firefox and WebKit with an isolated local D1 copy. The hub kept Add fridge beside the heading at 313, 527, 768 and 1440 CSS pixels. The 313 px checks covered the account redirect, five fridge tabs, favorites below inventory, chart keyboard range selection, quiet settings behavior and the history empty state. The Worker fixture verified the three-day cutoff against an item expiring on day four.
