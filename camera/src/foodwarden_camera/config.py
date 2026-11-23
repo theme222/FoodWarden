@@ -94,7 +94,7 @@ class GatewaySettings(BaseModel):
 
     # Runtime UI & Power-Saving Timeouts
     autocomplete_timeout_s: int = Field(
-        default=int(os.getenv("AUTOCOMPLETE_TIMEOUT_S", "5")),
+        default=int(os.getenv("AUTOCOMPLETE_TIMEOUT_S", "10")),
         description="Seconds until Check-In/Check-Out action auto-completes",
     )
     sleep_timeout_s: int = Field(

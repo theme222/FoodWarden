@@ -31,8 +31,6 @@ from foodwarden_camera.ui.styles import (
     COLOR_SURFACE,
     COLOR_SURFACE_2,
     COLOR_TAKE_SOLID,
-    COLOR_WAIT_BG,
-    COLOR_WAIT_FG,
     COLOR_WARN_TEXT,
     FS_BODY,
     FS_LABEL,
@@ -40,6 +38,8 @@ from foodwarden_camera.ui.styles import (
     pill_style,
 )
 from foodwarden_camera.ui.widgets import (
+    DEFAULT_AUTOCOMPLETE_S,
+    EDIT_TIMEOUT_S,
     FitLabel,
     countdown_style,
     create_key_guide,
@@ -127,26 +127,33 @@ class _CandidateRow(QFrame):
 class CheckOutScreen(QWidget):
     """High-contrast Check-Out screen highlighting top FEFO candidates.
 
-    Countdown rules:
-      * No button pressed → countdown runs out → the FEFO item (row 1) is
-        removed directly (``on_confirm``), no confirmation step.
+    Countdown rules (every expiry does NOT remove anything; removal only
+    happens on an explicit O on the confirmation screen):
+      * No button pressed → ``autocomplete_timeout_s`` (default 10 s) runs out →
+        ``on_timeout(candidate)``: nothing is removed, the user is told so.
       * The user changes the selected item (Pi-top ↑/↓, keyboard, or touch)
-        → countdown stops for good so they can take their time.
-      * O always opens the confirmation step (``on_review``).
+        → countdown switches to ``EDIT_TIMEOUT_S`` (30 s), restarting on every
+        move; expiry → ``on_timeout`` as above.
+      * O opens the confirmation step (``on_review``), which has its own 7 s
+        countdown (also "don't remove" on expiry).
     """
 
     def __init__(
         self,
         on_confirm_callback: Callable[[CheckOutCandidate], None],
         on_cancel_callback: Callable[[], None],
-        autocomplete_timeout_s: int = 5,
+        autocomplete_timeout_s: int = DEFAULT_AUTOCOMPLETE_S,
         parent: QWidget | None = None,
         on_review_callback: Callable[[CheckOutCandidate], None] | None = None,
+        on_timeout_callback: Callable[[CheckOutCandidate], None] | None = None,
     ) -> None:
         super().__init__(parent)
         self.on_confirm = on_confirm_callback
         self.on_cancel = on_cancel_callback
         self.on_review = on_review_callback or on_confirm_callback
+        self.on_timeout: Callable[[CheckOutCandidate], None] = on_timeout_callback or (
+            lambda _cand: self.on_cancel()
+        )
         self._manual = False  # True once the user changed the selection
         self.autocomplete_timeout_s = max(1, autocomplete_timeout_s)
         self._candidates: list[CheckOutCandidate] = []
@@ -169,7 +176,7 @@ class CheckOutScreen(QWidget):
         root_layout.setSpacing(10)
 
         header, self.countdown_label = create_screen_header("นำออกอาหาร", self)
-        self.countdown_label.setText(f"ยืนยันอัตโนมัติ {self.autocomplete_timeout_s} วิ")
+        self.countdown_label.setText(f"ยกเลิกอัตโนมัติใน {self.autocomplete_timeout_s} วิ")
         root_layout.addLayout(header)
 
         body = QHBoxLayout()
@@ -284,35 +291,37 @@ class CheckOutScreen(QWidget):
         """Updates inactivity auto-confirm duration in seconds."""
         self.autocomplete_timeout_s = max(1, seconds)
 
-    def _reset_countdown_display(self) -> None:
-        """Restarts the auto-confirm countdown from the full timeout."""
-        self._countdown_seconds = self.autocomplete_timeout_s
-        self.countdown_label.setText(f"ยืนยันอัตโนมัติ {self._countdown_seconds} วิ")
-        if self._countdown_timer.isActive():
-            # Restart so the next tick is a full second away, not a partial one.
-            self._countdown_timer.start(1000)
+    def _start_countdown(self, seconds: int) -> None:
+        """(Re)starts the auto-cancel countdown; the next tick is a full second away."""
+        self._countdown_seconds = max(1, seconds)
+        self._update_countdown_label()
+        self._countdown_timer.start(1000)
 
-    def _enter_manual_mode(self) -> None:
-        """User started choosing: stop the countdown permanently for this list."""
-        if self._manual:
-            return
+    def _update_countdown_label(self) -> None:
+        self.countdown_label.setText(f"ยกเลิกอัตโนมัติใน {self._countdown_seconds} วิ")
+
+    def _on_user_interaction(self) -> None:
+        """User is choosing: switch to / restart the 30 s browse countdown."""
         self._manual = True
-        self._countdown_timer.stop()
-        self.countdown_label.setText("หยุดนับเวลาแล้ว")
-        self.countdown_label.setStyleSheet(countdown_style(COLOR_WAIT_BG, COLOR_WAIT_FG))
+        self._start_countdown(EDIT_TIMEOUT_S)
 
     @property
     def is_manual(self) -> bool:
-        """Whether the user has changed the selection (countdown stopped)."""
+        """Whether the user has changed the selection (30 s countdown active)."""
         return self._manual
 
     def _tick_countdown(self) -> None:
         self._countdown_seconds -= 1
         if self._countdown_seconds <= 0:
             self._countdown_timer.stop()
-            self._commit()
+            self._time_out()
         else:
-            self.countdown_label.setText(f"ยืนยันอัตโนมัติ {self._countdown_seconds} วิ")
+            self._update_countdown_label()
+
+    def resume_selecting(self) -> None:
+        """Back from the confirm step (X): keep the selection, 30 s countdown."""
+        if self._candidates:
+            self._on_user_interaction()
 
     # ------------------------------------------------------------------
     # Data loading
@@ -392,8 +401,7 @@ class CheckOutScreen(QWidget):
         self._is_loading = False
         self._apply_selection(0)
 
-        self._countdown_timer.start(1000)
-        self._reset_countdown_display()
+        self._start_countdown(self.autocomplete_timeout_s)
 
     # ------------------------------------------------------------------
     # Selection
@@ -412,7 +420,7 @@ class CheckOutScreen(QWidget):
         if self._is_loading or not self._rows:
             return
         self._apply_selection(row)
-        self._enter_manual_mode()
+        self._on_user_interaction()
 
     def handle_up(self) -> None:
         """Selects previous candidate item."""
@@ -420,9 +428,9 @@ class CheckOutScreen(QWidget):
             return
         current_row = self.list_widget.currentRow()
         if current_row > 0:
-            self.list_widget.setCurrentRow(current_row - 1)  # stops via _on_row_changed
+            self.list_widget.setCurrentRow(current_row - 1)  # restarts via _on_row_changed
         else:
-            self._enter_manual_mode()  # still choosing at the top edge
+            self._on_user_interaction()  # still choosing at the top edge
 
     def handle_down(self) -> None:
         """Selects next candidate item."""
@@ -430,9 +438,9 @@ class CheckOutScreen(QWidget):
             return
         current_row = self.list_widget.currentRow()
         if current_row < self.list_widget.count() - 1:
-            self.list_widget.setCurrentRow(current_row + 1)  # stops via _on_row_changed
+            self.list_widget.setCurrentRow(current_row + 1)  # restarts via _on_row_changed
         else:
-            self._enter_manual_mode()  # still choosing at the bottom edge
+            self._on_user_interaction()  # still choosing at the bottom edge
 
     def handle_select(self) -> None:
         """Opens the confirm step for the selected candidate."""
@@ -442,7 +450,8 @@ class CheckOutScreen(QWidget):
         if candidate is None:
             self.on_cancel()  # "not found" list: O just goes back
             return
-        self._enter_manual_mode()
+        self._manual = True
+        self._countdown_timer.stop()  # the confirm step runs its own countdown
         self.on_review(candidate)
 
     @property
@@ -463,11 +472,11 @@ class CheckOutScreen(QWidget):
         self._countdown_timer.stop()
         self.on_cancel()
 
-    def _commit(self) -> None:
-        """Auto-confirm path (countdown ran out with no interaction): remove directly."""
+    def _time_out(self) -> None:
+        """Countdown ran out: do NOT remove anything; report which item was left in."""
         self._countdown_timer.stop()
-        row = self.list_widget.currentRow()
-        if 0 <= row < len(self._candidates):
-            self.on_confirm(self._candidates[row])
+        candidate = self.selected_candidate
+        if candidate is not None:
+            self.on_timeout(candidate)
         else:
             self.on_cancel()

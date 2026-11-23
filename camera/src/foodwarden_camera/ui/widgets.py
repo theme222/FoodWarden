@@ -138,3 +138,12 @@ class FitLabel(QLabel):
         painter.setPen(self.palette().color(self.foregroundRole()))
         painter.drawText(rect, int(self.alignment() | Qt.AlignmentFlag.AlignVCenter), shown)
         painter.end()
+
+
+# --- Flow countdowns (seconds) -------------------------------------------------
+# Initial countdown is user-configurable (Settings → AUTOCOMPLETE_TIMEOUT_S).
+DEFAULT_AUTOCOMPLETE_S = 10
+# After the user starts editing/scrolling: restarts on every button press.
+EDIT_TIMEOUT_S = 30
+# On the explicit confirm step.
+CONFIRM_TIMEOUT_S = 7

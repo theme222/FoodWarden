@@ -450,68 +450,105 @@ def _make_candidates(n: int) -> list[CheckOutCandidate]:
     ]
 
 
-def test_checkout_selection_change_stops_countdown(qapp: QApplication) -> None:
+def _expire(screen_timer_owner: object, attr: str = "_tick_countdown") -> None:
+    """Ticks a screen's countdown until it fires (each tick = 1 simulated second)."""
+    owner = screen_timer_owner
+    while getattr(owner, "_countdown_timer").isActive():  # noqa: B009
+        getattr(owner, attr)()
+
+
+def test_checkout_scroll_restarts_30s_countdown(qapp: QApplication) -> None:
     button_ctrl = ButtonController()
-    window = FoodWardenMainWindow(button_controller=button_ctrl, autocomplete_timeout_s=5)
+    window = FoodWardenMainWindow(button_controller=button_ctrl, autocomplete_timeout_s=10)
     screen = window.checkout_screen
     window.show_checkout_candidates(_make_candidates(3))
 
     # The list must never take keyboard focus, or it would swallow ↑/↓.
     assert screen.list_widget.focusPolicy() == Qt.FocusPolicy.NoFocus
-    assert screen._countdown_timer.isActive()
+    assert screen._countdown_seconds == 10
+    assert "ยกเลิกอัตโนมัติใน 10" in screen.countdown_label.text()
 
-    # Keyboard ↓ (routed like the Pi-top button) changes the row and stops the countdown.
+    # Keyboard ↓ (routed like the Pi-top button) switches to the 30 s countdown...
     screen._tick_countdown()
     window.keyPressEvent(
         QKeyEvent(QKeyEvent.Type.KeyPress, Qt.Key.Key_Down, Qt.KeyboardModifier.NoModifier)
     )
     assert screen.list_widget.currentRow() == 1
-    assert screen.is_manual
-    assert not screen._countdown_timer.isActive()
-    assert "หยุด" in screen.countdown_label.text()
-    screen.handle_cancel()
+    assert screen.is_manual and screen._countdown_timer.isActive()
+    assert screen._countdown_seconds == 30
 
-    # Touch/mouse selection change also stops it.
-    window.show_checkout_candidates(_make_candidates(3))
-    assert screen._countdown_timer.isActive()
-    screen.list_widget.setCurrentRow(2)
-    assert not screen._countdown_timer.isActive()
-    screen.handle_cancel()
-
-    # ↓ at the bottom edge with a single item still counts as interacting.
-    window.show_checkout_candidates(_make_candidates(1))
+    # ...which restarts on every move, including at the bottom edge and touch.
+    for _ in range(5):
+        screen._tick_countdown()
     button_ctrl.emit_button_press(ButtonType.DOWN)
-    assert not screen._countdown_timer.isActive()
+    assert screen._countdown_seconds == 30
+    screen._tick_countdown()
+    button_ctrl.emit_button_press(ButtonType.DOWN)  # already at the last row
+    assert screen.list_widget.currentRow() == 2
+    assert screen._countdown_seconds == 30
+    screen._tick_countdown()
+    screen.list_widget.setCurrentRow(0)
+    assert screen._countdown_seconds == 30
     screen.handle_cancel()
 
 
-def test_checkout_auto_confirm_skips_confirm_step(qapp: QApplication) -> None:
+def test_checkout_timeouts_never_remove_item(qapp: QApplication) -> None:
     button_ctrl = ButtonController()
     committed: list[str] = []
     window = FoodWardenMainWindow(
         button_controller=button_ctrl,
         on_commit_checkout=lambda c: committed.append(c.item_id),
-        autocomplete_timeout_s=2,
+        autocomplete_timeout_s=10,
     )
-    window.show_checkout_candidates(_make_candidates(2))
-    window.checkout_screen._tick_countdown()
-    window.checkout_screen._tick_countdown()
-    assert committed == ["cand_0"]  # FEFO default, no confirm step
-    assert window.stack.currentIndex() == 5
-    assert window.result_screen.status == "saving"
+    screen = window.checkout_screen
 
+    # 1) Untouched 10 s -> not removed, result card says so.
+    window.show_checkout_candidates(_make_candidates(2))
+    _expire(screen)
+    assert committed == []
+    assert window.stack.currentIndex() == 5
+    assert window.result_screen.status == "skipped"
+    assert "ไม่ได้นำออก" in window.result_screen.headline_label.text()
+    assert window.result_screen.name_label.text() == "รายการ 0"
+
+    # 2) Scrolled, then 30 s -> not removed (reports the item that was selected).
+    window.show_checkout_candidates(_make_candidates(2))
+    button_ctrl.emit_button_press(ButtonType.DOWN)
+    _expire(screen)
+    assert committed == []
+    assert window.result_screen.status == "skipped"
+    assert window.result_screen.name_label.text() == "รายการ 1"
+
+    # 3) O -> confirm step with 7 s countdown; expiry -> not removed.
+    window.show_checkout_candidates(_make_candidates(2))
+    button_ctrl.emit_button_press(ButtonType.SELECT)
+    assert window.stack.currentIndex() == 4
+    assert "ยกเลิกอัตโนมัติใน 7" in window.confirm_screen.countdown_label.text()
+    _expire(window.confirm_screen)
+    assert committed == []
+    assert window.result_screen.status == "skipped"
+
+    # 4) O, X (back, 30 s again), O, O -> removed.
+    window.show_checkout_candidates(_make_candidates(2))
+    button_ctrl.emit_button_press(ButtonType.SELECT)
+    button_ctrl.emit_button_press(ButtonType.CANCEL)
+    assert window.stack.currentIndex() == 2
+    assert screen._countdown_seconds == 30
+    button_ctrl.emit_button_press(ButtonType.SELECT)
+    button_ctrl.emit_button_press(ButtonType.SELECT)
+    assert committed == ["cand_0"]
+    assert window.result_screen.status == "saving"
     window.show_commit_result("checkout", "success", "รายการ 0")
-    assert window.result_screen.status == "success"
     assert "นำออกแล้ว" in window.result_screen.headline_label.text()
 
 
-def test_checkin_auto_confirm_and_manual_confirm_flow(qapp: QApplication) -> None:
+def test_checkin_timeouts_always_save(qapp: QApplication) -> None:
     button_ctrl = ButtonController()
     committed: list[str] = []
     window = FoodWardenMainWindow(
         button_controller=button_ctrl,
         on_commit_checkin=lambda _d, date_str: committed.append(date_str),
-        autocomplete_timeout_s=2,
+        autocomplete_timeout_s=10,
     )
     draft = CheckInDraftResult(
         name_th="นมสด",
@@ -527,10 +564,11 @@ def test_checkin_auto_confirm_and_manual_confirm_flow(qapp: QApplication) -> Non
     )
     screen = window.checkin_screen
 
-    # 1) No interaction: countdown runs out -> saved directly, no confirm step.
+    # 1) Untouched 10 s -> saved directly (no confirm step) and the result card shows it.
     window.show_checkin_draft(draft, b"")
-    screen._tick_countdown()
-    screen._tick_countdown()
+    assert screen._countdown_seconds == 10
+    assert "บันทึกอัตโนมัติใน 10" in screen.countdown_label.text()
+    _expire(screen)
     assert committed == ["2099-01-10"]
     assert window.stack.currentIndex() == 5
     window.show_commit_result("checkin", "success", "นมสด")
@@ -538,27 +576,42 @@ def test_checkin_auto_confirm_and_manual_confirm_flow(qapp: QApplication) -> Non
     button_ctrl.emit_button_press(ButtonType.CANCEL)  # any button -> Idle
     assert window.stack.currentIndex() == 0
 
-    # 2) Editing the date stops the countdown for good.
+    # 2) Editing -> 30 s countdown restarting on every press; expiry saves the edit.
     committed.clear()
     window.show_checkin_draft(draft, b"")
     button_ctrl.emit_button_press(ButtonType.UP)
-    assert screen.is_manual and not screen._countdown_timer.isActive()
+    assert screen.is_manual and screen._countdown_seconds == 30
+    for _ in range(12):
+        screen._tick_countdown()
+    button_ctrl.emit_button_press(ButtonType.UP)
+    assert screen._countdown_seconds == 30
+    _expire(screen)
+    assert committed == ["2099-01-12"]
+    assert window.stack.currentIndex() == 5
 
-    # O through Day -> Month -> Year opens the confirm step (no countdown there).
+    # 3) O through Day -> Month -> Year opens confirm with a 7 s countdown; expiry saves.
+    committed.clear()
+    window.show_checkin_draft(draft, b"")
     for _ in range(3):
         button_ctrl.emit_button_press(ButtonType.SELECT)
     assert window.stack.currentIndex() == 4
-    assert committed == []
+    assert "บันทึกอัตโนมัติใน 7" in window.confirm_screen.countdown_label.text()
+    _expire(window.confirm_screen)
+    assert committed == ["2099-01-10"]
+    assert window.stack.currentIndex() == 5
 
-    # X goes back to editing (still no countdown), then confirm for real.
+    # 4) X on confirm goes back to editing with the 30 s countdown; O confirms.
+    committed.clear()
+    window.show_checkin_draft(draft, b"")
+    for _ in range(3):
+        button_ctrl.emit_button_press(ButtonType.SELECT)
     button_ctrl.emit_button_press(ButtonType.CANCEL)
     assert window.stack.currentIndex() == 1
-    assert not screen._countdown_timer.isActive()
+    assert screen._countdown_seconds == 30
     for _ in range(3):
         button_ctrl.emit_button_press(ButtonType.SELECT)
     button_ctrl.emit_button_press(ButtonType.SELECT)
-    assert committed == ["2099-01-11"]
-    assert window.stack.currentIndex() == 5
+    assert committed == ["2099-01-10"]
 
     # Outcome that arrives after the user left the card goes to the banner instead.
     button_ctrl.emit_button_press(ButtonType.SELECT)

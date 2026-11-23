@@ -37,7 +37,7 @@ from foodwarden_camera.ui.styles import (
     MAIN_WINDOW_HEIGHT,
     MAIN_WINDOW_WIDTH,
 )
-from foodwarden_camera.ui.widgets import days_left_badge
+from foodwarden_camera.ui.widgets import DEFAULT_AUTOCOMPLETE_S, days_left_badge
 
 logger = logging.getLogger(__name__)
 
@@ -138,7 +138,7 @@ class FoodWardenMainWindow(QMainWindow):
         on_save_door_close_timeout: Callable[[int], None] | None = None,
         on_wake_requested: Callable[[], None] | None = None,
         initial_token: str = "",
-        autocomplete_timeout_s: int = 5,
+        autocomplete_timeout_s: int = DEFAULT_AUTOCOMPLETE_S,
         sleep_timeout_s: int = 600,
         initial_pir_gpio_pin: int = 22,
         initial_door_close_timeout_s: int = 60,
@@ -209,6 +209,7 @@ class FoodWardenMainWindow(QMainWindow):
             autocomplete_timeout_s=self._current_autocomplete_s,
             parent=self.stack,
             on_review_callback=self._handle_checkout_review,
+            on_timeout_callback=self._handle_checkout_timed_out,
         )
         self.stack.addWidget(self.checkout_screen)
 
@@ -235,6 +236,7 @@ class FoodWardenMainWindow(QMainWindow):
             on_confirm=self._handle_confirm_accepted,
             on_back=self._handle_confirm_back,
             parent=self.stack,
+            on_timeout=self._handle_confirm_timeout,
         )
         self.stack.addWidget(self.confirm_screen)
         self._pending_checkin: tuple[CheckInDraftResult, str] | None = None
@@ -289,6 +291,7 @@ class FoodWardenMainWindow(QMainWindow):
     # ==========================================================================
 
     def _apply_show_idle_screen(self) -> None:
+        self.confirm_screen.stop_countdown()
         self.stack.setCurrentIndex(0)
         logger.info("Transitioned to Idle screen")
 
@@ -610,12 +613,33 @@ class FoodWardenMainWindow(QMainWindow):
             self.show_idle_screen()
 
     def _handle_confirm_back(self) -> None:
-        """X on the confirm step: return to editing (countdown stays off)."""
+        """X on the confirm step: return to editing with the 30 s edit countdown."""
         if self.confirm_screen.kind == "checkin":
             self.checkin_screen.resume_editing()
             self.stack.setCurrentIndex(IDX_CHECKIN)
         else:
+            self.checkout_screen.resume_selecting()
             self.stack.setCurrentIndex(IDX_CHECKOUT)
+
+    def _handle_confirm_timeout(self) -> None:
+        """7 s on the confirm step ran out: Check-In saves, Check-Out does not remove."""
+        if self.stack.currentIndex() != IDX_CONFIRM:
+            return
+        if self.confirm_screen.kind == "checkin":
+            logger.info("Confirm step timed out: saving check-in")
+            self._handle_confirm_accepted()
+        elif self._pending_checkout is not None:
+            candidate = self._pending_checkout
+            self._pending_checkout = None
+            self._handle_checkout_timed_out(candidate)
+        else:
+            self.show_idle_screen()
+
+    def _handle_checkout_timed_out(self, candidate: CheckOutCandidate) -> None:
+        """Check-Out countdown expired: nothing is removed; tell the user which item."""
+        logger.info("Check-out timed out; item NOT removed: %s", candidate.item_id)
+        self.result_screen.show_skipped("checkout", candidate.name_th)
+        self.stack.setCurrentIndex(IDX_RESULT)
 
     # --- Commit + outcome card ------------------------------------------------
 

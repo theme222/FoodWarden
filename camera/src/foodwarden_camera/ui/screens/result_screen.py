@@ -6,6 +6,7 @@ States:
     success - "นำเข้าแล้ว" / "นำออกแล้ว"
     queued  - server unreachable; saved locally and will sync automatically
     failed  - not saved; tells the user why
+    skipped - nothing was saved on purpose (Check-Out timed out: item left in)
 
 Final states return to the Idle screen automatically; any button returns
 immediately.
@@ -21,10 +22,12 @@ from PyQt6.QtWidgets import QFrame, QLabel, QVBoxLayout, QWidget
 
 from foodwarden_camera.ui.styles import (
     COLOR_BAD,
+    COLOR_DARK,
     COLOR_FRESH,
     COLOR_INK,
     COLOR_MUTED,
     COLOR_ON_BAD,
+    COLOR_ON_DARK,
     COLOR_ON_FRESH,
     COLOR_ON_SOON,
     COLOR_SOON,
@@ -39,7 +42,7 @@ from foodwarden_camera.ui.styles import (
 from foodwarden_camera.ui.widgets import FitLabel
 
 ResultKind = Literal["checkin", "checkout"]
-ResultStatus = Literal["saving", "success", "queued", "failed"]
+ResultStatus = Literal["saving", "success", "queued", "failed", "skipped"]
 
 SUCCESS_RETURN_MS = 3000
 FAILED_RETURN_MS = 6000
@@ -122,6 +125,12 @@ class ResultScreen(QWidget):
         )
         self._return_timer.start(SAVING_SAFETY_MS)
 
+    def show_skipped(self, kind: ResultKind, item_name: str, message: str = "") -> None:
+        """Timed out without an explicit confirm: tell the user nothing was changed."""
+        self.kind = kind
+        self.item_name = item_name
+        self.show_outcome("skipped", message)
+
     def show_outcome(self, status: ResultStatus, message: str = "") -> None:
         """Updates the card with the server's answer and schedules return to Idle."""
         is_in = self.kind == "checkin"
@@ -135,6 +144,15 @@ class ResultScreen(QWidget):
             self._apply(
                 status, "!", "บันทึกไว้ในเครื่องแล้ว", message or default, COLOR_SOON, COLOR_ON_SOON
             )
+            self._return_timer.start(FAILED_RETURN_MS)
+        elif status == "skipped":
+            headline = "ไม่ได้นำออก" if self.kind == "checkout" else "ไม่ได้นำเข้า"
+            default = (
+                "หมดเวลา — ไม่ได้บันทึกการนำรายการนี้ออก รายการยังอยู่ในตู้เย็น"
+                if self.kind == "checkout"
+                else "หมดเวลา — ไม่ได้บันทึกรายการนี้"
+            )
+            self._apply(status, "–", headline, message or default, COLOR_DARK, COLOR_ON_DARK)
             self._return_timer.start(FAILED_RETURN_MS)
         elif status == "failed":
             default = "กรุณาลองใหม่อีกครั้ง"

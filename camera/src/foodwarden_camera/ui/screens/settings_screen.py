@@ -171,7 +171,7 @@ class SettingsScreen(QWidget):
         on_save_pir_pin: Callable[[int], None] | None = None,
         on_save_door_close_timeout: Callable[[int], None] | None = None,
         initial_token: str = "",
-        initial_autocomplete_s: int = 5,
+        initial_autocomplete_s: int = 10,
         initial_sleep_s: int = 600,
         initial_pir_gpio_pin: int = 22,
         initial_door_close_s: int = 60,
@@ -396,7 +396,7 @@ class SettingsScreen(QWidget):
 
         card_auto = self._build_stepper_card(
             "CardAuto",
-            "ยืนยันอัตโนมัติหลัง",
+            "นับถอยหลังเริ่มต้น (นำเข้า/นำออก)",
             self.autocomplete_spin,
             lambda: self._adjust_autocomplete(-1),
             lambda: self._adjust_autocomplete(1),

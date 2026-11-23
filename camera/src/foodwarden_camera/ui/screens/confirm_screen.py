@@ -1,7 +1,8 @@
-"""Explicit "Are you sure?" step shown after the user manually edits a Check-In/Out.
+"""Explicit "Are you sure?" step shown after the user presses O on Check-In/Out.
 
-There is deliberately no countdown here: the user has already shown they want
-to review the item, so the record is only saved on an explicit O press.
+A short countdown (``CONFIRM_TIMEOUT_S``, 7 s) runs here. What happens on expiry
+is decided by the caller via ``on_timeout``: Check-In saves the item, Check-Out
+does NOT remove it.
 """
 
 from __future__ import annotations
@@ -9,7 +10,7 @@ from __future__ import annotations
 from collections.abc import Callable
 from typing import Literal
 
-from PyQt6.QtCore import Qt
+from PyQt6.QtCore import Qt, QTimer
 from PyQt6.QtGui import QPixmap
 from PyQt6.QtWidgets import QFrame, QHBoxLayout, QLabel, QVBoxLayout, QWidget
 
@@ -22,8 +23,6 @@ from foodwarden_camera.ui.styles import (
     COLOR_ON_DARK,
     COLOR_ON_TAKE,
     COLOR_TAKE_SOLID,
-    COLOR_WAIT_BG,
-    COLOR_WAIT_FG,
     FS_BODY,
     FS_HERO,
     FS_LABEL,
@@ -31,7 +30,12 @@ from foodwarden_camera.ui.styles import (
     card_style,
     pill_style,
 )
-from foodwarden_camera.ui.widgets import FitLabel, create_key_guide
+from foodwarden_camera.ui.widgets import (
+    CONFIRM_TIMEOUT_S,
+    FitLabel,
+    countdown_style,
+    create_key_guide,
+)
 
 ConfirmKind = Literal["checkin", "checkout"]
 
@@ -46,11 +50,16 @@ class ConfirmScreen(QWidget):
         on_confirm: Callable[[], None],
         on_back: Callable[[], None],
         parent: QWidget | None = None,
+        on_timeout: Callable[[], None] | None = None,
     ) -> None:
         super().__init__(parent)
         self._on_confirm = on_confirm
         self._on_back = on_back
+        self._on_timeout = on_timeout or on_back
         self.kind: ConfirmKind = "checkin"
+        self._countdown_seconds = CONFIRM_TIMEOUT_S
+        self._countdown_timer = QTimer(self)
+        self._countdown_timer.timeout.connect(self._tick_countdown)
         self._init_ui()
 
     def _init_ui(self) -> None:
@@ -63,15 +72,11 @@ class ConfirmScreen(QWidget):
         self.title_label.setStyleSheet(
             f"font-size: {FS_TITLE}px; font-weight: bold; color: {COLOR_INK};"
         )
-        hint = QLabel("ยังไม่ได้บันทึก", self)
-        hint.setStyleSheet(
-            pill_style(
-                COLOR_WAIT_BG, COLOR_WAIT_FG, font_px=FS_LABEL + 1, pad_v=8, pad_h=16, radius=16
-            )
-        )
+        self.countdown_label = QLabel("", self)
+        self.countdown_label.setStyleSheet(countdown_style())
         header.addWidget(self.title_label)
         header.addStretch()
-        header.addWidget(hint)
+        header.addWidget(self.countdown_label)
         root.addLayout(header)
 
         card = QFrame(self)
@@ -174,10 +179,32 @@ class ConfirmScreen(QWidget):
             self.image_label.clear()
             self.image_label.setText("ไม่มีภาพ")
 
+        self._countdown_seconds = CONFIRM_TIMEOUT_S
+        self._update_countdown_label()
+        self._countdown_timer.start(1000)
+
+    def _update_countdown_label(self) -> None:
+        verb = "บันทึก" if self.kind == "checkin" else "ยกเลิก"
+        self.countdown_label.setText(f"{verb}อัตโนมัติใน {self._countdown_seconds} วิ")
+
+    def _tick_countdown(self) -> None:
+        self._countdown_seconds -= 1
+        if self._countdown_seconds <= 0:
+            self._countdown_timer.stop()
+            self._on_timeout()
+        else:
+            self._update_countdown_label()
+
+    def stop_countdown(self) -> None:
+        """Stops the countdown (used when the screen is left by other means)."""
+        self._countdown_timer.stop()
+
     def handle_select(self) -> None:
         """O: save the item."""
+        self._countdown_timer.stop()
         self._on_confirm()
 
     def handle_cancel(self) -> None:
         """X: go back to the edit screen without saving."""
+        self._countdown_timer.stop()
         self._on_back()
