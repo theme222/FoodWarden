@@ -220,3 +220,19 @@ test("REST and WebSocket parsers decode Worker API payloads cleanly", () => {
   );
   expect(mergedDoors.map((d) => d.timestampS)).toEqual([120, 100]);
 });
+
+test("mergeTelemetrySamples uses first-write-wins deduplication matching backend storage", () => {
+  const merged = mergeTelemetrySamples(
+    [{ nodeId: "F0", timeS: 1000, temperature: 3.1, voc: 90, light: 10 }],
+    [
+      { nodeId: "F0", timeS: 1000, temperature: 18.0, voc: 350, light: 90 },
+      { nodeId: "F0", timeS: 1010, temperature: 4.0, voc: 100, light: 15 },
+      { nodeId: "F0", timeS: 1010, temperature: 22.0, voc: 400, light: 99 },
+    ],
+    1020,
+  );
+  expect(merged).toEqual([
+    { nodeId: "F0", timeS: 1000, temperature: 3.1, voc: 90, light: 10 },
+    { nodeId: "F0", timeS: 1010, temperature: 4.0, voc: 100, light: 15 },
+  ]);
+});

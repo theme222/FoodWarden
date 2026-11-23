@@ -297,12 +297,14 @@ export function mergeTelemetrySamples(
   const deduped = new Map<string, Sample>();
   for (const sample of existing) {
     if (sample.timeS >= minTimeS) {
-      deduped.set(`${sample.nodeId}\0${sample.timeS}`, sample);
+      const key = `${sample.nodeId}\0${sample.timeS}`;
+      if (!deduped.has(key)) deduped.set(key, sample);
     }
   }
   for (const sample of incoming) {
     if (sample.timeS >= minTimeS) {
-      deduped.set(`${sample.nodeId}\0${sample.timeS}`, sample);
+      const key = `${sample.nodeId}\0${sample.timeS}`;
+      if (!deduped.has(key)) deduped.set(key, sample);
     }
   }
   return [...deduped.values()]

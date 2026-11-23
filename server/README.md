@@ -118,7 +118,7 @@ bunx wrangler deploy
 
 ## 4. Diagrams
 
-Hardware/system reference diagrams remain in [`diagram/`](diagram/Fridge.drawio) and [`diagrams/`](diagrams/fridge.mmd). See [`ARCHITECTURE.md`](ARCHITECTURE.md) for the live Cloudflare Worker topology.
+Start with the [diagram guide](diagrams/README.md) and [detailed system view](diagrams/system-detailed.svg). The guide links all 15 hardware, workflow, server, data and safety views and distinguishes implemented server behavior from embedded designs. Legacy hardware references remain in [diagram/](diagram/Fridge.drawio). See [ARCHITECTURE.md](ARCHITECTURE.md) for the Cloudflare Worker topology.
 
 ### Work with a private D1 snapshot
 

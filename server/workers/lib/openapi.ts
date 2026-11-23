@@ -748,7 +748,7 @@ route("/api/telemetry", post, "Upload a telemetry batch", "Gateway", {
     }),
   ),
   description:
-    "Deduplicates by node_id and timestamp_s. Sensor failures use null readings.",
+    "First-write-wins deduplication by (node_id, timestamp_s); duplicate or conflicting retries are ignored and do not broadcast or alert. Sensor failures use null readings. Optional ?bypass_cooldown=1 works only in development with an authenticated fridge owner session.",
   responses: {
     "200": response(
       "Ingest result",
@@ -804,7 +804,7 @@ route("/api/door_events", post, "Upload door safety events", "Gateway", {
     }),
   ),
   description:
-    "Deduplicates node_id, timestamp_s and status; may dispatch LINE alerts.",
+    "First-write-wins deduplication by (node_id, timestamp_s, status); duplicate retries are ignored. May dispatch LINE alerts; optional ?bypass_cooldown=1 works only in development with an authenticated fridge owner session.",
   responses: {
     "200": response(
       "Ingest result",

@@ -449,6 +449,7 @@ test("GatewaySimulator flag toggles panel and posts telemetry, door events, and 
     url: string;
     method: string;
     auth: string | null;
+    credentials: RequestCredentials | undefined;
     body: unknown;
   }> = [];
 
@@ -460,6 +461,7 @@ test("GatewaySimulator flag toggles panel and posts telemetry, door events, and 
       url,
       method: init?.method ?? "GET",
       auth: headers.get("Authorization"),
+      credentials: init?.credentials,
       body: bodyText ? JSON.parse(bodyText) : null,
     });
     return new Response(JSON.stringify({ ok: true, accepted: 1 }), {
@@ -484,28 +486,45 @@ test("GatewaySimulator flag toggles panel and posts telemetry, door events, and 
   expect(localStorage.getItem("foodwarden_gateway_sim")).toBe("1");
 
   await user.click(screen.getByRole("button", { name: "Send Telemetry" }));
-  await screen.findByText(/200 POST \/api\/telemetry\?bypass_cooldown=1/);
+  await screen.findByText(/200 POST \/api\/telemetry(?!\?)/);
 
   await user.click(screen.getByRole("button", { name: "Send Door Event" }));
-  await screen.findByText(/200 POST \/api\/door_events\?bypass_cooldown=1/);
+  await screen.findByText(/200 POST \/api\/door_events(?!\?)/);
+
+  const bypassCheckboxes = screen.getAllByRole("checkbox", {
+    name: /Bypass LINE alert cooldown/i,
+  });
+  expect(bypassCheckboxes.length).toBe(2);
+  await user.click(bypassCheckboxes[0]!);
+  await user.click(screen.getByRole("button", { name: "Send Telemetry" }));
+  await screen.findByText(/200 POST \/api\/telemetry\?bypass_cooldown=1/);
 
   await user.click(screen.getByRole("button", { name: "Send Device Status" }));
   await screen.findByText(/200 POST \/api\/status/);
 
-  expect(calls.length).toBe(3);
+  expect(calls.length).toBe(4);
   expect(calls[0]).toMatchObject({
+    url: "/api/telemetry",
+    method: "POST",
+    auth: "Bearer tok_secret_sim",
+    credentials: "same-origin",
+  });
+  expect(calls[1]).toMatchObject({
+    url: "/api/door_events",
+    method: "POST",
+    auth: "Bearer tok_secret_sim",
+    credentials: "same-origin",
+  });
+  expect(calls[2]).toMatchObject({
     url: "/api/telemetry?bypass_cooldown=1",
     method: "POST",
     auth: "Bearer tok_secret_sim",
+    credentials: "same-origin",
   });
-  expect(calls[1]).toMatchObject({
-    url: "/api/door_events?bypass_cooldown=1",
-    method: "POST",
-    auth: "Bearer tok_secret_sim",
-  });
-  expect(calls[2]).toMatchObject({
+  expect(calls[3]).toMatchObject({
     url: "/api/status",
     method: "POST",
     auth: "Bearer tok_secret_sim",
+    credentials: "same-origin",
   });
 });

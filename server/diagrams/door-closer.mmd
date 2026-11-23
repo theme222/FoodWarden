@@ -2,7 +2,7 @@ flowchart TB
     accTitle: Door closer hardware
     accDescr: Power, motor drive and safety inputs from Fridge.drawio. This is a block diagram.
     %% PlatformIO C++ / FreeRTOS with MQTTS. The controller mounts on top of the fridge.
-    %% Four fail-safes: limit switch ISR, INA219 stall cutoff, 8 s timeout and MQTTS abort.
+    %% Four fail-safes: limit switch ISR, INA219 stall cutoff, bounded motion timeout (CBD default 30 s) and MQTTS abort.
     %% IR sensor at door seam stops forward drive when closed. Limit switch stops reverse drive at home.
     %% INA219 samples at 100 Hz. The controller retracts at ≥ 1200 mA.
     %% Driver supports PWM soft start and direction (PWMA 26, AIN1 27, AIN2 25).

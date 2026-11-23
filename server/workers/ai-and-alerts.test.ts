@@ -918,17 +918,25 @@ describe("Gemini AI check-in/out, LINE alerts, and daily Cron", () => {
     expect(pushedPayloads.length).toBe(3);
   });
 
-  it("bypasses LINE alert cooldowns when bypass_cooldown=1 is passed", async () => {
-    const { DB } = getTestEnv();
+  it("bypasses LINE alert cooldowns in development only for authenticated fridge owners", async () => {
+    const testEnv = getTestEnv();
+    const { DB } = testEnv;
     const fridgeId = `bypass-${crypto.randomUUID()}`;
     const token = `tok-${crypto.randomUUID()}`;
+    const ownerEmail = `owner-${crypto.randomUUID()}@example.com`;
     const t0 = Math.floor(Date.now() / 1000);
 
     await seedFridge(DB, {
       fridgeId,
       token,
+      ownerEmail,
       lineTargetId: "C_bypass_group_01",
     });
+    const ownerSession = await createSignedSessionForEmail(
+      testEnv,
+      "http://localhost/",
+      { email: ownerEmail },
+    );
 
     const pushedPayloads: string[] = [];
     mockLinePush((req) => {
@@ -936,13 +944,14 @@ describe("Gemini AI check-in/out, LINE alerts, and daily Cron", () => {
       return new Response("{}", { status: 200 });
     }, 4);
 
-    const postDoor = (url: string, ts: number) =>
+    const postDoor = (url: string, ts: number, cookie?: string) =>
       exports.default.fetch(url, {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
           Authorization: `Bearer ${token}`,
           "Idempotency-Key": crypto.randomUUID(),
+          ...(cookie ? { Cookie: cookie } : {}),
         },
         body: JSON.stringify({
           events: [
@@ -963,20 +972,29 @@ describe("Gemini AI check-in/out, LINE alerts, and daily Cron", () => {
     expect(door2.status).toBe(200);
     expect(pushedPayloads.length).toBe(1);
 
+    const unauthDoorBypass = await postDoor(
+      "http://localhost/api/door_events?bypass_cooldown=1",
+      t0 + 15,
+    );
+    expect(unauthDoorBypass.status).toBe(403);
+    expect(pushedPayloads.length).toBe(1);
+
     const door3 = await postDoor(
       "http://localhost/api/door_events?bypass_cooldown=1",
       t0 + 20,
+      ownerSession.cookieHeader.split(";")[0] ?? ownerSession.cookieHeader,
     );
     expect(door3.status).toBe(200);
     expect(pushedPayloads.length).toBe(2);
 
-    const postTemp = (url: string, ts: number) =>
+    const postTemp = (url: string, ts: number, cookie?: string) =>
       exports.default.fetch(url, {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
           Authorization: `Bearer ${token}`,
           "Idempotency-Key": crypto.randomUUID(),
+          ...(cookie ? { Cookie: cookie } : {}),
         },
         body: JSON.stringify({
           samples: [
@@ -1002,6 +1020,7 @@ describe("Gemini AI check-in/out, LINE alerts, and daily Cron", () => {
     const tel3 = await postTemp(
       "http://localhost/api/telemetry?bypass_cooldown=1",
       t0 + 120,
+      ownerSession.cookieHeader.split(";")[0] ?? ownerSession.cookieHeader,
     );
     expect(tel3.status).toBe(200);
     expect(pushedPayloads.length).toBe(4);

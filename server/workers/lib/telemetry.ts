@@ -62,24 +62,26 @@ export function parseTelemetry(
   return samples;
 }
 
+export interface TelemetryIngestResult {
+  ingestedCount: number;
+  acceptedSamples: TelemetrySample[];
+}
+
 export async function ingestTelemetry(
   db: D1Database,
   fridgeId: string,
   samples: TelemetrySample[],
   nowS: number,
-): Promise<number> {
+): Promise<TelemetryIngestResult> {
   if (samples.some((sample) => !eventTimeIsValid(sample.timestamp_s, nowS)))
     throw new Error("INVALID_EVENT_TIME");
-  // Deduplicate within the incoming payload by (node_id, timestamp_s), keeping the first seen reading.
+  // Conflicting retry policy: first-write-wins per (fridge_id, node_id, timestamp_s).
+  // Deduplicate within the incoming payload keeping the first reading, and match D1 INSERT OR IGNORE.
   const unique = new Map<string, TelemetrySample>();
-  let newestSample: TelemetrySample | undefined;
   for (const sample of samples) {
     const key = `${sample.node_id}\u0000${sample.timestamp_s}`;
     if (!unique.has(key)) {
       unique.set(key, sample);
-    }
-    if (!newestSample || sample.timestamp_s > newestSample.timestamp_s) {
-      newestSample = sample;
     }
   }
 
@@ -90,7 +92,8 @@ export async function ingestTelemetry(
      VALUES (?, ?, ?, ?, ?, ?)`,
   );
 
-  let ingestedCount = 0;
+  const acceptedSamples: TelemetrySample[] = [];
+  let newestAccepted: TelemetrySample | undefined;
   for (let offset = 0; offset < deduped.length; offset += D1_BATCH_CHUNK_SIZE) {
     const chunk = deduped.slice(offset, offset + D1_BATCH_CHUNK_SIZE);
     const statements = chunk.map((sample) =>
@@ -104,13 +107,22 @@ export async function ingestTelemetry(
       ),
     );
     const results = await db.batch(statements);
-    for (const result of results) {
-      ingestedCount += result.meta.changes ?? 0;
+    for (let i = 0; i < chunk.length; i += 1) {
+      if ((results[i]?.meta.changes ?? 0) > 0) {
+        const accepted = chunk[i]!;
+        acceptedSamples.push(accepted);
+        if (
+          !newestAccepted ||
+          accepted.timestamp_s > newestAccepted.timestamp_s
+        ) {
+          newestAccepted = accepted;
+        }
+      }
     }
   }
 
-  if (newestSample) {
-    const newestJson = JSON.stringify(newestSample);
+  if (newestAccepted) {
+    const newestJson = JSON.stringify(newestAccepted);
     await db
       .prepare(
         `UPDATE fridges
@@ -126,13 +138,23 @@ export async function ingestTelemetry(
       )
       .bind(
         nowS,
-        newestSample.timestamp_s,
+        newestAccepted.timestamp_s,
         nowS + MAX_FUTURE_SKEW_S,
         newestJson,
         fridgeId,
       )
       .run();
+  } else if (samples.length > 0) {
+    await db
+      .prepare(
+        "UPDATE fridges SET last_seen_s = MAX(last_seen_s, ?) WHERE id = ?",
+      )
+      .bind(nowS, fridgeId)
+      .run();
   }
 
-  return ingestedCount;
+  return {
+    ingestedCount: acceptedSamples.length,
+    acceptedSamples,
+  };
 }

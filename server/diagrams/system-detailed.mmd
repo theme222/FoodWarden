@@ -1,0 +1,35 @@
+flowchart TB
+    accTitle: FoodWarden detailed system and implementation boundaries
+    accDescr: Embedded nodes are designs in this branch; the Cloudflare server is implemented. Local safety does not depend on cloud access.
+    subgraph embedded["Embedded design - entry points are scaffolds on feat/server"]
+        sensors["F0 - KidBright32<br/>LM73 temperature, SGP40 VOC, LDR<br/>Battery BMS and sealed enclosure"]
+        sensor_tasks["FreeRTOS sampling and BLE tasks<br/>AES-128-GCM and RTC sync<br/>Deep sleep between cycles"]
+        camera["C0 - Pi-top 4, Python<br/>USB camera and PIR<br/>YOLO11n crops and human detection"]
+        lcd["5-inch LCD and buttons<br/>Thai and English prompts<br/>FEFO confirmation"]
+        queue[("Gateway durable offline queue<br/>Store and forward with backoff")]
+        broker["Local Mosquitto<br/>MQTT TLS on port 8883"]
+        door["D0 - KidBright32 FreeRTOS<br/>TB6612FNG and 12 V motor<br/>INA219, IR and home limit ISR"]
+        sensors --> sensor_tasks
+        sensor_tasks <-->|"BLE telemetry and clock"| camera
+        camera <--> lcd
+        camera <--> queue
+        camera <--> broker
+        broker <-->|"QoS 1 commands and safety events"| door
+    end
+    subgraph implemented["Implemented server - Cloudflare"]
+        worker["S - Hono Worker<br/>Session or gateway authorization<br/>Validation and tenant isolation"]
+        db[("D1<br/>Memberships, inventory, events<br/>Receipts, quotas and outboxes")]
+        photos[("Private R2<br/>JPEG crops and garbage collection")]
+        room["FridgeRoom Durable Object<br/>Per-fridge WebSocket broadcasts"]
+        spa["React dashboard and SWR<br/>Per-user memory cache<br/>Inventory, charts, devices and settings"]
+        cron["Cron<br/>Daily family digest and photo cleanup<br/>Minute outbox and personal digest jobs"]
+        worker <--> db
+        worker <--> photos
+        worker --> room
+        spa <-->|"Cookie REST and private photos"| worker
+        room -->|"WSS events"| spa
+        cron --> worker
+    end
+    queue -->|"HTTPS Bearer and idempotent retries"| worker
+    worker <-->|"Structured image inference"| gemini["G - Gemini API"]
+    worker <-->|"Signed webhook and push delivery"| line["L - LINE Messaging API"]
