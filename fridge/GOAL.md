@@ -41,5 +41,5 @@
 
 ## 4. Tests & Quantitative Metrics
 - [ ] **Binary Layout & Encryption Verification:** Confirm packed `SensorPacketEnvelope` size matches [`FUC.md`](../interface/FUC.md) (`32 + (N × 14)` bytes, or 116 bytes for N=6) and decrypts cleanly with AAD validation on Gateway `'C'`. *(Struct sizes are `static_assert`ed; decrypt tool in `tools/decrypt_packet.py`; Gateway-side check pending.)*
-- [ ] **Power Consumption Profile (E3):** Measure active vs. deep-sleep current draw (`mA` / `µA`) and document estimated 18650 battery runtime inside the `4°C` fridge compartment. *(Estimate and procedure in [`POWER.md`](POWER.md); measurements pending.)*
+- [ ] **Power Consumption Profile (E3):** Measure active vs. deep-sleep current draw (`mA` / `µA`) and document estimated 18650 battery runtime inside the `4°C` fridge compartment. *(Currents measured with a multimeter on 2026-11-23: sleep 3 to 5 mA, sample wake 40 to 50 mA, BLE 60 mA with one 160 mA peak; about 24 days estimated runtime. Phase durations still to measure. See [`POWER.md`](POWER.md).)*
 - [ ] **Sensor Accuracy Calibration:** Log SHT31 temperature and SGP40 VOC readings against a reference thermometer inside the refrigerator.

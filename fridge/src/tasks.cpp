@@ -139,10 +139,14 @@ static void vDisplayTask(void *) {
 // Node F never uses Wi-Fi, so the Wi-Fi LED must stay dark. The pad is latched
 // at the "off" level before deep sleep (RTC hold) so it does not float and
 // glow while asleep; the hold is released on wake and re-applied before sleep.
+// The off level and output direction are set while the hold still latches the
+// pad, so releasing the hold goes straight to "off". Releasing first would let
+// the reset defaults (output 0, GPIO2 pull-down) light the LED for an instant
+// on every wake.
 static void wifiLedOff() {
+  gpio_set_level((gpio_num_t)PIN_LED_WIFI, FRIDGE_LED_OFF_LEVEL);
+  gpio_set_direction((gpio_num_t)PIN_LED_WIFI, GPIO_MODE_OUTPUT);
   gpio_hold_dis((gpio_num_t)PIN_LED_WIFI);
-  pinMode(PIN_LED_WIFI, OUTPUT);
-  digitalWrite(PIN_LED_WIFI, FRIDGE_LED_OFF_LEVEL);
 }
 
 static void wifiLedHoldOffInSleep() {
