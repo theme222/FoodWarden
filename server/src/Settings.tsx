@@ -23,7 +23,6 @@ import { useLineStatus } from "./line-data";
 import { readFridgeSettings } from "./model";
 import type { FridgeSettings, Language, MemberRole } from "./model";
 import { computeSetupProgress } from "./state/dashboard-machine";
-import { useUiVersion } from "./components/ui-version-context";
 import { words } from "./words";
 
 function useSettings({
@@ -232,7 +231,7 @@ function useSettings({
       });
       if (!res.ok) throw new Error("Delete fridge failed");
       onFridgesChanged();
-      navigate("/fridges", { replace: true });
+      void navigate("/fridges", { replace: true });
     } catch {
       setError(t.actionFailed);
       toast.error(t.actionFailed);
@@ -773,7 +772,6 @@ export function Settings(props: {
 }) {
   const controller = useSettings(props);
   const { t, settings, loading, loadSettings, notice, error } = controller;
-  const { version: uiVersion } = useUiVersion();
   const th = props.language === "th";
 
   if (loading) return <output className="sub">{t.loading}</output>;
@@ -810,9 +808,7 @@ export function Settings(props: {
       {notice && <output className="pill accent">{notice}</output>}
       {error && <StatusAlert>{error}</StatusAlert>}
       <GeneralSettings view={view} />
-      {uiVersion === "v2" && !view.hasDevices && (
-        <FamilySetupGuide view={view} />
-      )}
+      {!view.hasDevices && <FamilySetupGuide view={view} />}
       <MemberSettings view={view} />
       <LineConnection
         language={props.language}

@@ -314,7 +314,7 @@ export function deriveTelemetryAlerts(
   if (latest.temperature !== null && latest.temperature > TEMP_DANGER_C) {
     alerts.push("warm");
   }
-  if (latest.voc !== null && latest.voc > VOC_DANGER) {
+  if (latest.voc !== null && latest.voc >= VOC_DANGER) {
     alerts.push("spoil");
   }
   return alerts;
@@ -342,7 +342,7 @@ export function deriveKpiSummary(
   const latestDoor = doorEvents[0] ?? null;
 
   const tempAlert = temp !== null && temp > TEMP_DANGER_C;
-  const vocAlert = voc !== null && voc > VOC_DANGER;
+  const vocAlert = voc !== null && voc >= VOC_DANGER;
   const lightOpen = light !== null && light > LIGHT_OPEN_LDR;
   const doorProblem =
     latestDoor !== null &&

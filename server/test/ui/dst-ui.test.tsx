@@ -133,13 +133,27 @@ test("DST UI: Charts recovers from fetch error via Retry button and supports met
   await waitFor(() =>
     expect(screen.getByRole("checkbox", { name: "Temperature" })).toBeTruthy(),
   );
-  await user.click(screen.getByRole("checkbox", { name: "Temperature" }));
-  expect(screen.getByText("Select metrics to show on the chart.")).toBeTruthy();
-  await user.click(screen.getByRole("checkbox", { name: "Light" }));
-  expect(
-    (screen.getByRole("checkbox", { name: "Light" }) as HTMLInputElement)
-      .checked,
-  ).toBe(true);
+  const tempCheckbox = () =>
+    screen.getByRole("checkbox", { name: "Temperature" }) as HTMLInputElement;
+  const lightCheckbox = () =>
+    screen.getByRole("checkbox", { name: "Light" }) as HTMLInputElement;
+
+  expect(tempCheckbox().checked).toBe(true);
+  expect(tempCheckbox().disabled).toBe(true);
+  await user.click(tempCheckbox());
+  expect(tempCheckbox().checked).toBe(true);
+
+  await user.click(lightCheckbox());
+  expect(lightCheckbox().checked).toBe(true);
+  expect(tempCheckbox().disabled).toBe(false);
+
+  await user.click(tempCheckbox());
+  expect(tempCheckbox().checked).toBe(false);
+  expect(lightCheckbox().checked).toBe(true);
+  expect(lightCheckbox().disabled).toBe(true);
+
+  await user.click(lightCheckbox());
+  expect(lightCheckbox().checked).toBe(true);
 });
 
 test("DST UI: Devices renders schematic, auto-expands degraded node, and offers troubleshooting", () => {

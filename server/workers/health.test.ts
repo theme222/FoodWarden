@@ -60,15 +60,6 @@ describe("worker scaffold and D1 schema", () => {
     expect(await response.json()).toEqual({ ok: true, database: "ok" });
   });
 
-  it("returns default UI version flag from GET /api/ui/config", async () => {
-    const response = await exports.default.fetch("http://localhost/api/ui/config");
-    expect(response.status).toBe(200);
-    expect(await response.json()).toEqual({
-      defaultVersion: "v2",
-      locked: false,
-    });
-  });
-
   it("returns JSON 404 envelope for unknown /api/* routes", async () => {
     const response = await exports.default.fetch(
       "http://localhost/api/does-not-exist",

@@ -1,5 +1,4 @@
 import type { Language } from "@/model";
-import { useUiVersion } from "@/components/ui-version-context";
 import type { ColorTheme } from "@/state/dashboard-machine";
 import { COLOR_THEMES, THEME_META } from "@/theme";
 
@@ -15,7 +14,6 @@ export function ThemeLanguagePicker({
   onColorThemeChange?: (next: ColorTheme) => void;
 }) {
   const th = language === "th";
-  const { version, locked, setVersion } = useUiVersion();
   if (!onLanguageChange && !onColorThemeChange) return null;
 
   return (
@@ -36,7 +34,7 @@ export function ThemeLanguagePicker({
             </select>
           </label>
         )}
-        {onColorThemeChange && version === "v2" && (
+        {onColorThemeChange && (
           <label>
             <span>{th ? "โทนสี" : "Color palette"}</span>
             <select
@@ -56,17 +54,6 @@ export function ThemeLanguagePicker({
             </select>
           </label>
         )}
-        <label>
-          <span>{th ? "รูปแบบหน้าจอ" : "Layout"}</span>
-          <select
-            value={version}
-            disabled={locked}
-            onChange={(e) => setVersion(e.target.value === "v1" ? "v1" : "v2")}
-          >
-            <option value="v2">{th ? "ปัจจุบัน" : "Current"}</option>
-            <option value="v1">{th ? "แบบเดิม" : "Classic"}</option>
-          </select>
-        </label>
       </div>
     </section>
   );

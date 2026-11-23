@@ -273,14 +273,6 @@ app.get("/api/auth/config", (c) => {
   });
 });
 
-app.get("/api/ui/config", (c) => {
-  c.header("Cache-Control", "private, no-store");
-  const raw = c.env.UI_VERSION?.trim().toLowerCase();
-  const defaultVersion = raw === "v1" ? "v1" : "v2";
-  const locked = c.env.UI_VERSION_LOCK?.trim().toLowerCase() === "true";
-  return c.json({ defaultVersion, locked });
-});
-
 app.post("/api/auth/dev-login", async (c) => {
   c.header("Cache-Control", "private, no-store");
   if (!isDevBypassEnabled(c.env)) {

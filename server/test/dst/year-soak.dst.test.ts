@@ -1,6 +1,5 @@
 import { expect, test } from "bun:test";
 import { summarizeInventory } from "../../src/state/dashboard-machine";
-import { resolveUiVersion } from "../../src/ui-version";
 import { eventTimeIsValid } from "../../workers/lib/event-time";
 import { simAddDaysIso, simBangkokIsoDate } from "./fullstack-sim";
 import { SeededRng } from "./prng";
@@ -19,7 +18,6 @@ function runYearSoak(startIsoUtc: string, seed: number) {
     hasPhoto: boolean;
   }> = [];
   let telemetryCount = 0;
-  let storedUi: string | null = null;
 
   for (let day = 0; day < 365; day++) {
     const todayBkk = simBangkokIsoDate(nowS);
@@ -49,15 +47,6 @@ function runYearSoak(startIsoUtc: string, seed: number) {
       telemetryCount++;
     }
 
-    const resolved = resolveUiVersion({
-      search: day === 30 ? "?ui=v1" : day === 45 ? "?ui=reset" : "",
-      stored: storedUi,
-      serverConfig: { defaultVersion: "v2", locked: false },
-      buildDefault: "v2",
-    });
-    if (resolved.nextStorage === null) storedUi = null;
-    else if (resolved.nextStorage !== "unchanged") storedUi = resolved.nextStorage;
-
     const summary = summarizeInventory(foods, nowS);
     expect(
       summary.expired + summary.soon + summary.fresh + summary.unknown,
@@ -67,13 +56,12 @@ function runYearSoak(startIsoUtc: string, seed: number) {
     nowS += 86_400;
   }
 
-  return { remainingFoods: foods.length, telemetryCount, finalUi: storedUi };
+  return { remainingFoods: foods.length, telemetryCount };
 }
 
 test("DST Soak: 365-day simulated execution across standard year preserves all invariants", () => {
   const result = runYearSoak("2026-11-22T00:00:00Z", 2026);
   expect(result.telemetryCount).toBe(365 * 12);
-  expect(result.finalUi).toBeNull();
 });
 
 test("DST Soak: 365-day simulation spanning 2028 leap day handles all Bangkok dates cleanly", () => {

@@ -84,6 +84,16 @@ function parsePage(value: unknown, kind: Kind) {
   return { rows, next };
 }
 
+const INVENTORY_ACTIONS = {
+  th: { created: "เพิ่ม", updated: "แก้ไข", deleted: "นำออก" },
+  en: { created: "Added", updated: "Edited", deleted: "Removed" },
+} as const;
+
+const INVENTORY_SOURCES = {
+  th: { CAMERA: "กล้อง", WEB_MANUAL: "เว็บ" },
+  en: { CAMERA: "Camera", WEB_MANUAL: "Web" },
+} as const;
+
 function ActivityDetail({
   row,
   language,
@@ -91,13 +101,13 @@ function ActivityDetail({
   row: ActivityRow;
   language: Language;
 }) {
-  const th = language === "th";
-  if (row.kind === "door")
+  if (row.kind === "door") {
     return (
       <>
         {words[language][`door_${row.event.status}`]} · {row.event.nodeId}
       </>
     );
+  }
   if (row.kind === "sensor") {
     const { nodeId, temperature, voc, light } = row.sample;
     return (
@@ -108,25 +118,105 @@ function ActivityDetail({
       </>
     );
   }
-  const action = th
-    ? { created: "เพิ่ม", updated: "แก้ไข", deleted: "นำออก" }
-    : { created: "Added", updated: "Edited", deleted: "Removed" };
-  const name = th ? row.nameTh || row.nameEn : row.nameEn || row.nameTh;
-  const source =
-    row.source === "CAMERA"
-      ? th
-        ? "กล้อง"
-        : "Camera"
-      : row.source === "WEB_MANUAL"
-        ? th
-          ? "เว็บ"
-          : "Web"
-        : null;
+  const name =
+    language === "th"
+      ? row.nameTh || row.nameEn
+      : row.nameEn || row.nameTh;
+  const source = row.source ? INVENTORY_SOURCES[language][row.source] : null;
   return (
     <>
-      {action[row.action]} <strong>{name}</strong>
+      {INVENTORY_ACTIONS[language][row.action]} <strong>{name}</strong>
       {source && <span className="small"> · {source}</span>}
     </>
+  );
+}
+
+function ActivityPagination({
+  language,
+  pageNumber,
+  hasPrev,
+  hasNext,
+  onPrev,
+  onNext,
+}: {
+  language: Language;
+  pageNumber: number;
+  hasPrev: boolean;
+  hasNext: boolean;
+  onPrev: () => void;
+  onNext: () => void;
+}) {
+  const th = language === "th";
+  if (!hasPrev && !hasNext) return null;
+  return (
+    <div className="history-pagination">
+      <button
+        type="button"
+        className="btn sm"
+        disabled={!hasPrev}
+        onClick={onPrev}
+      >
+        {th ? "ใหม่กว่า" : "Newer"}
+      </button>
+      <output>
+        {th ? "หน้า" : "Page"} {pageNumber}
+      </output>
+      <button
+        type="button"
+        className="btn sm"
+        disabled={!hasNext}
+        onClick={onNext}
+      >
+        {th ? "เก่ากว่า" : "Older"}
+      </button>
+    </div>
+  );
+}
+
+function ActivityTable({
+  rows,
+  kind,
+  language,
+}: {
+  rows: ActivityRow[];
+  kind: Kind;
+  language: Language;
+}) {
+  const th = language === "th";
+  if (rows.length === 0) {
+    return (
+      <p className="empty-state">
+        {th ? "ไม่มีรายการในช่วงนี้" : "No activity for this selection."}
+      </p>
+    );
+  }
+  const Icon = icons[kind];
+  return (
+    <table className="history-table activity-table">
+      <thead>
+        <tr>
+          <th scope="col">{th ? "เหตุการณ์" : "Activity"}</th>
+          <th scope="col">{th ? "เวลา (ไทย)" : "Time (Bangkok)"}</th>
+        </tr>
+      </thead>
+      <tbody>
+        {rows.map((row) => (
+          <tr key={row.id}>
+            <td>
+              <Icon aria-hidden="true" size={17} />
+              <span>
+                <ActivityDetail row={row} language={language} />
+              </span>
+            </td>
+            <td>
+              <time dateTime={new Date(row.time * 1000).toISOString()}>
+                {localTimestamp(row.time, language)}
+              </time>
+            </td>
+          </tr>
+        ))}
+      </tbody>
+    </table>
   );
 }
 
@@ -155,8 +245,7 @@ function ActivityResults({
     (url: string) => getJson(url, (value) => parsePage(value, kind)),
     swrOptions,
   );
-  const Icon = icons[kind];
-  const next = state.data?.next;
+  const next = state.data?.next ?? null;
 
   return (
     <>
@@ -176,63 +265,23 @@ function ActivityResults({
         </StatusAlert>
       )}
       {state.isLoading && <output>{th ? "กำลังโหลด…" : "Loading…"}</output>}
-      {(next || cursor) && (
-        <div className="history-pagination">
-          <button
-            type="button"
-            className="btn sm"
-            disabled={!cursor}
-            onClick={() => setCursors(cursors.slice(0, -1))}
-          >
-            {th ? "ใหม่กว่า" : "Newer"}
-          </button>
-          <output>
-            {th ? "หน้า" : "Page"} {cursors.length + 1}
-          </output>
-          <button
-            type="button"
-            className="btn sm"
-            disabled={!next}
-            onClick={() => {
-              if (next) setCursors([...cursors, next]);
-            }}
-          >
-            {th ? "เก่ากว่า" : "Older"}
-          </button>
-        </div>
+      <ActivityPagination
+        language={language}
+        pageNumber={cursors.length + 1}
+        hasPrev={Boolean(cursor)}
+        hasNext={Boolean(next)}
+        onPrev={() => setCursors(cursors.slice(0, -1))}
+        onNext={() => {
+          if (next) setCursors([...cursors, next]);
+        }}
+      />
+      {state.data && (
+        <ActivityTable
+          rows={state.data.rows}
+          kind={kind}
+          language={language}
+        />
       )}
-      {state.data &&
-        (state.data.rows.length ? (
-          <table className="history-table activity-table">
-            <thead>
-              <tr>
-                <th scope="col">{th ? "เหตุการณ์" : "Activity"}</th>
-                <th scope="col">{th ? "เวลา (ไทย)" : "Time (Bangkok)"}</th>
-              </tr>
-            </thead>
-            <tbody>
-              {state.data.rows.map((row) => (
-                <tr key={row.id}>
-                  <td>
-                    <Icon aria-hidden="true" size={17} />
-                    <span>
-                      <ActivityDetail row={row} language={language} />
-                    </span>
-                  </td>
-                  <td>
-                    <time dateTime={new Date(row.time * 1000).toISOString()}>
-                      {localTimestamp(row.time, language)}
-                    </time>
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        ) : (
-          <p className="empty-state">
-            {th ? "ไม่มีรายการในช่วงนี้" : "No activity for this selection."}
-          </p>
-        ))}
     </>
   );
 }

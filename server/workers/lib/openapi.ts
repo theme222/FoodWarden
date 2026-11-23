@@ -258,24 +258,6 @@ route(
   },
 );
 route(
-  "/api/ui/config",
-  get,
-  "Read default dashboard UI version and emergency lock flag",
-  "Authentication",
-  {
-    security: [],
-    responses: {
-      "200": response(
-        "UI version feature flag configuration",
-        object({
-          defaultVersion: { type: "string", enum: ["v1", "v2"] },
-          locked: { type: "boolean" },
-        }),
-      ),
-    },
-  },
-);
-route(
   "/api/auth/dev-login",
   post,
   "Create a local development session",

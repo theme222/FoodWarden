@@ -214,6 +214,11 @@ function FoodEditForm({
   );
 }
 
+function readFormString(form: FormData, key: string): string {
+  const value = form.get(key);
+  return typeof value === "string" ? value.trim() : "";
+}
+
 interface FoodDetailProps {
   itemId: string;
   items: Food[];
@@ -228,6 +233,155 @@ export function FoodDetail(props: FoodDetailProps) {
       key={JSON.stringify([props.fridgeId, props.itemId])}
       {...props}
     />
+  );
+}
+
+function restoreRemovedFood(
+  fridgeId: string,
+  food: Food,
+  removedLabel: string,
+  th: boolean,
+  onChanged: () => void,
+) {
+  void fetch(inventoryEndpoint(fridgeId), {
+    method: "POST",
+    credentials: "same-origin",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      item_id: crypto.randomUUID(),
+      name: food.nameEn || food.nameTh || removedLabel,
+      estimated_expiry_date: food.expiry,
+      category: Object.hasOwn(categories, food.category)
+        ? food.category
+        : "Other",
+      jpeg_base64: null,
+    }),
+  })
+    .then((r) => {
+      if (!r.ok) throw new Error("Undo failed");
+      onChanged();
+    })
+    .catch(() => {
+      toast.error(th ? "เลิกทำไม่สำเร็จ" : "Could not undo");
+    });
+}
+
+function FoodMissingNotice({
+  fridgeId,
+  language,
+}: {
+  fridgeId: string;
+  language: Language;
+}) {
+  const th = language === "th";
+  const t = words[language];
+  return (
+    <section className="food-detail panel">
+      <output className="sub">{t.itemMissing}</output>
+      <div>
+        <Link
+          className="primary"
+          to={"/fridges/" + encodeURIComponent(fridgeId)}
+        >
+          <ArrowLeft size={18} aria-hidden="true" />
+          {th ? "กลับไปหน้ารายการอาหาร" : "Back to food list"}
+        </Link>
+      </div>
+    </section>
+  );
+}
+
+function FoodDetailHeader({
+  fridgeId,
+  food,
+  language,
+  notice,
+  error,
+  onDismissError,
+}: {
+  fridgeId: string;
+  food: Food;
+  language: Language;
+  notice: string | null;
+  error: string | null;
+  onDismissError: () => void;
+}) {
+  const th = language === "th";
+  return (
+    <>
+      <div className="page-head">
+        <div className="page-head-copy">
+          <Link
+            className="btn sm"
+            to={"/fridges/" + encodeURIComponent(fridgeId)}
+          >
+            <ArrowLeft size={16} aria-hidden="true" />
+            {th ? "กลับ" : "Back"}
+          </Link>
+          <h1>{foodName(food, language)}</h1>
+        </div>
+        <span className="pill neutral">
+          {CAT_EMOJIS[food.category] ?? "📦"}{" "}
+          {categoryLabel(food.category, language) || "—"}
+        </span>
+      </div>
+
+      {notice && <output className="pill accent">{notice}</output>}
+      {error && (
+        <StatusAlert
+          action={
+            <button type="button" className="btn sm" onClick={onDismissError}>
+              {th ? "ปิด" : "Dismiss"}
+            </button>
+          }
+        >
+          {error}
+        </StatusAlert>
+      )}
+    </>
+  );
+}
+
+function FoodExpirySummary({
+  food,
+  groupSize,
+  now,
+  language,
+}: {
+  food: Food;
+  groupSize: number;
+  now: number;
+  language: Language;
+}) {
+  const th = language === "th";
+  const t = words[language];
+  const status = foodStatus(food, now);
+  const relText = relativeExpiryText(food, now, language);
+  const advice = th
+    ? food.adviceTh || food.adviceEn
+    : food.adviceEn || food.adviceTh;
+
+  return (
+    <>
+      <div className={`d-exp ${status}`}>
+        <div>
+          <strong>{relText}</strong>
+          <p className="small">
+            {t.expiry}: {expiryLabel(food.expiry, language)}
+          </p>
+        </div>
+        <span className={`pill ${status}`}>
+          {t.duplicates}: {groupSize - 1}
+        </span>
+      </div>
+
+      {advice && (
+        <div className="subblock">
+          <h3>{th ? "คำแนะนำการเก็บรักษา" : "Storage tip"}</h3>
+          <p>{advice}</p>
+        </div>
+      )}
+    </>
   );
 }
 
@@ -249,37 +403,26 @@ function FoodDetailEditor({
 
   const confirm = useConfirm();
   const group = foodGroups(items).find((entries) =>
-    entries.some((food) => food.id === itemId),
+    entries.some((entry) => entry.id === itemId),
   );
   const food = group?.find((entry) => entry.id === itemId);
 
   if (!group || !food) {
-    return (
-      <section className="food-detail panel">
-        <output className="sub">{t.itemMissing}</output>
-        <div>
-          <Link className="primary" to={"/fridges/" + encodeURIComponent(fridgeId)}>
-            <ArrowLeft size={18} aria-hidden="true" />
-            {th ? "กลับไปหน้ารายการอาหาร" : "Back to food list"}
-          </Link>
-        </div>
-      </section>
-    );
+    return <FoodMissingNotice fridgeId={fridgeId} language={language} />;
   }
 
-  const advice = th ? food.adviceTh || food.adviceEn : food.adviceEn || food.adviceTh;
-  const itemUrl = inventoryEndpoint(fridgeId) + "/" + encodeURIComponent(food.id);
-  const status = foodStatus(food, now);
-  const relText = relativeExpiryText(food, now, language);
+  const targetFood = food;
+  const itemUrl =
+    inventoryEndpoint(fridgeId) + "/" + encodeURIComponent(targetFood.id);
 
   async function saveEdit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    if (busy || !food) return;
+    if (busy) return;
     const form = new FormData(event.currentTarget);
-    const nameEn = String(form.get("name_en") ?? "").trim();
-    const nameTh = String(form.get("name_th") ?? "").trim();
-    const expiry = String(form.get("expiry") ?? "");
-    const category = String(form.get("category") ?? "Other");
+    const nameEn = readFormString(form, "name_en");
+    const nameTh = readFormString(form, "name_th");
+    const expiry = readFormString(form, "expiry");
+    const category = readFormString(form, "category") || "Other";
 
     setBusy(true);
     setError(null);
@@ -310,7 +453,7 @@ function FoodDetailEditor({
   }
 
   async function removeItem() {
-    if (busy || !food) return;
+    if (busy) return;
     if (!(await confirm(t.confirmDeleteFood, t.deleteFood, "take"))) return;
     setBusy(true);
     setError(null);
@@ -321,37 +464,24 @@ function FoodDetailEditor({
       });
       if (!res.ok) throw new Error("Delete failed");
       onChanged();
-      const removedLabel = foodName(food, language);
+      const removedLabel = foodName(targetFood, language);
       toast.success(t.deleteFood, {
         duration: 6000,
         action: {
           label: th ? "เลิกทำ" : "Undo",
-          onClick: () => {
-            void fetch(inventoryEndpoint(fridgeId), {
-              method: "POST",
-              credentials: "same-origin",
-              headers: { "Content-Type": "application/json" },
-              body: JSON.stringify({
-                item_id: crypto.randomUUID(),
-                name: food.nameEn || food.nameTh || removedLabel,
-                estimated_expiry_date: food.expiry,
-                category: Object.hasOwn(categories, food.category)
-                  ? food.category
-                  : "Other",
-                jpeg_base64: null,
-              }),
-            })
-              .then((r) => {
-                if (!r.ok) throw new Error("Undo failed");
-                onChanged();
-              })
-              .catch(() => {
-                toast.error(th ? "เลิกทำไม่สำเร็จ" : "Could not undo");
-              });
-          },
+          onClick: () =>
+            restoreRemovedFood(
+              fridgeId,
+              targetFood,
+              removedLabel,
+              th,
+              onChanged,
+            ),
         },
       });
-      navigate("/fridges/" + encodeURIComponent(fridgeId), { replace: true });
+      void navigate("/fridges/" + encodeURIComponent(fridgeId), {
+        replace: true,
+      });
     } catch {
       setError(t.actionFailed);
       toast.error(t.actionFailed);
@@ -362,64 +492,32 @@ function FoodDetailEditor({
 
   return (
     <section className="food-detail panel">
-      <div className="page-head">
-        <div className="page-head-copy">
-          <Link
-            className="btn sm"
-            to={"/fridges/" + encodeURIComponent(fridgeId)}
-          >
-            <ArrowLeft size={16} aria-hidden="true" />
-            {th ? "กลับ" : "Back"}
-          </Link>
-          <h1>{foodName(food, language)}</h1>
-        </div>
-        <span className="pill neutral">
-          {CAT_EMOJIS[food.category] ?? "📦"} {categoryLabel(food.category, language) || "—"}
-        </span>
-      </div>
-
-      {notice && <output className="pill accent">{notice}</output>}
-      {error && (
-        <StatusAlert
-          action={
-            <button type="button" className="btn sm" onClick={() => setError(null)}>
-              {th ? "ปิด" : "Dismiss"}
-            </button>
-          }
-        >
-          {error}
-        </StatusAlert>
-      )}
+      <FoodDetailHeader
+        fridgeId={fridgeId}
+        food={targetFood}
+        language={language}
+        notice={notice}
+        error={error}
+        onDismissError={() => setError(null)}
+      />
 
       <FoodPhoto
-        key={JSON.stringify([fridgeId, food.id, food.hasPhoto])}
+        key={JSON.stringify([fridgeId, targetFood.id, targetFood.hasPhoto])}
         fridgeId={fridgeId}
-        food={food}
+        food={targetFood}
         language={language}
       />
 
-      <div className={`d-exp ${status}`}>
-        <div>
-          <strong>{relText}</strong>
-          <p className="small">
-            {t.expiry}: {expiryLabel(food.expiry, language)}
-          </p>
-        </div>
-        <span className={`pill ${status}`}>
-          {t.duplicates}: {group.length - 1}
-        </span>
-      </div>
-
-      {advice && (
-        <div className="subblock">
-          <h3>{th ? "คำแนะนำการเก็บรักษา" : "Storage tip"}</h3>
-          <p>{advice}</p>
-        </div>
-      )}
+      <FoodExpirySummary
+        food={targetFood}
+        groupSize={group.length}
+        now={now}
+        language={language}
+      />
 
       <FoodMatchingCopies
         group={group}
-        currentFoodId={food.id}
+        currentFoodId={targetFood.id}
         fridgeId={fridgeId}
         language={language}
       />
@@ -450,7 +548,7 @@ function FoodDetailEditor({
 
       {editing && (
         <FoodEditForm
-          food={food}
+          food={targetFood}
           language={language}
           busy={busy}
           onSave={(event) => void saveEdit(event)}
@@ -635,7 +733,7 @@ export function AddFood({
       if (!response.ok) throw new Error("Save failed");
       onAdded();
       toast.success(t.saved);
-      navigate("/fridges/" + encodeURIComponent(fridgeId), {
+      void navigate("/fridges/" + encodeURIComponent(fridgeId), {
         replace: true,
         state: { added: true },
       });

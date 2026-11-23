@@ -1,5 +1,12 @@
 {
   "ignore": {
-    "files": [".reports/**", ".deepsec/**", "dist/**", "**/FoodWarden*.html"]
+    "files": [
+      ".reports/**",
+      ".deepsec/**",
+      ".local-docs/**",
+      "dist/**",
+      "workers/**",
+      "**/FoodWarden*.html"
+    ]
   }
 }

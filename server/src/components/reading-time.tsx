@@ -1,6 +1,11 @@
 import { localTimestamp } from "../model";
 import type { Language } from "../model";
 
+const RELATIVE_FORMATTERS: Record<Language, Intl.RelativeTimeFormat> = {
+  th: new Intl.RelativeTimeFormat("th", { numeric: "always" }),
+  en: new Intl.RelativeTimeFormat("en", { numeric: "always" }),
+};
+
 export function ReadingTime({
   timeS,
   now,
@@ -11,7 +16,7 @@ export function ReadingTime({
   language: Language;
 }) {
   const seconds = Math.max(0, now - timeS);
-  const format = new Intl.RelativeTimeFormat(language, { numeric: "always" });
+  const format = RELATIVE_FORMATTERS[language];
   const relative =
     seconds < 60
       ? language === "th"

@@ -63,13 +63,9 @@ function getVar(vars: VarMap, name: string): string {
   return val;
 }
 
-test("Design Tokens: all v2 palettes (green, blue, pink) and v1 rollback meet WCAG AA (>=4.5:1) contrast", () => {
+test("Design Tokens: all palettes (green, blue, pink) meet WCAG AA (>=4.5:1) contrast", () => {
   const uiThemeCss = readFileSync(
     resolve(import.meta.dirname, "../../src/ui-theme.css"),
-    "utf8",
-  );
-  const v1Css = readFileSync(
-    resolve(import.meta.dirname, "../../src/v1-classic.css"),
     "utf8",
   );
 
@@ -83,10 +79,6 @@ test("Design Tokens: all v2 palettes (green, blue, pink) and v1 rollback meet WC
     pink: {
       ...greenRoot,
       ...extractCssVars(uiThemeCss, ':root[data-color="pink"] {'),
-    },
-    v1: {
-      ...greenRoot,
-      ...extractCssVars(v1Css, ':root[data-ui="v1"] {'),
     },
   };
 
@@ -117,11 +109,8 @@ test("Design Tokens: all v2 palettes (green, blue, pink) and v1 rollback meet WC
       ["--on-fresh", "--fresh", "white on fresh solid", 4.5],
       ["--take-ink", "--take-soft", "take-out icon ink", 4.5],
       ["--edit-ink", "--edit-soft", "edit icon ink", 4.5],
+      ["--lime-ink", "--hero-bg", "login hero headline on hero-bg", 4.5],
     ];
-
-    if (themeName !== "v1") {
-      pairs.push(["--lime-ink", "--hero-bg", "login hero headline on hero-bg", 4.5]);
-    }
 
     for (const [fgKey, bgKey, desc, minRatio] of pairs) {
       const ratio = contrastRatio(getVar(vars, fgKey), getVar(vars, bgKey));

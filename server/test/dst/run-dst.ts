@@ -1,4 +1,3 @@
-import { resolveUiVersion, type UiVersionConfig } from "../../src/ui-version";
 import { eventTimeIsValid } from "../../workers/lib/event-time";
 import {
   runFullStackSimulation,
@@ -8,7 +7,7 @@ import {
 import { formatReplayHint, parseCliIntArg, SeededRng } from "./prng";
 import { runSeededSimulation } from "./sim-env";
 
-type SuiteName = "all" | "dashboard" | "fullstack" | "ui-version" | "soak";
+type SuiteName = "all" | "dashboard" | "fullstack" | "soak";
 
 function parseSuiteArg(argv: readonly string[]): SuiteName {
   for (let i = 0; i < argv.length; i++) {
@@ -22,7 +21,6 @@ function parseSuiteArg(argv: readonly string[]): SuiteName {
       raw === "all" ||
       raw === "dashboard" ||
       raw === "fullstack" ||
-      raw === "ui-version" ||
       raw === "soak"
     ) {
       return raw;
@@ -40,36 +38,6 @@ function runDashboardSuite(seeds: readonly number[], steps: number): void {
 function runFullStackSuite(seeds: readonly number[], steps: number): void {
   for (const seed of seeds) {
     runFullStackSimulation(seed, steps);
-  }
-}
-
-function runUiVersionSuite(seeds: readonly number[], steps: number): void {
-  const queries = ["", "?ui=v1", "?ui=v2", "?ui=reset"] as const;
-  const cfgs: UiVersionConfig[] = [
-    { defaultVersion: "v2", locked: false },
-    { defaultVersion: "v1", locked: false },
-    { defaultVersion: "v1", locked: true },
-  ];
-  for (const seed of seeds) {
-    const rng = new SeededRng(seed);
-    let stored: string | null = null;
-    for (let i = 0; i < steps; i++) {
-      const cfg = rng.pick(cfgs);
-      const q = rng.pick(queries);
-      const out = resolveUiVersion({
-        search: q,
-        stored,
-        serverConfig: cfg,
-        buildDefault: "v2",
-      });
-      if (cfg.locked && out.version !== cfg.defaultVersion) {
-        throw new Error(
-          `Locked config violated (${formatReplayHint(seed, "ui-version")})`,
-        );
-      }
-      if (out.nextStorage === null) stored = null;
-      else if (out.nextStorage !== "unchanged") stored = out.nextStorage;
-    }
   }
 }
 
@@ -113,9 +81,6 @@ function main() {
   }
   if (suite === "all" || suite === "fullstack") {
     runFullStackSuite(seeds, steps);
-  }
-  if (suite === "all" || suite === "ui-version") {
-    runUiVersionSuite(seeds, steps);
   }
   if (suite === "all" || suite === "soak") {
     runSoakSuite(seeds.slice(0, Math.min(seeds.length, 5)));

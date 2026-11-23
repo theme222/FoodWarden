@@ -16,7 +16,7 @@ import { StatusAlert } from "./components/status-alert";
 import { getJson, swrOptions } from "./lib/api";
 import { localTimestamp, readBucket } from "./model";
 import type { Language, Sample } from "./model";
-import { CHART_SERIES } from "./state/dashboard-machine";
+import { CHART_SERIES, toggleSeriesSafely } from "./state/dashboard-machine";
 import type { ChartRange, SeriesKey } from "./state/dashboard-machine";
 
 const ranges = { "1h": 3600, "24h": 86400, "7d": 604800, "30d": 2592000 };
@@ -28,6 +28,79 @@ const periods = [
 ] as const;
 const PAGE_SIZE = 10;
 type Series = (typeof CHART_SERIES)[number];
+type AxisTickMode = "time" | "dateTime" | "date";
+
+const AXIS_TIME_FORMATTERS: Record<
+  Language,
+  Record<AxisTickMode, Intl.DateTimeFormat>
+> = {
+  th: {
+    time: new Intl.DateTimeFormat("th-TH", {
+      timeZone: "Asia/Bangkok",
+      hour: "2-digit",
+      minute: "2-digit",
+    }),
+    dateTime: new Intl.DateTimeFormat("th-TH", {
+      timeZone: "Asia/Bangkok",
+      day: "numeric",
+      month: "short",
+      hour: "2-digit",
+      minute: "2-digit",
+    }),
+    date: new Intl.DateTimeFormat("th-TH", {
+      timeZone: "Asia/Bangkok",
+      day: "numeric",
+      month: "short",
+    }),
+  },
+  en: {
+    time: new Intl.DateTimeFormat("en-GB", {
+      timeZone: "Asia/Bangkok",
+      hour: "2-digit",
+      minute: "2-digit",
+    }),
+    dateTime: new Intl.DateTimeFormat("en-GB", {
+      timeZone: "Asia/Bangkok",
+      day: "numeric",
+      month: "short",
+      hour: "2-digit",
+      minute: "2-digit",
+    }),
+    date: new Intl.DateTimeFormat("en-GB", {
+      timeZone: "Asia/Bangkok",
+      day: "numeric",
+      month: "short",
+    }),
+  },
+};
+
+function selectAxisTimeFormatter(
+  language: Language,
+  plottedSeconds: number,
+): Intl.DateTimeFormat {
+  const mode: AxisTickMode =
+    plottedSeconds <= ranges["24h"]
+      ? "time"
+      : plottedSeconds < ranges["7d"]
+        ? "dateTime"
+        : "date";
+  return AXIS_TIME_FORMATTERS[language][mode];
+}
+
+function mergeTelemetryWithLatest(
+  saved: Sample[],
+  latest: Sample | null,
+  minTimeS: number,
+): Sample[] {
+  if (!latest || latest.timeS < minTimeS) return saved;
+  return [
+    ...saved.filter(
+      (sample) =>
+        sample.timeS !== latest.timeS || sample.nodeId !== latest.nodeId,
+    ),
+    latest,
+  ].sort((a, b) => a.timeS - b.timeS);
+}
 
 function ReadingTable({
   points,
@@ -197,6 +270,226 @@ export function Charts(props: ChartsProps) {
   );
 }
 
+function ChartFilterControls({
+  language,
+  metrics,
+  onToggleMetric,
+  range,
+  onChangeRange,
+  nodes,
+  activeNode,
+  onChangeNode,
+}: {
+  language: Language;
+  metrics: SeriesKey[];
+  onToggleMetric: (key: SeriesKey) => void;
+  range: ChartRange;
+  onChangeRange: (next: ChartRange) => void;
+  nodes: string[];
+  activeNode: string | undefined;
+  onChangeNode: (id: string) => void;
+}) {
+  const th = language === "th";
+  const periodIndex = periods.findIndex(([key]) => key === range);
+  const period = periods[periodIndex] ?? periods[1];
+
+  return (
+    <div className="chart-filters">
+      <fieldset className="visible-choices">
+        <legend>{th ? "ค่าที่แสดง" : "Metrics"}</legend>
+        <div>
+          {CHART_SERIES.map((entry) => {
+            const active = metrics.includes(entry.key);
+            const lastActive = active && metrics.length <= 1;
+            return (
+              <label key={entry.key}>
+                <input
+                  type="checkbox"
+                  checked={active}
+                  disabled={lastActive}
+                  onChange={() => onToggleMetric(entry.key)}
+                />
+                {th ? (entry.key === "voc" ? "ค่า VOC" : entry.th) : entry.en}
+              </label>
+            );
+          })}
+        </div>
+      </fieldset>
+      <div className="chart-period">
+        <div className="chart-period-label">
+          <label htmlFor="chart-period">
+            {th ? "ช่วงเวลา" : "Time range"}
+          </label>
+          <strong>{th ? period[1] : period[2]}</strong>
+        </div>
+        <input
+          id="chart-period"
+          type="range"
+          min={0}
+          max={periods.length - 1}
+          step={1}
+          value={periodIndex}
+          aria-valuetext={th ? period[1] : period[2]}
+          onChange={(event) => {
+            const next = periods[Number(event.currentTarget.value)];
+            if (next && next[0] !== range) onChangeRange(next[0]);
+          }}
+        />
+        <div className="chart-period-stops" aria-hidden="true">
+          {periods.map(([key, thai, english]) => (
+            <span key={key}>{th ? thai : english}</span>
+          ))}
+        </div>
+      </div>
+      {nodes.length > 1 && (
+        <label>
+          {th ? "เซนเซอร์" : "Sensor"}
+          <select
+            value={activeNode}
+            onChange={(event) => onChangeNode(event.target.value)}
+          >
+            {nodes.map((id) => (
+              <option key={id} value={id}>
+                {id}
+              </option>
+            ))}
+          </select>
+        </label>
+      )}
+    </div>
+  );
+}
+
+function ChartPlotPanel({
+  series,
+  points,
+  selected,
+  selectedIndex,
+  language,
+  axisTime,
+  onSelectTime,
+}: {
+  series: Series[];
+  points: Sample[];
+  selected: Sample;
+  selectedIndex: number;
+  language: Language;
+  axisTime: Intl.DateTimeFormat;
+  onSelectTime: (timeS: number | null) => void;
+}) {
+  const th = language === "th";
+  return (
+    <section
+      className="panel sensor-plot"
+      aria-label={th ? "ค่าจากเซนเซอร์" : "Sensor values"}
+    >
+      <div className="sensor-series-list">
+        {series.map((item) => (
+          <SensorPlot
+            key={item.key}
+            series={item}
+            points={points}
+            language={language}
+            axisTime={axisTime}
+            height={series.length > 1 ? 170 : 230}
+            readingTime={selectedIndex >= 0 ? selected.timeS : null}
+          />
+        ))}
+      </div>
+      <label className="chart-scrubber">
+        {th ? "เลือกเวลาที่ต้องการดู" : "Choose a reading"}
+        <input
+          type="range"
+          min={0}
+          max={points.length - 1}
+          value={selectedIndex === -1 ? points.length - 1 : selectedIndex}
+          disabled={points.length === 1}
+          aria-valuetext={localTimestamp(selected.timeS, language)}
+          onChange={(event) =>
+            onSelectTime(points[Number(event.target.value)]?.timeS ?? null)
+          }
+        />
+      </label>
+      <output className="reading-selected">
+        <time dateTime={new Date(selected.timeS * 1000).toISOString()}>
+          {localTimestamp(selected.timeS, language)}
+        </time>
+        {series.map(({ key, th: thai, en, unit }) => (
+          <strong key={key}>
+            {th ? thai : en}: {selected[key] ?? "—"} {unit}
+          </strong>
+        ))}
+      </output>
+    </section>
+  );
+}
+
+function ChartResultsView({
+  series,
+  points,
+  selected,
+  selectedIndex,
+  language,
+  axisTime,
+  range,
+  activeNode,
+  hasError,
+  isLoading,
+  onSelectTime,
+}: {
+  series: Series[];
+  points: Sample[];
+  selected: Sample | undefined;
+  selectedIndex: number;
+  language: Language;
+  axisTime: Intl.DateTimeFormat;
+  range: ChartRange;
+  activeNode: string | undefined;
+  hasError: boolean;
+  isLoading: boolean;
+  onSelectTime: (timeS: number | null) => void;
+}) {
+  const th = language === "th";
+  if (!series.length) {
+    return (
+      <p className="empty-state">
+        {th
+          ? "เลือกค่าที่ต้องการแสดงบนกราฟ"
+          : "Select metrics to show on the chart."}
+      </p>
+    );
+  }
+  if (!selected) {
+    if (hasError || isLoading) return null;
+    return (
+      <p className="empty-state">
+        {th
+          ? "ยังไม่มีค่าจากเซนเซอร์ในช่วงนี้"
+          : "No sensor readings in this period."}
+      </p>
+    );
+  }
+  return (
+    <>
+      <ChartPlotPanel
+        series={series}
+        points={points}
+        selected={selected}
+        selectedIndex={selectedIndex}
+        language={language}
+        axisTime={axisTime}
+        onSelectTime={onSelectTime}
+      />
+      <ReadingTable
+        key={range + activeNode}
+        points={points}
+        language={language}
+        series={series}
+      />
+    </>
+  );
+}
+
 function ChartContents({
   fridgeId,
   language,
@@ -208,8 +501,6 @@ function ChartContents({
   const [metrics, setMetrics] = useState<SeriesKey[]>([initialMetric]);
   const series = CHART_SERIES.filter(({ key }) => metrics.includes(key));
   const [range, setRange] = useState<ChartRange>("24h");
-  const periodIndex = periods.findIndex(([key]) => key === range);
-  const period = periods[periodIndex] ?? periods[1];
   const [node, setNode] = useState("");
   const [selectedTime, setSelectedTime] = useState<number | null>(null);
   const base = "/api/fridges/" + encodeURIComponent(fridgeId);
@@ -221,17 +512,10 @@ function ChartContents({
       refreshInterval: 30000,
     },
   );
-  const allPoints = useMemo(() => {
-    const saved = state.data ?? [];
-    if (!latest || latest.timeS < now - ranges[range]) return saved;
-    return [
-      ...saved.filter(
-        (sample) =>
-          sample.timeS !== latest.timeS || sample.nodeId !== latest.nodeId,
-      ),
-      latest,
-    ].sort((a, b) => a.timeS - b.timeS);
-  }, [state.data, latest, range, now]);
+  const allPoints = useMemo(
+    () => mergeTelemetryWithLatest(state.data ?? [], latest, now - ranges[range]),
+    [state.data, latest, range, now],
+  );
   const nodes = [...new Set(allPoints.map((point) => point.nodeId))].sort();
   const activeNode =
     [node, latest?.nodeId].find(
@@ -241,20 +525,7 @@ function ChartContents({
   const index = points.findIndex((point) => point.timeS === selectedTime);
   const selected = points[index] ?? points.at(-1);
   const plottedSeconds = (points.at(-1)?.timeS ?? 0) - (points[0]?.timeS ?? 0);
-  const axisTime = new Intl.DateTimeFormat(
-    language === "th" ? "th-TH" : "en-GB",
-    {
-      timeZone: "Asia/Bangkok",
-      ...(plottedSeconds > ranges["24h"] && {
-        day: "numeric",
-        month: "short",
-      }),
-      ...(plottedSeconds < ranges["7d"] && {
-        hour: "2-digit",
-        minute: "2-digit",
-      }),
-    },
-  );
+  const axisTime = selectAxisTimeFormatter(language, plottedSeconds);
 
   return (
     <section className="chart-page">
@@ -267,77 +538,24 @@ function ChartContents({
           {th ? "ประวัติประตู" : "Door history"}
         </Link>
       </div>
-      <div className="chart-filters">
-        <fieldset className="visible-choices">
-          <legend>{th ? "ค่าที่แสดง" : "Metrics"}</legend>
-          <div>
-            {CHART_SERIES.map((entry) => (
-              <label key={entry.key}>
-                <input
-                  type="checkbox"
-                  checked={series.includes(entry)}
-                  onChange={(event) => {
-                    const { checked } = event.currentTarget;
-                    setMetrics((prev) =>
-                      checked
-                        ? [...prev, entry.key]
-                        : prev.filter((key) => key !== entry.key),
-                    );
-                  }}
-                />
-                {th ? (entry.key === "voc" ? "ค่า VOC" : entry.th) : entry.en}
-              </label>
-            ))}
-          </div>
-        </fieldset>
-        <div className="chart-period">
-          <div className="chart-period-label">
-            <label htmlFor="chart-period">
-              {th ? "ช่วงเวลา" : "Time range"}
-            </label>
-            <strong>{th ? period[1] : period[2]}</strong>
-          </div>
-          <input
-            id="chart-period"
-            type="range"
-            min={0}
-            max={periods.length - 1}
-            step={1}
-            value={periodIndex}
-            aria-valuetext={th ? period[1] : period[2]}
-            onChange={(event) => {
-              const next = periods[Number(event.currentTarget.value)];
-              if (next && next[0] !== range) {
-                setRange(next[0]);
-                setSelectedTime(null);
-              }
-            }}
-          />
-          <div className="chart-period-stops" aria-hidden="true">
-            {periods.map(([key, thai, english]) => (
-              <span key={key}>{th ? thai : english}</span>
-            ))}
-          </div>
-        </div>
-        {nodes.length > 1 && (
-          <label>
-            {th ? "เซนเซอร์" : "Sensor"}
-            <select
-              value={activeNode}
-              onChange={(event) => {
-                setNode(event.target.value);
-                setSelectedTime(null);
-              }}
-            >
-              {nodes.map((id) => (
-                <option key={id} value={id}>
-                  {id}
-                </option>
-              ))}
-            </select>
-          </label>
-        )}
-      </div>
+      <ChartFilterControls
+        language={language}
+        metrics={metrics}
+        onToggleMetric={(key) =>
+          setMetrics((prev) => toggleSeriesSafely(prev, key))
+        }
+        range={range}
+        onChangeRange={(nextRange) => {
+          setRange(nextRange);
+          setSelectedTime(null);
+        }}
+        nodes={nodes}
+        activeNode={activeNode}
+        onChangeNode={(nextNode) => {
+          setNode(nextNode);
+          setSelectedTime(null);
+        }}
+      />
       {state.error && (
         <StatusAlert
           action={
@@ -354,75 +572,19 @@ function ChartContents({
         </StatusAlert>
       )}
       {state.isLoading && <output>{th ? "กำลังโหลด…" : "Loading…"}</output>}
-      {!series.length ? (
-        <p className="empty-state">
-          {th
-            ? "เลือกค่าที่ต้องการแสดงบนกราฟ"
-            : "Select metrics to show on the chart."}
-        </p>
-      ) : selected ? (
-        <>
-          <section
-            className="panel sensor-plot"
-            aria-label={th ? "ค่าจากเซนเซอร์" : "Sensor values"}
-          >
-            <div className="sensor-series-list">
-              {series.map((item) => (
-                <SensorPlot
-                  key={item.key}
-                  series={item}
-                  points={points}
-                  language={language}
-                  axisTime={axisTime}
-                  height={series.length > 1 ? 170 : 230}
-                  readingTime={index >= 0 ? selected.timeS : null}
-                />
-              ))}
-            </div>
-            <label className="chart-scrubber">
-              {th ? "เลือกเวลาที่ต้องการดู" : "Choose a reading"}
-              <input
-                type="range"
-                min={0}
-                max={points.length - 1}
-                value={index === -1 ? points.length - 1 : index}
-                disabled={points.length === 1}
-                aria-valuetext={localTimestamp(selected.timeS, language)}
-                onChange={(event) =>
-                  setSelectedTime(
-                    points[Number(event.target.value)]?.timeS ?? null,
-                  )
-                }
-              />
-            </label>
-            <output className="reading-selected">
-              <time dateTime={new Date(selected.timeS * 1000).toISOString()}>
-                {localTimestamp(selected.timeS, language)}
-              </time>
-              {series.map(({ key, th: thai, en, unit }) => (
-                <strong key={key}>
-                  {th ? thai : en}: {selected[key] ?? "—"} {unit}
-                </strong>
-              ))}
-            </output>
-          </section>
-          <ReadingTable
-            key={range + activeNode}
-            points={points}
-            language={language}
-            series={series}
-          />
-        </>
-      ) : (
-        !state.error &&
-        !state.isLoading && (
-          <p className="empty-state">
-            {th
-              ? "ยังไม่มีค่าจากเซนเซอร์ในช่วงนี้"
-              : "No sensor readings in this period."}
-          </p>
-        )
-      )}
+      <ChartResultsView
+        series={series}
+        points={points}
+        selected={selected}
+        selectedIndex={index}
+        language={language}
+        axisTime={axisTime}
+        range={range}
+        activeNode={activeNode}
+        hasError={Boolean(state.error)}
+        isLoading={state.isLoading}
+        onSelectTime={setSelectedTime}
+      />
     </section>
   );
 }

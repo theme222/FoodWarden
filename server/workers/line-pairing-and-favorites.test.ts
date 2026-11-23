@@ -569,7 +569,12 @@ describe("LINE pairing, personal preferences and favorite isolation", () => {
     const sentBodies: Array<{ url: string; body: string }> = [];
     vi.spyOn(globalThis, "fetch").mockImplementation(async (input, init) => {
       sentBodies.push({
-        url: String(input),
+        url:
+          typeof input === "string"
+            ? input
+            : input instanceof URL
+              ? input.toString()
+              : input.url,
         body: typeof init?.body === "string" ? init.body : "",
       });
       return new Response("{}", { status: 200 });

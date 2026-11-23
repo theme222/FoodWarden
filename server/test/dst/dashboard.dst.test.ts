@@ -8,6 +8,7 @@ import {
   computeSetupProgress,
   deriveKpiSummary,
   deriveRecoveryActions,
+  deriveTelemetryAlerts,
   filterAndSortInventory,
   foodIdentityKey,
   parseColorTheme,
@@ -202,12 +203,20 @@ test("DST helpers: theme parser, scrubber clamping, KPI verdicts, relative expir
   expect(clampScrubberIndex(-4, 3)).toBe(0);
 
   const nowS = SIM_BASE_TIME_S;
+  const boundarySample = {
+    nodeId: "F0",
+    timeS: nowS,
+    temperature: 9.5,
+    voc: 250,
+    light: 25,
+  };
   const kpi = deriveKpiSummary(
-    { nodeId: "F0", timeS: nowS, temperature: 9.5, voc: 300, light: 25 },
+    boundarySample,
     [{ nodeId: "D0", timestampS: nowS - 120, status: "SUCCESS" }],
     nowS,
     "en",
   );
+  expect(deriveTelemetryAlerts(boundarySample)).toEqual(["warm", "spoil"]);
   expect(kpi.find((t) => t.id === "temperature")?.tone).toBe("bad");
   expect(kpi.find((t) => t.id === "voc")?.tone).toBe("bad");
   expect(kpi.find((t) => t.id === "door")?.tone).toBe("mint");

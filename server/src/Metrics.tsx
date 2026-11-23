@@ -1,7 +1,6 @@
 import { Thermometer, Wind, Sun, DoorClosed } from "lucide-react";
 import { Link } from "react-router-dom";
 import { ReadingTime } from "./components/reading-time";
-import { useUiVersion } from "./components/ui-version-context";
 import { FRIDGE_SENSOR_STALE_S } from "./model";
 import type { DoorEvent, Language, Sample } from "./model";
 import { deriveKpiSummary, LIGHT_OPEN_LDR } from "./state/dashboard-machine";
@@ -31,7 +30,6 @@ export function Metrics({
 }) {
   const th = language === "th";
   const t = words[language];
-  const { version } = useUiVersion();
   const tiles = deriveKpiSummary(latest, doorEvents, now, language);
   const labels = {
     temperature: t.temperature,
@@ -63,9 +61,7 @@ export function Metrics({
         </p>
       </div>
       <ul className="sensor-metrics">
-        {tiles
-          .filter((tile) => version === "v2" || tile.id !== "door")
-          .map((tile) => {
+        {tiles.map((tile) => {
             const Icon = icons[tile.id];
             const content = (
               <>

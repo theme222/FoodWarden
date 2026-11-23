@@ -29,6 +29,7 @@
     "secrets:all": "bun ../scripts/check-secrets.ts --all",
     "lint": "oxlint src workers vite.config.ts scalar-assets.ts",
     "lint:type-aware": "oxlint --type-aware src workers vite.config.ts scalar-assets.ts",
+    "check": "bun run typecheck && bun run lint:type-aware && bun run knip",
     "typecheck:fast": "tsrs --noEmit && tsrs -p workers/tsconfig.json --noEmit",
     "check:fast": "oxlint --type-aware --type-check src workers vite.config.ts scalar-assets.ts",
     "knip": "knip",

@@ -8,7 +8,13 @@ import {
   removeFridgeMember,
 } from "./lib/fridges";
 import { parseMultipartJpeg } from "./lib/ai-inventory";
-import { withInferenceQuota, InferenceQuotaError } from "./lib/ai-quota";
+import {
+  withInferenceQuota,
+  InferenceQuotaError,
+  OWNER_DAILY_AI_LIMIT,
+  GLOBAL_DAILY_AI_LIMIT,
+  FRIDGE_MINUTE_AI_LIMIT,
+} from "./lib/ai-quota";
 import { updateInventoryItem, deleteInventoryItem } from "./lib/inventory";
 import { ingestStatus } from "./lib/status";
 import {
@@ -333,10 +339,10 @@ describe("Deepsec regressions", () => {
     const f = await fixture();
     const t = now();
     await bindings.DB.prepare(
-      `WITH RECURSIVE n(x) AS (SELECT 1 UNION ALL SELECT x+1 FROM n WHERE x<50)
+      `WITH RECURSIVE n(x) AS (SELECT 1 UNION ALL SELECT x+1 FROM n WHERE x<?)
       INSERT INTO ai_reservations SELECT ? || x, ?, ?, ?, 0 FROM n`,
     )
-      .bind(f.id, f.email, f.id, t)
+      .bind(OWNER_DAILY_AI_LIMIT, f.id, f.email, f.id, t)
       .run();
     await bindings.DB.prepare("DELETE FROM fridges WHERE id = ?")
       .bind(f.id)
@@ -353,16 +359,37 @@ describe("Deepsec regressions", () => {
     ).rejects.toBeInstanceOf(InferenceQuotaError);
     expect(run).not.toHaveBeenCalled();
     await bindings.DB.prepare(
-      `WITH RECURSIVE n(x) AS (SELECT 1 UNION ALL SELECT x+1 FROM n WHERE x<200)
+      `WITH RECURSIVE n(x) AS (SELECT 1 UNION ALL SELECT x+1 FROM n WHERE x<?)
       INSERT INTO ai_reservations SELECT ? || x, 'other@example.com', 'deleted', ?, 0 FROM n`,
     )
-      .bind("global-" + f.id, t)
+      .bind(GLOBAL_DAILY_AI_LIMIT, "global-" + f.id, t)
       .run();
     const other = await fixture();
     await expect(
       withInferenceQuota(bindings, other.id, run),
     ).rejects.toBeInstanceOf(InferenceQuotaError);
     expect(run).not.toHaveBeenCalled();
+    await bindings.DB.prepare(
+      "UPDATE fridge_secrets SET gemini_api_key = 'custom-key', updated_at_s = ? WHERE fridge_id = ?",
+    )
+      .bind(t, replacement.id)
+      .run();
+    expect(await withInferenceQuota(bindings, replacement.id, run)).toBe(1);
+    await bindings.DB.prepare(
+      `WITH RECURSIVE n(x) AS (SELECT 1 UNION ALL SELECT x+1 FROM n WHERE x<?)
+      INSERT INTO ai_reservations SELECT ? || x, ?, ?, ?, 0 FROM n`,
+    )
+      .bind(
+        FRIDGE_MINUTE_AI_LIMIT,
+        "min-" + replacement.id,
+        f.email,
+        replacement.id,
+        t,
+      )
+      .run();
+    await expect(
+      withInferenceQuota(bindings, replacement.id, run),
+    ).rejects.toBeInstanceOf(InferenceQuotaError);
   });
 
   it("does not replay old LINE events after cooldown or retry to a disabled recipient", async () => {

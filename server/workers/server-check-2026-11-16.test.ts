@@ -103,7 +103,7 @@ describe("Audit 2026-11-16 regressions", () => {
 
     const pushes: unknown[] = [];
     vi.spyOn(globalThis, "fetch").mockImplementation(async (_input, init) => {
-      pushes.push(JSON.parse(String(init?.body)));
+      pushes.push(JSON.parse(typeof init?.body === "string" ? init.body : "{}"));
       return new Response("{}", { status: 200 });
     });
 
@@ -232,7 +232,7 @@ describe("Audit 2026-11-16 regressions", () => {
 
     const pushes: unknown[] = [];
     vi.spyOn(globalThis, "fetch").mockImplementation(async (_input, init) => {
-      pushes.push(JSON.parse(String(init?.body)));
+      pushes.push(JSON.parse(typeof init?.body === "string" ? init.body : "{}"));
       return new Response("{}", { status: 200 });
     });
 
@@ -350,7 +350,9 @@ describe("Audit 2026-11-16 regressions", () => {
     const sentLengths: number[] = [];
     const sentTexts: string[] = [];
     vi.spyOn(globalThis, "fetch").mockImplementation(async (_input, init) => {
-      const payload = JSON.parse(String(init?.body)) as {
+      const payload = JSON.parse(
+        typeof init?.body === "string" ? init.body : "{}",
+      ) as {
         messages: Array<{ text: string }>;
       };
       for (const msg of payload.messages) {

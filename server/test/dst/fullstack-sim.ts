@@ -5,7 +5,6 @@ import {
   reduceDashboardEvent,
   type DashboardMachineState,
 } from "../../src/state/dashboard-machine";
-import { resolveUiVersion, type UiVersion, type UiVersionConfig } from "../../src/ui-version";
 import { eventTimeIsValid } from "../../workers/lib/event-time";
 import { SeededRng } from "./prng";
 
@@ -79,7 +78,6 @@ export interface FullStackInvariantMetrics {
 export class SimulatedFullStackSystem {
   readonly rng: SeededRng;
   nowS: number;
-  uiConfig: UiVersionConfig = { defaultVersion: "v2", locked: false };
   private msgSeq = 1;
   private networkQueue: PendingNetworkMessage[] = [];
 
@@ -101,10 +99,6 @@ export class SimulatedFullStackSystem {
 
   // Simulated Multi-Actor Clients (browser tabs + localStorage)
   clients: Record<string, DashboardMachineState>;
-  clientStorage: Record<string, { uiVersion: string | null }> = {
-    "owner@example.com": { uiVersion: null },
-    "member@example.com": { uiVersion: null },
-  };
   clientLastGatewaySeen: Record<string, number> = {
     "owner@example.com": 0,
     "member@example.com": 0,
@@ -303,7 +297,7 @@ export class SimulatedFullStackSystem {
       this.trySendAlert("line", "warm", 1800);
       this.trySendAlert("personal", "warm", 1800);
     }
-    if (voc > 250) {
+    if (voc >= 250) {
       this.trySendAlert("line", "spoil", 1800);
       this.trySendAlert("personal", "spoil", 1800);
     }
@@ -449,7 +443,6 @@ export class SimulatedFullStackSystem {
       | "status"
       | "cron"
       | "revoke_or_restore"
-      | "ui_flag"
     >([
       ["tick", 20],
       ["add_food", 18],
@@ -460,7 +453,6 @@ export class SimulatedFullStackSystem {
       ["status", 8],
       ["cron", 5],
       ["revoke_or_restore", 4],
-      ["ui_flag", 4],
     ]);
 
     switch (op) {
@@ -538,25 +530,6 @@ export class SimulatedFullStackSystem {
           );
           this.clientLastGatewaySeen["member@example.com"] = 0;
         }
-        break;
-      }
-      case "ui_flag": {
-        if (this.rng.chance(0.4)) {
-          this.uiConfig = {
-            defaultVersion: this.rng.pick<UiVersion>(["v1", "v2"]),
-            locked: this.rng.bool(0.35),
-          };
-        }
-        const storage = this.clientStorage[actor]!;
-        const query = this.rng.pick(["", "?ui=v1", "?ui=v2", "?ui=reset"]);
-        const res = resolveUiVersion({
-          search: query,
-          stored: storage.uiVersion,
-          serverConfig: this.uiConfig,
-          buildDefault: "v2",
-        });
-        if (res.nextStorage === null) storage.uiVersion = null;
-        else if (res.nextStorage !== "unchanged") storage.uiVersion = res.nextStorage;
         break;
       }
     }

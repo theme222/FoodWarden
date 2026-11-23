@@ -2391,7 +2391,7 @@ button:disabled {
 }
 
 @media (max-width: 720px) {
-  :root:not([data-ui="v1"]) {
+  :root {
     scroll-padding-bottom: calc(72px + env(safe-area-inset-bottom, 0px));
   }
   .wrap {

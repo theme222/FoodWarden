@@ -327,6 +327,94 @@ function doorStatusLabel(
   return t[key] ?? status;
 }
 
+function DevicesStatusBanner({
+  summary,
+  language,
+}: {
+  summary: DeviceHealthSummary;
+  language: Language;
+}) {
+  const th = language === "th";
+  if (summary.allOk) {
+    return (
+      <StatusAlert variant="success">
+        {th
+          ? "อุปกรณ์ทั้งหมดเชื่อมต่อและทำงานปกติ (3/3)"
+          : "All 3 fridge devices are online and reporting normally."}
+      </StatusAlert>
+    );
+  }
+  const attentionCount =
+    summary.degradedNodeIds.length ||
+    summary.nodes.length - summary.healthyCount;
+  return (
+    <StatusAlert variant="warning">
+      {th
+        ? `พบอุปกรณ์ที่รอตรวจสอบ ${attentionCount} รายการ`
+        : `${attentionCount} device(s) need attention or haven't checked in yet.`}
+    </StatusAlert>
+  );
+}
+
+function DoorEventsSection({
+  fridgeId,
+  doorEvents,
+  language,
+}: {
+  fridgeId?: string;
+  doorEvents: DoorEvent[] | null;
+  language: Language;
+}) {
+  const th = language === "th";
+  const t = words[language];
+  return (
+    <section className="panel flex flex-col gap-3" aria-labelledby="door-title">
+      <div className="page-head">
+        <h2 id="door-title">{t.doorEvents}</h2>
+        {fridgeId && (
+          <Link
+            className="btn sm"
+            to={
+              "/fridges/" + encodeURIComponent(fridgeId) + "/history?kind=door"
+            }
+          >
+            {th ? "ดูประวัติ" : "View history"}
+          </Link>
+        )}
+      </div>
+      {!doorEvents ? (
+        <output className="sub">{t.loading}</output>
+      ) : doorEvents.length === 0 ? (
+        <p className="sub">{t.emptyDoorEvents}</p>
+      ) : (
+        <ul className="door-list">
+          {doorEvents.slice(0, 3).map((event) => {
+            const isAlert =
+              event.status !== "SUCCESS" && event.status !== "CLOSING";
+            return (
+              <li
+                key={`${event.nodeId}-${event.timestampS}-${event.status}`}
+                className={isAlert ? "door-item door-alert" : "door-item"}
+              >
+                <div className="flex items-center gap-2">
+                  <strong>{doorStatusLabel(event.status, language)}</strong>
+                  <span className="tn-id">{event.nodeId}</span>
+                </div>
+                <time
+                  className="small num"
+                  dateTime={new Date(event.timestampS * 1000).toISOString()}
+                >
+                  {localTimestamp(event.timestampS, language)}
+                </time>
+              </li>
+            );
+          })}
+        </ul>
+      )}
+    </section>
+  );
+}
+
 export function Devices({
   fridgeId,
   heartbeat,
@@ -340,7 +428,6 @@ export function Devices({
   error: boolean;
   language: Language;
 }) {
-  const th = language === "th";
   const now = useNow();
   const t = words[language];
   const resolvedHeartbeat = heartbeat ?? null;
@@ -365,24 +452,16 @@ export function Devices({
         {resolvedHeartbeat && (
           <p className="gateway-report small num">
             <span>{t.lastReport}</span>
-            <ReadingTime timeS={resolvedHeartbeat.receivedS} now={now} language={language} />
+            <ReadingTime
+              timeS={resolvedHeartbeat.receivedS}
+              now={now}
+              language={language}
+            />
           </p>
         )}
       </div>
 
-      {summary.allOk ? (
-        <StatusAlert variant="success">
-          {th
-            ? "อุปกรณ์ทั้งหมดเชื่อมต่อและทำงานปกติ (3/3)"
-            : "All 3 fridge devices are online and reporting normally."}
-        </StatusAlert>
-      ) : (
-        <StatusAlert variant="warning">
-          {th
-            ? `พบอุปกรณ์ที่รอตรวจสอบ ${summary.degradedNodeIds.length || summary.nodes.length - summary.healthyCount} รายการ`
-            : `${summary.degradedNodeIds.length || summary.nodes.length - summary.healthyCount} device(s) need attention or haven't checked in yet.`}
-        </StatusAlert>
-      )}
+      <DevicesStatusBanner summary={summary} language={language} />
 
       <FridgeSchematic
         summary={summary}
@@ -409,43 +488,11 @@ export function Devices({
         ))}
       </div>
 
-      <section className="panel flex flex-col gap-3" aria-labelledby="door-title">
-        <div className="page-head">
-          <h2 id="door-title">{t.doorEvents}</h2>
-          {fridgeId && <Link className="btn sm" to={"/fridges/" + encodeURIComponent(fridgeId) + "/history?kind=door"}>
-            {th ? "ดูประวัติ" : "View history"}
-          </Link>}
-        </div>
-        {!doorEvents ? (
-          <output className="sub">{t.loading}</output>
-        ) : doorEvents.length === 0 ? (
-          <p className="sub">{t.emptyDoorEvents}</p>
-        ) : (
-          <ul className="door-list">
-            {doorEvents.slice(0, 3).map((event) => {
-              const isAlert =
-                event.status !== "SUCCESS" && event.status !== "CLOSING";
-              return (
-                <li
-                  key={`${event.nodeId}-${event.timestampS}-${event.status}`}
-                  className={isAlert ? "door-item door-alert" : "door-item"}
-                >
-                  <div className="flex items-center gap-2">
-                    <strong>{doorStatusLabel(event.status, language)}</strong>
-                    <span className="tn-id">{event.nodeId}</span>
-                  </div>
-                  <time
-                    className="small num"
-                    dateTime={new Date(event.timestampS * 1000).toISOString()}
-                  >
-                    {localTimestamp(event.timestampS, language)}
-                  </time>
-                </li>
-              );
-            })}
-          </ul>
-        )}
-      </section>
+      <DoorEventsSection
+        fridgeId={fridgeId}
+        doorEvents={doorEvents}
+        language={language}
+      />
     </section>
   );
 }
