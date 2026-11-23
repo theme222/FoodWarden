@@ -1,12 +1,28 @@
-import { useConfirm } from "./components/confirmation";
-import { StatusAlert } from "./components/status-alert";
-import { toast } from "sonner";
+import { ArrowLeft, Camera, Image as ImageIcon, Pencil, Trash2 } from "lucide-react";
 import { useRef, useState } from "react";
 import type { FormEvent } from "react";
 import { Link, useNavigate } from "react-router-dom";
-import { expiryLabel, foodGroups } from "./model";
+import { toast } from "sonner";
+import { useConfirm } from "./components/confirmation";
+import { StatusAlert } from "./components/status-alert";
+import { useNow } from "./data";
+import { expiryLabel, foodGroups, localTimestamp } from "./model";
 import type { Food, Language } from "./model";
+import { foodStatus, relativeExpiryText } from "./state/dashboard-machine";
 import { categories, categoryLabel, foodName, words } from "./words";
+
+const CAT_EMOJIS: Record<string, string> = {
+  Dairy: "🥛",
+  Produce: "🥬",
+  Meat: "🥩",
+  Seafood: "🦐",
+  Beverage: "🧃",
+  Condiments: "🧂",
+  Leftovers: "🍱",
+  Bakery: "🍞",
+  Snacks: "🍪",
+  Other: "📦",
+};
 
 function route(fridgeId: string, itemId?: string) {
   return (
@@ -21,6 +37,12 @@ function inventoryEndpoint(fridgeId: string) {
   return "/api/fridges/" + encodeURIComponent(fridgeId) + "/inventory";
 }
 
+function addDaysBangkok(days: number): string {
+  return new Date(Date.now() + days * 86_400_000 + 7 * 3600_000)
+    .toISOString()
+    .slice(0, 10);
+}
+
 function FoodPhoto({
   fridgeId,
   food,
@@ -33,26 +55,162 @@ function FoodPhoto({
   const [failed, setFailed] = useState(false);
   const t = words[language];
 
-  if (!food.hasPhoto) return <p className="photo-placeholder">{t.noPhoto}</p>;
+  if (!food.hasPhoto) {
+    return (
+      <div className="d-photo">
+        <p className="sub">{t.noPhoto}</p>
+      </div>
+    );
+  }
   if (failed) {
     return (
-      <p className="photo-placeholder" role="alert">
-        {t.photoError}
-      </p>
+      <div className="d-photo">
+        <p className="sub" role="alert">
+          {t.photoError}
+        </p>
+      </div>
     );
   }
   return (
-    <img
-      className="food-photo"
-      src={
-        inventoryEndpoint(fridgeId) +
-        "/" +
-        encodeURIComponent(food.id) +
-        "/photo"
-      }
-      alt={foodName(food, language)}
-      onError={() => setFailed(true)}
-    />
+    <div className="d-photo">
+      <img
+        className="food-photo"
+        src={
+          inventoryEndpoint(fridgeId) +
+          "/" +
+          encodeURIComponent(food.id) +
+          "/photo"
+        }
+        alt={foodName(food, language)}
+        width={800}
+        height={600}
+        decoding="async"
+        fetchPriority="high"
+        onError={() => setFailed(true)}
+      />
+    </div>
+  );
+}
+
+function FoodMatchingCopies({
+  group,
+  currentFoodId,
+  fridgeId,
+  language,
+}: {
+  group: Food[];
+  currentFoodId: string;
+  fridgeId: string;
+  language: Language;
+}) {
+  if (group.length <= 1) return null;
+  const th = language === "th";
+  const t = words[language];
+  const cameraLabel = th ? "กล้อง C0" : "Camera C0";
+  const manualLabel = th ? "เพิ่มเอง" : "Manual";
+
+  return (
+    <div className="subblock">
+      <p className="small">{t.matching}</p>
+      <ul className="copies">
+        {group.map((item, index) => {
+          const sourceText =
+            item.checkInSource === "CAMERA" ? cameraLabel : manualLabel;
+          return (
+            <li key={item.id}>
+              <div className="flex flex-wrap items-center gap-2">
+                <Link
+                  className={item.id === currentFoodId ? "primary sm" : "btn sm"}
+                  to={route(fridgeId, item.id)}
+                  aria-current={item.id === currentFoodId ? "page" : undefined}
+                >
+                  {t.itemNumber} {index + 1}
+                </Link>
+                {item.checkInSource && (
+                  <span className="pill neutral">{sourceText}</span>
+                )}
+                {typeof item.confidence === "number" && (
+                  <span className="small num">
+                    {Math.round(item.confidence * 100)}%
+                  </span>
+                )}
+              </div>
+              {item.checkInTimestampS ? (
+                <span className="small">
+                  {localTimestamp(item.checkInTimestampS, language)}
+                </span>
+              ) : null}
+            </li>
+          );
+        })}
+      </ul>
+    </div>
+  );
+}
+
+function FoodEditForm({
+  food,
+  language,
+  busy,
+  onSave,
+}: {
+  food: Food;
+  language: Language;
+  busy: boolean;
+  onSave: (event: FormEvent<HTMLFormElement>) => void;
+}) {
+  const t = words[language];
+  const defaultCategory = Object.hasOwn(categories, food.category)
+    ? food.category
+    : "Other";
+
+  return (
+    <form className="subblock add-form" onSubmit={onSave}>
+      <fieldset disabled={busy}>
+        <label>
+          {t.nameEn}
+          <input
+            name="name_en"
+            defaultValue={food.nameEn}
+            required
+            maxLength={100}
+          />
+        </label>
+        <label>
+          {t.nameTh}
+          <input
+            name="name_th"
+            defaultValue={food.nameTh}
+            required
+            maxLength={100}
+          />
+        </label>
+        <label>
+          {t.expiry}
+          <input
+            name="expiry"
+            type="date"
+            defaultValue={food.expiry}
+            required
+          />
+        </label>
+        <label>
+          {t.category}
+          <select name="category" defaultValue={defaultCategory}>
+            {Object.keys(categories).map((category) => (
+              <option key={category} value={category}>
+                {categoryLabel(category, language)}
+              </option>
+            ))}
+          </select>
+        </label>
+      </fieldset>
+      <div className="form-actions">
+        <button className="primary" disabled={busy} type="submit">
+          {busy ? t.saving : t.save}
+        </button>
+      </div>
+    </form>
   );
 }
 
@@ -63,6 +221,7 @@ interface FoodDetailProps {
   language: Language;
   onChanged: () => void;
 }
+
 export function FoodDetail(props: FoodDetailProps) {
   return (
     <FoodDetailEditor
@@ -71,6 +230,7 @@ export function FoodDetail(props: FoodDetailProps) {
     />
   );
 }
+
 function FoodDetailEditor({
   itemId,
   items,
@@ -78,7 +238,9 @@ function FoodDetailEditor({
   language,
   onChanged,
 }: FoodDetailProps) {
+  const th = language === "th";
   const t = words[language];
+  const now = useNow();
   const navigate = useNavigate();
   const [editing, setEditing] = useState(false);
   const [busy, setBusy] = useState(false);
@@ -90,14 +252,25 @@ function FoodDetailEditor({
     entries.some((food) => food.id === itemId),
   );
   const food = group?.find((entry) => entry.id === itemId);
-  if (!group || !food) return <p role="status">{t.itemMissing}</p>;
 
-  const advice =
-    language === "th"
-      ? food.adviceTh || food.adviceEn
-      : food.adviceEn || food.adviceTh;
-  const itemUrl =
-    inventoryEndpoint(fridgeId) + "/" + encodeURIComponent(food.id);
+  if (!group || !food) {
+    return (
+      <section className="food-detail panel">
+        <output className="sub">{t.itemMissing}</output>
+        <div>
+          <Link className="primary" to={"/fridges/" + encodeURIComponent(fridgeId)}>
+            <ArrowLeft size={18} aria-hidden="true" />
+            {th ? "กลับไปหน้ารายการอาหาร" : "Back to food list"}
+          </Link>
+        </div>
+      </section>
+    );
+  }
+
+  const advice = th ? food.adviceTh || food.adviceEn : food.adviceEn || food.adviceTh;
+  const itemUrl = inventoryEndpoint(fridgeId) + "/" + encodeURIComponent(food.id);
+  const status = foodStatus(food, now);
+  const relText = relativeExpiryText(food, now, language);
 
   async function saveEdit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -138,7 +311,7 @@ function FoodDetailEditor({
 
   async function removeItem() {
     if (busy || !food) return;
-    if (!(await confirm(t.confirmDeleteFood, t.deleteFood))) return;
+    if (!(await confirm(t.confirmDeleteFood, t.deleteFood, "take"))) return;
     setBusy(true);
     setError(null);
     try {
@@ -148,7 +321,36 @@ function FoodDetailEditor({
       });
       if (!res.ok) throw new Error("Delete failed");
       onChanged();
-      toast.success(t.deleteFood);
+      const removedLabel = foodName(food, language);
+      toast.success(t.deleteFood, {
+        duration: 6000,
+        action: {
+          label: th ? "เลิกทำ" : "Undo",
+          onClick: () => {
+            void fetch(inventoryEndpoint(fridgeId), {
+              method: "POST",
+              credentials: "same-origin",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({
+                item_id: crypto.randomUUID(),
+                name: food.nameEn || food.nameTh || removedLabel,
+                estimated_expiry_date: food.expiry,
+                category: Object.hasOwn(categories, food.category)
+                  ? food.category
+                  : "Other",
+                jpeg_base64: null,
+              }),
+            })
+              .then((r) => {
+                if (!r.ok) throw new Error("Undo failed");
+                onChanged();
+              })
+              .catch(() => {
+                toast.error(th ? "เลิกทำไม่สำเร็จ" : "Could not undo");
+              });
+          },
+        },
+      });
       navigate("/fridges/" + encodeURIComponent(fridgeId), { replace: true });
     } catch {
       setError(t.actionFailed);
@@ -159,131 +361,100 @@ function FoodDetailEditor({
   }
 
   return (
-    <section className="food-detail">
-      <h1>{foodName(food, language)}</h1>
-      {notice && (
-        <p role="status" className="notice">
-          {notice}
-        </p>
+    <section className="food-detail panel">
+      <div className="page-head">
+        <div className="page-head-copy">
+          <Link
+            className="btn sm"
+            to={"/fridges/" + encodeURIComponent(fridgeId)}
+          >
+            <ArrowLeft size={16} aria-hidden="true" />
+            {th ? "กลับ" : "Back"}
+          </Link>
+          <h1>{foodName(food, language)}</h1>
+        </div>
+        <span className="pill neutral">
+          {CAT_EMOJIS[food.category] ?? "📦"} {categoryLabel(food.category, language) || "—"}
+        </span>
+      </div>
+
+      {notice && <output className="pill accent">{notice}</output>}
+      {error && (
+        <StatusAlert
+          action={
+            <button type="button" className="btn sm" onClick={() => setError(null)}>
+              {th ? "ปิด" : "Dismiss"}
+            </button>
+          }
+        >
+          {error}
+        </StatusAlert>
       )}
-      {error && <StatusAlert>{error}</StatusAlert>}
+
       <FoodPhoto
         key={JSON.stringify([fridgeId, food.id, food.hasPhoto])}
         fridgeId={fridgeId}
         food={food}
         language={language}
       />
-      <dl className="item-facts">
+
+      <div className={`d-exp ${status}`}>
         <div>
-          <dt>{t.expiry}</dt>
-          <dd>{expiryLabel(food.expiry, language)}</dd>
+          <strong>{relText}</strong>
+          <p className="small">
+            {t.expiry}: {expiryLabel(food.expiry, language)}
+          </p>
         </div>
-        <div>
-          <dt>{t.category}</dt>
-          <dd>{categoryLabel(food.category, language) || "—"}</dd>
-        </div>
-        <div>
-          <dt>{t.duplicates}</dt>
-          <dd>{group.length - 1}</dd>
-        </div>
-      </dl>
-      {group.length > 1 && (
-        <div>
-          <p className="small">{t.matching}</p>
-          <div className="item-picker">
-            {group.map((item, index) => (
-              <Link
-                key={item.id}
-                to={route(fridgeId, item.id)}
-                aria-current={item.id === food.id ? "page" : undefined}
-              >
-                {t.itemNumber} {index + 1}
-              </Link>
-            ))}
-          </div>
+        <span className={`pill ${status}`}>
+          {t.duplicates}: {group.length - 1}
+        </span>
+      </div>
+
+      {advice && (
+        <div className="subblock">
+          <h3>{th ? "คำแนะนำการเก็บรักษา" : "Storage tip"}</h3>
+          <p>{advice}</p>
         </div>
       )}
-      {advice && <p>{advice}</p>}
+
+      <FoodMatchingCopies
+        group={group}
+        currentFoodId={food.id}
+        fridgeId={fridgeId}
+        language={language}
+      />
 
       <div className="form-actions">
         <button
           type="button"
-          className="secondary"
+          className="btn"
           disabled={busy}
           onClick={() => {
             setEditing((prev) => !prev);
             setError(null);
           }}
         >
+          <Pencil size={17} aria-hidden="true" />
           {editing ? t.cancel : t.editFood}
         </button>
         <button
           type="button"
-          className="danger"
+          className="take-solid"
           disabled={busy}
           onClick={() => void removeItem()}
         >
+          <Trash2 size={17} aria-hidden="true" />
           {t.deleteFood}
         </button>
       </div>
 
       {editing && (
-        <form
-          className="surface add-form edit-form"
-          onSubmit={(event) => void saveEdit(event)}
-        >
-          <fieldset disabled={busy}>
-            <label>
-              {t.nameEn}
-              <input
-                name="name_en"
-                defaultValue={food.nameEn}
-                required
-                maxLength={100}
-              />
-            </label>
-            <label>
-              {t.nameTh}
-              <input
-                name="name_th"
-                defaultValue={food.nameTh}
-                required
-                maxLength={100}
-              />
-            </label>
-            <label>
-              {t.expiry}
-              <input
-                name="expiry"
-                type="date"
-                defaultValue={food.expiry}
-                required
-              />
-            </label>
-            <label>
-              {t.category}
-              <select
-                name="category"
-                defaultValue={
-                  Object.hasOwn(categories, food.category)
-                    ? food.category
-                    : "Other"
-                }
-              >
-                {Object.keys(categories).map((category) => (
-                  <option key={category} value={category}>
-                    {categoryLabel(category, language)}
-                  </option>
-                ))}
-              </select>
-            </label>
-          </fieldset>
-          <div className="form-actions">
-            <button className="primary" disabled={busy} type="submit">
-              {busy ? t.saving : t.save}
-            </button>
-          </div>
-        </form>
+        <FoodEditForm
+          food={food}
+          language={language}
+          busy={busy}
+          onSave={(event) => void saveEdit(event)}
+        />
       )}
     </section>
   );
@@ -292,28 +463,116 @@ function FoodDetailEditor({
 async function prepareJpeg(file: File): Promise<string> {
   if (file.size > 25_000_000) throw new Error("Photo is too large");
   const url = URL.createObjectURL(file);
+  const image = new Image();
+  image.src = url;
   try {
-    const image = new Image();
-    image.src = url;
     await image.decode();
-    const scale = Math.min(
-      1,
-      1440 / Math.max(image.naturalWidth, image.naturalHeight),
-    );
-    const canvas = document.createElement("canvas");
-    canvas.width = Math.max(1, Math.round(image.naturalWidth * scale));
-    canvas.height = Math.max(1, Math.round(image.naturalHeight * scale));
-    const context = canvas.getContext("2d");
-    if (!context) throw new Error("Photo processing unavailable");
-    context.fillStyle = "#fff";
-    context.fillRect(0, 0, canvas.width, canvas.height);
-    context.drawImage(image, 0, 0, canvas.width, canvas.height);
-    const jpeg = canvas.toDataURL("image/jpeg", 0.8).split(",")[1];
-    if (!jpeg || jpeg.length > 2_000_000) throw new Error("Photo is too large");
-    return jpeg;
-  } finally {
     URL.revokeObjectURL(url);
+  } catch (err) {
+    URL.revokeObjectURL(url);
+    throw err;
   }
+  const scale = Math.min(
+    1,
+    1440 / Math.max(image.naturalWidth, image.naturalHeight),
+  );
+  const canvas = document.createElement("canvas");
+  canvas.width = Math.max(1, Math.round(image.naturalWidth * scale));
+  canvas.height = Math.max(1, Math.round(image.naturalHeight * scale));
+  const context = canvas.getContext("2d");
+  if (!context) throw new Error("Photo processing unavailable");
+  context.fillStyle = "#fff";
+  context.fillRect(0, 0, canvas.width, canvas.height);
+  context.drawImage(image, 0, 0, canvas.width, canvas.height);
+  const jpeg = canvas.toDataURL("image/jpeg", 0.8).split(",")[1];
+  if (!jpeg || jpeg.length > 2_000_000) throw new Error("Photo is too large");
+  return jpeg;
+}
+
+function AddFoodCategoryField({
+  category,
+  language,
+  onChange,
+}: {
+  category: string;
+  language: Language;
+  onChange: (next: string) => void;
+}) {
+  const t = words[language];
+  return (
+    <div className="flex flex-col gap-2">
+      <label>
+        {t.category}
+        <select
+          name="category"
+          value={category}
+          onChange={(e) => onChange(e.target.value)}
+        >
+          {Object.keys(categories).map((cat) => (
+            <option key={cat} value={cat}>
+              {categoryLabel(cat, language)}
+            </option>
+          ))}
+        </select>
+      </label>
+    </div>
+  );
+}
+
+function AddFoodPhotoField({
+  photo,
+  photoBusy,
+  language,
+  onSelect,
+  onClear,
+}: {
+  photo: string | null;
+  photoBusy: boolean;
+  language: Language;
+  onSelect: (file: File | undefined) => void;
+  onClear: () => void;
+}) {
+  const t = words[language];
+  return (
+    <div className="photo-box">
+      <p className="font-semibold">{t.optionalPhoto}</p>
+      {photo && (
+        <img
+          className="food-preview"
+          src={"data:image/jpeg;base64," + photo}
+          alt=""
+        />
+      )}
+      <div className="form-actions">
+        {([false, true] as const).map((camera) => (
+          <label className="primary sm photo-label" key={String(camera)}>
+            {camera ? (
+              <Camera size={16} aria-hidden="true" />
+            ) : (
+              <ImageIcon size={16} aria-hidden="true" />
+            )}
+            {camera ? t.takePhoto : t.pickPhoto}
+            <input
+              type="file"
+              accept="image/*"
+              capture={camera ? "environment" : undefined}
+              disabled={photoBusy}
+              onChange={(event) => {
+                const file = event.currentTarget.files?.[0];
+                event.currentTarget.value = "";
+                onSelect(file);
+              }}
+            />
+          </label>
+        ))}
+        {photo && (
+          <button type="button" className="btn sm" onClick={onClear}>
+            {t.removePhoto}
+          </button>
+        )}
+      </div>
+    </div>
+  );
 }
 
 export function AddFood({
@@ -325,8 +584,12 @@ export function AddFood({
   language: Language;
   onAdded: () => void;
 }) {
+  const th = language === "th";
   const t = words[language];
   const navigate = useNavigate();
+  const [name, setName] = useState("");
+  const [expiry, setExpiry] = useState(() => addDaysBangkok(7));
+  const [category, setCategory] = useState("Other");
   const [photo, setPhoto] = useState<string | null>(null);
   const [photoBusy, setPhotoBusy] = useState(false);
   const [error, setError] = useState<"photo" | "save" | null>(null);
@@ -349,11 +612,10 @@ export function AddFood({
   async function save(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     if (saving || photoBusy) return;
-    const form = new FormData(event.currentTarget);
     const payload = {
-      name: String(form.get("name") ?? "").trim(),
-      estimated_expiry_date: String(form.get("expiry") ?? ""),
-      category: String(form.get("category") ?? "Other"),
+      name: name.trim(),
+      estimated_expiry_date: expiry,
+      category,
       jpeg_base64: photo,
     };
     const key = JSON.stringify(payload);
@@ -372,6 +634,7 @@ export function AddFood({
       });
       if (!response.ok) throw new Error("Save failed");
       onAdded();
+      toast.success(t.saved);
       navigate("/fridges/" + encodeURIComponent(fridgeId), {
         replace: true,
         state: { added: true },
@@ -382,91 +645,117 @@ export function AddFood({
     }
   }
 
+  const presets = [
+    [3, th ? "อีก 3 วัน" : "In 3 days"],
+    [7, th ? "อีก 7 วัน" : "In 7 days"],
+    [14, th ? "อีก 14 วัน" : "In 14 days"],
+    [30, th ? "อีก 30 วัน" : "In 30 days"],
+  ] as const;
+
+
   return (
-    <section className="food-detail">
-      <h1>{t.addFood}</h1>
-      <form className="surface add-form" onSubmit={(event) => void save(event)}>
+    <section className="food-detail panel">
+      <div className="page-head">
+        <div className="page-head-copy">
+          <h1>{t.addFood}</h1>
+          <p className="sub">
+            {th
+              ? "ตั้งวันหมดอายุเริ่มต้นให้แล้ว สามารถปรับได้ตามฉลาก"
+              : "Pre-filled with a 1-week default so check-in takes seconds."}
+          </p>
+        </div>
+      </div>
+
+      <form className="add-form" onSubmit={(event) => void save(event)}>
         <fieldset disabled={saving}>
           <label>
             {t.name}
-            <input name="name" required maxLength={100} autoComplete="off" />
+            <input
+              name="name"
+              value={name}
+              onChange={(e) => setName(e.target.value)}
+              required
+              maxLength={100}
+              autoComplete="off"
+              placeholder={th ? "เช่น นมสด, ไข่ไก่" : "e.g. Milk, Eggs"}
+            />
           </label>
+
           <label>
             {t.expiry}
             <input
               name="expiry"
               type="date"
+              value={expiry}
+              onChange={(e) => setExpiry(e.target.value)}
               required
               aria-describedby="expiry-help"
             />
           </label>
+          <fieldset className="quick"><legend className="small">{th ? "วันหมดอายุนับจากวันนี้" : "Expiry from today"}</legend>
+            {presets.map(([days, label]) => (
+              <button
+                key={days}
+                type="button"
+                className="chip"
+                aria-pressed={expiry === addDaysBangkok(days)}
+                onClick={() => setExpiry(addDaysBangkok(days))}
+              >
+                {label}
+              </button>
+            ))}
+          </fieldset>
           <p className="small" id="expiry-help">
             {t.expiryHelp}
           </p>
-          <label>
-            {t.category}
-            <select name="category" defaultValue="Other">
-              {Object.keys(categories).map((category) => (
-                <option key={category} value={category}>
-                  {categoryLabel(category, language)}
-                </option>
-              ))}
-            </select>
-          </label>
-          <div className="photo-picker">
-            <p>{t.optionalPhoto}</p>
-            {photo && (
-              <img
-                className="food-preview"
-                src={"data:image/jpeg;base64," + photo}
-                alt=""
-              />
-            )}
-            <div className="photo-actions">
-              {([false, true] as const).map((camera) => (
-                <label className="secondary photo-label" key={String(camera)}>
-                  {camera ? t.takePhoto : t.pickPhoto}
-                  <input
-                    type="file"
-                    accept="image/*"
-                    capture={camera ? "environment" : undefined}
-                    disabled={photoBusy}
-                    onChange={(event) => {
-                      const file = event.currentTarget.files?.[0];
-                      event.currentTarget.value = "";
-                      void selectPhoto(file);
-                    }}
-                  />
-                </label>
-              ))}
-              {photo && (
+
+          <AddFoodCategoryField
+            category={category}
+            language={language}
+            onChange={setCategory}
+          />
+
+          <AddFoodPhotoField
+            photo={photo}
+            photoBusy={photoBusy}
+            language={language}
+            onSelect={(file) => void selectPhoto(file)}
+            onClear={() => setPhoto(null)}
+          />
+        </fieldset>
+
+        {photoBusy && <output className="small">{t.loading}</output>}
+        {error && (
+          <StatusAlert
+            action={
+              error === "photo" ? (
                 <button
                   type="button"
-                  className="secondary"
-                  onClick={() => setPhoto(null)}
+                  className="btn sm"
+                  onClick={() => {
+                    setPhoto(null);
+                    setError(null);
+                  }}
                 >
-                  {t.removePhoto}
+                  {th ? "ดำเนินการต่อโดยไม่มีรูป" : "Continue without photo"}
                 </button>
-              )}
-            </div>
-          </div>
-        </fieldset>
-        {photoBusy && <p role="status">{t.loading}</p>}
-        {error && (
-          <p className="error" role="alert">
+              ) : undefined
+            }
+          >
             {error === "photo" ? t.fileError : t.saveError}
-          </p>
+          </StatusAlert>
         )}
+
         <div className="form-actions">
           <button
-            className="primary"
+            className="primary big"
             disabled={saving || photoBusy}
             type="submit"
           >
             {saving ? t.saving : t.save}
           </button>
           <Link
-            className="secondary"
+            className="btn big"
             to={"/fridges/" + encodeURIComponent(fridgeId)}
           >
             {t.cancel}

@@ -1,486 +1,428 @@
-import { useNow } from "./data";
-import { words } from "./words";
-import { memo, useMemo, useState } from "react";
+import { useMemo, useState } from "react";
+import { Link, useSearchParams } from "react-router-dom";
+import {
+  CartesianGrid,
+  Line,
+  LineChart,
+  ReferenceLine,
+  ResponsiveContainer,
+  Tooltip,
+  XAxis,
+  YAxis,
+} from "recharts";
 import useSWR from "swr";
-import { getJson, swrOptions } from "./lib/api";
-import { readBucket, localTimestamp } from "./model";
-import type { Sample, Language, DoorEvent } from "./model";
-import { Metrics } from "./Metrics";
+import { useNow } from "./data";
 import { StatusAlert } from "./components/status-alert";
-const series = [
-  {
-    key: "temperature",
-    th: "อุณหภูมิ",
-    en: "Temperature",
-    unit: "°C",
-    limit: 8,
-    color: "#4E7A12",
-  },
-  {
-    key: "voc",
-    th: "VOC",
-    en: "VOC",
-    unit: "VOC",
-    limit: 250,
-    color: "#7256A8",
-  },
-  {
-    key: "light",
-    th: "แสง",
-    en: "Light",
-    unit: "LDR",
-    limit: 200,
-    color: "#BD6F12",
-  },
+import { getJson, swrOptions } from "./lib/api";
+import { localTimestamp, readBucket } from "./model";
+import type { Language, Sample } from "./model";
+import { CHART_SERIES } from "./state/dashboard-machine";
+import type { ChartRange, SeriesKey } from "./state/dashboard-machine";
+
+const ranges = { "1h": 3600, "24h": 86400, "7d": 604800, "30d": 2592000 };
+const periods = [
+  ["1h", "1 ชั่วโมง", "1 hour"],
+  ["24h", "24 ชั่วโมง", "24 hours"],
+  ["7d", "7 วัน", "7 days"],
+  ["30d", "30 วัน", "30 days"],
 ] as const;
-function chartGeometry(points: Sample[], activeSeries: readonly Series[]) {
-  const first = points[0]?.timeS ?? 0;
-  const last = points.at(-1)?.timeS ?? first + 1;
-  const span = Math.max(1, last - first);
-  const ceiling = Math.max(
-    1.25,
-    ...points.flatMap((point) =>
-      activeSeries.map((s) =>
-        point[s.key] === null ? 0 : point[s.key]! / s.limit,
-      ),
-    ),
-  );
-  const x = (time: number) => 40 + ((time - first) / span) * 640;
-  const y = (value: number) => 220 - (Math.max(0, value) / ceiling) * 190;
-  return { first, last, span, x, y };
-}
-type Series = (typeof series)[number];
-const SensorLine = memo(function SensorLine({
+const PAGE_SIZE = 10;
+type Series = (typeof CHART_SERIES)[number];
+
+function ReadingTable({
   points,
-  item,
-  x,
-  y,
+  language,
+  series,
 }: {
   points: Sample[];
-  item: Series;
-  x: (time: number) => number;
-  y: (value: number) => number;
+  language: Language;
+  series: Series[];
 }) {
-  const segments: string[] = [];
-  let path = "";
-  for (const point of points) {
-    const value = point[item.key];
-    if (value === null) {
-      if (path) segments.push(path);
-      path = "";
-    } else {
-      path +=
-        (path ? " L" : "M") +
-        x(point.timeS).toFixed(1) +
-        " " +
-        y(value / item.limit).toFixed(1);
-    }
-  }
-  if (path) segments.push(path);
+  const [page, setPage] = useState(0);
+  const th = language === "th";
+  const pages = Math.ceil(points.length / PAGE_SIZE);
+  const current = Math.min(page, pages - 1);
+  const end = points.length - current * PAGE_SIZE;
+  const rows = points.slice(Math.max(0, end - PAGE_SIZE), end).reverse();
+
   return (
-    <g key={item.key}>
-      {segments.map((segment, i) => (
-        <path
-          key={i}
-          d={segment}
-          stroke={item.color}
-          strokeWidth="2.5"
-          strokeLinecap="round"
-          fill="none"
-        />
-      ))}
-    </g>
+    <details className="history-readings">
+      <summary>
+        {th ? "ตารางค่าที่วัดได้" : "Readings table"} ({points.length})
+      </summary>
+      <table className="history-table chart-reading-table">
+        <thead>
+          <tr>
+            <th scope="col">{th ? "เวลา (ไทย)" : "Time (Bangkok)"}</th>
+            {series.map(({ key, th: thai, en, unit }) => (
+              <th key={key} scope="col">
+                {key === "voc" ? "VOC" : (th ? thai : en) + " (" + unit + ")"}
+              </th>
+            ))}
+          </tr>
+        </thead>
+        <tbody>
+          {rows.map((row) => (
+            <tr key={row.timeS}>
+              <td>{localTimestamp(row.timeS, language)}</td>
+              {series.map(({ key }) => (
+                <td key={key}>{row[key] ?? "—"}</td>
+              ))}
+            </tr>
+          ))}
+        </tbody>
+      </table>
+      <div className="history-pagination">
+        <button
+          type="button"
+          className="btn sm"
+          disabled={current === 0}
+          onClick={() => setPage(current - 1)}
+        >
+          {th ? "ใหม่กว่า" : "Newer"}
+        </button>
+        <output>
+          {current + 1} / {pages}
+        </output>
+        <button
+          type="button"
+          className="btn sm"
+          disabled={current + 1 >= pages}
+          onClick={() => setPage(current + 1)}
+        >
+          {th ? "เก่ากว่า" : "Older"}
+        </button>
+      </div>
+    </details>
   );
-});
-function useChartHistory({
-  fridgeId,
+}
+
+function SensorPlot({
+  series,
+  points,
   language,
-  latest,
-  doorEvents,
+  axisTime,
+  height,
+  readingTime,
 }: {
+  series: Series;
+  points: Sample[];
+  language: Language;
+  axisTime: Intl.DateTimeFormat;
+  height: number;
+  readingTime: number | null;
+}) {
+  const th = language === "th";
+  const metric = series.key;
+  const label = th ? series.th : series.en;
+  const valueCount = points.filter((point) => point[metric] !== null).length;
+  return (
+    <div className="sensor-series">
+      <h2>{metric === "voc" ? label : `${label} (${series.unit})`}</h2>
+      {valueCount > 0 ? (
+        <ResponsiveContainer width="100%" height={height} minWidth={0}>
+          <LineChart data={points} margin={{ right: 16, top: 12, left: 0 }}>
+            <CartesianGrid strokeDasharray="3 3" vertical={false} />
+            <XAxis
+              dataKey="timeS"
+              type="number"
+              domain={["dataMin", "dataMax"]}
+              tickFormatter={(time: number) => axisTime.format(time * 1000)}
+              minTickGap={28}
+            />
+            <YAxis
+              width={42}
+              domain={[
+                (min: number) => Math.min(min, series.limit),
+                (max: number) => Math.max(max, series.limit),
+              ]}
+            />
+            <ReferenceLine
+              y={series.limit}
+              stroke="var(--muted-ink)"
+              strokeDasharray="4 4"
+            />
+            {readingTime !== null && (
+              <ReferenceLine x={readingTime} stroke="var(--control-border)" />
+            )}
+            <Tooltip
+              labelFormatter={(time) => localTimestamp(Number(time), language)}
+            />
+            <Line
+              dataKey={metric}
+              name={label}
+              unit={" " + series.unit}
+              stroke={series.textColor}
+              strokeWidth={2}
+              dot={valueCount === 1}
+              isAnimationActive={false}
+            />
+          </LineChart>
+        </ResponsiveContainer>
+      ) : (
+        <p className="small">
+          {th
+            ? "เซนเซอร์ไม่ได้ส่งค่านี้ในช่วงที่เลือก"
+            : "No values for this metric in the selected period."}
+        </p>
+      )}
+      {valueCount > 0 && (
+        <p className="small">
+          {th ? "เส้นประแสดงเกณฑ์" : "Dashed line shows the threshold"} (
+          {series.limit} {series.unit})
+        </p>
+      )}
+    </div>
+  );
+}
+
+type ChartsProps = {
   fridgeId: string;
   language: Language;
   latest: Sample | null;
-  doorEvents: DoorEvent[];
-}) {
+};
+
+export function Charts(props: ChartsProps) {
+  const [params] = useSearchParams();
+  const linkedMetric = CHART_SERIES.find(
+    ({ key }) => key === params.get("metric"),
+  );
+  const initialMetric = linkedMetric?.key ?? "temperature";
+  return (
+    <ChartContents
+      key={props.fridgeId + "/" + initialMetric}
+      initialMetric={initialMetric}
+      {...props}
+    />
+  );
+}
+
+function ChartContents({
+  fridgeId,
+  language,
+  latest,
+  initialMetric,
+}: ChartsProps & { initialMetric: SeriesKey }) {
   const th = language === "th";
   const now = useNow();
-  const t = words[language];
+  const [metrics, setMetrics] = useState<SeriesKey[]>([initialMetric]);
+  const series = CHART_SERIES.filter(({ key }) => metrics.includes(key));
+  const [range, setRange] = useState<ChartRange>("24h");
+  const periodIndex = periods.findIndex(([key]) => key === range);
+  const period = periods[periodIndex] ?? periods[1];
   const [node, setNode] = useState("");
-  const [range, setRange] = useState("24h");
-  const [enabled, setEnabled] = useState<string[]>([
-    "temperature",
-    "voc",
-    "light",
-  ]);
-  const [index, setIndex] = useState<number | null>(null);
-  const [door, setDoor] = useState<DoorEvent | null>(null);
+  const [selectedTime, setSelectedTime] = useState<number | null>(null);
+  const base = "/api/fridges/" + encodeURIComponent(fridgeId);
   const state = useSWR(
-    `/api/fridges/${encodeURIComponent(fridgeId)}/telemetry?range=${range}`,
-    (url) => getJson(url, readBucket),
-    { ...swrOptions, refreshInterval: 30000 },
+    base + "/telemetry?range=" + range,
+    (url: string) => getJson(url, readBucket),
+    {
+      ...swrOptions,
+      refreshInterval: 30000,
+    },
   );
   const allPoints = useMemo(() => {
-    const data = state.data ?? [];
-    const seconds: Record<string, number> = {
-      "1h": 3600,
-      "24h": 86400,
-      "7d": 604800,
-      "30d": 2592000,
-    };
-    return latest && latest.timeS >= now - seconds[range]!
-      ? [
-          ...data.filter(
-            (sample) =>
-              sample.timeS !== latest.timeS || sample.nodeId !== latest.nodeId,
-          ),
-          latest,
-        ]
-          .sort((a, b) => a.timeS - b.timeS)
-          .slice(-2000)
-      : data;
+    const saved = state.data ?? [];
+    if (!latest || latest.timeS < now - ranges[range]) return saved;
+    return [
+      ...saved.filter(
+        (sample) =>
+          sample.timeS !== latest.timeS || sample.nodeId !== latest.nodeId,
+      ),
+      latest,
+    ].sort((a, b) => a.timeS - b.timeS);
   }, [state.data, latest, range, now]);
   const nodes = [...new Set(allPoints.map((point) => point.nodeId))].sort();
-  const activeNode = nodes.includes(node)
-    ? node
-    : nodes.includes(latest?.nodeId ?? "")
-      ? latest!.nodeId
-      : nodes[0];
-  const points = useMemo(
-    () => allPoints.filter((point) => point.nodeId === activeNode),
-    [allPoints, activeNode],
+  const activeNode =
+    [node, latest?.nodeId].find(
+      (id): id is string => id !== undefined && nodes.includes(id),
+    ) ?? nodes[0];
+  const points = allPoints.filter((point) => point.nodeId === activeNode);
+  const index = points.findIndex((point) => point.timeS === selectedTime);
+  const selected = points[index] ?? points.at(-1);
+  const plottedSeconds = (points.at(-1)?.timeS ?? 0) - (points[0]?.timeS ?? 0);
+  const axisTime = new Intl.DateTimeFormat(
+    language === "th" ? "th-TH" : "en-GB",
+    {
+      timeZone: "Asia/Bangkok",
+      ...(plottedSeconds > ranges["24h"] && {
+        day: "numeric",
+        month: "short",
+      }),
+      ...(plottedSeconds < ranges["7d"] && {
+        hour: "2-digit",
+        minute: "2-digit",
+      }),
+    },
   );
-  const activeSeries = useMemo(() => {
-    const keys = new Set(enabled);
-    return series.filter((item) => keys.has(item.key));
-  }, [enabled]);
-  const selected = points.length
-    ? points[Math.min(index ?? points.length - 1, points.length - 1)]
-    : undefined;
-  const { first, last, span, x, y } = useMemo(
-    () => chartGeometry(points, activeSeries),
-    [points, activeSeries],
-  );
-  return {
-    th,
-    now,
-    t,
-    node,
-    setNode,
-    range,
-    setRange,
-    enabled,
-    setEnabled,
-    index,
-    setIndex,
-    door,
-    setDoor,
-    state,
-    nodes,
-    activeNode,
-    points,
-    selected,
-    first,
-    last,
-    span,
-    x,
-    y,
-    activeSeries,
-    doorEvents,
-    language,
-  };
-}
-type ChartView = ReturnType<typeof useChartHistory>;
-function ChartSeriesControls({ view }: { view: ChartView }) {
-  const { th, enabled, setEnabled } = view;
+
   return (
-    <>
-      <div className="series-controls">
-        {series.map((item) => (
-          <button
-            type="button"
-            key={item.key}
-            aria-pressed={enabled.includes(item.key)}
-            disabled={enabled.length === 1 && enabled.includes(item.key)}
-            onClick={() =>
-              setEnabled(
-                enabled.includes(item.key)
-                  ? enabled.filter((key) => key !== item.key)
-                  : [...enabled, item.key],
-              )
-            }
-          >
-            <span style={{ background: item.color }} />
-            {th ? item.th : item.en}
-          </button>
-        ))}
-      </div>
-    </>
-  );
-}
-function SensorPlot({ view }: { view: ChartView }) {
-  const { doorEvents } = view;
-  const {
-    th,
-    setIndex,
-    points,
-    selected,
-    first,
-    last,
-    span,
-    x,
-    y,
-    activeSeries,
-  } = view;
-  return (
-    <>
-      <svg
-        viewBox="0 0 720 250"
-        role="img"
-        aria-label={
-          th
-            ? "กราฟเซนเซอร์เทียบค่าอ้างอิง"
-            : "Sensor readings relative to reference values"
-        }
-        onPointerMove={(event) => {
-          const bounds = event.currentTarget.getBoundingClientRect();
-          const time =
-            first +
-            Math.max(
-              0,
-              Math.min(
-                1,
-                (((event.clientX - bounds.left) / bounds.width) * 720 - 40) /
-                  640,
-              ),
-            ) *
-              span;
-          let nearest = 0;
-          points.forEach((point, i) => {
-            if (
-              Math.abs(point.timeS - time) <
-              Math.abs(points[nearest]!.timeS - time)
-            )
-              nearest = i;
-          });
-          setIndex(nearest);
-        }}
-      >
-        <path d="M40 30V220H680" stroke="#CBD6B9" fill="none" />
-        <path
-          d={`M40 ${y(1)}H680`}
-          stroke="#D6432C"
-          strokeDasharray="6 5"
-          fill="none"
-        />
-        <text x="682" y={y(1) + 4} fontSize="11" fill="#B83322">
-          100%
-        </text>
-        {activeSeries.map((item) => (
-          <SensorLine key={item.key} points={points} item={item} x={x} y={y} />
-        ))}
-        {selected && (
-          <path
-            d={`M${x(selected.timeS)} 30V220`}
-            stroke="#161A12"
-            strokeDasharray="2 4"
-          />
-        )}
-        {doorEvents
-          .filter(
-            (event) => event.timestampS >= first && event.timestampS <= last,
-          )
-          .slice(0, 12)
-          .map((event, i) => (
-            <g
-              key={`${event.timestampS}-${event.nodeId}-${event.status}`}
-              aria-hidden="true"
-            >
-              <rect
-                x={x(event.timestampS) - 8}
-                y={4 + (i % 2) * 13}
-                width="16"
-                height="12"
-                rx="4"
-                fill={event.status === "SUCCESS" ? "#4E7A12" : "#D6432C"}
-              />
-              <title>{event.status}</title>
-            </g>
-          ))}
-      </svg>
-    </>
-  );
-}
-function ChartDoorEvents({ view }: { view: ChartView }) {
-  const { language } = view;
-  const { doorEvents } = view;
-  const { th, t, setDoor, first, last } = view;
-  return (
-    <>
-      <ul
-        className="door-event-chips"
-        aria-label={th ? "เหตุการณ์ประตูบนกราฟ" : "Door events on the chart"}
-      >
-        {doorEvents
-          .filter(
-            (event) => event.timestampS >= first && event.timestampS <= last,
-          )
-          .slice(0, 12)
-          .map((event) => (
-            <li key={event.nodeId + event.timestampS + event.status}>
-              <button
-                type="button"
-                className="secondary"
-                onClick={() => setDoor(event)}
-              >
-                {t[`door_${event.status}`]} ·{" "}
-                {localTimestamp(event.timestampS, language)}
-              </button>
-            </li>
-          ))}
-      </ul>
-    </>
-  );
-}
-function ChartReadings({ view }: { view: ChartView }) {
-  const { language } = view;
-  const { th, t, index, setIndex, door, points, selected } = view;
-  return (
-    <>
-      <label className="chart-scrubber">
-        {th ? "เลือกเวลาที่ต้องการดู" : "Choose a reading"}
-        <input
-          type="range"
-          min={0}
-          max={Math.max(0, points.length - 1)}
-          value={Math.min(index ?? points.length - 1, points.length - 1)}
-          onChange={(e) => setIndex(Number(e.target.value))}
-        />
-      </label>
-      {selected && (
-        <output className="chart-readout">
-          <strong>{localTimestamp(selected.timeS, language)}</strong>
-          {series.map((item) => (
-            <span key={item.key}>
-              {th ? item.th : item.en}: {selected[item.key] ?? "—"} {item.unit}
-            </span>
-          ))}
-        </output>
-      )}
-      {door && (
-        <output className="door-chart-event">
-          {localTimestamp(door.timestampS, language)} · {door.nodeId} ·{" "}
-          {t[`door_${door.status}`]}
-        </output>
-      )}
-    </>
-  );
-}
-function ChartHistoryControls({ view }: { view: ChartView }) {
-  const { th, range, setRange, setIndex, setDoor, nodes, activeNode, setNode } =
-    view;
-  return (
-    <>
-      <div className="page-heading">
-        <h1>{th ? "กราฟและประวัติ" : "Charts & history"}</h1>
-        <div
-          className="range-controls"
-          role="group"
-          aria-label={th ? "ช่วงเวลา" : "Time range"}
+    <section className="chart-page">
+      <div className="page-head">
+        <h1>{th ? "กราฟเซนเซอร์" : "Sensor charts"}</h1>
+        <Link
+          className="btn sm"
+          to={"/fridges/" + encodeURIComponent(fridgeId) + "/history?kind=door"}
         >
-          {["1h", "24h", "7d", "30d"].map((value) => (
-            <button
-              key={value}
-              type="button"
-              aria-pressed={range === value}
-              onClick={() => {
-                setRange(value);
-                setIndex(null);
-                setDoor(null);
+          {th ? "ประวัติประตู" : "Door history"}
+        </Link>
+      </div>
+      <div className="chart-filters">
+        <fieldset className="visible-choices">
+          <legend>{th ? "ค่าที่แสดง" : "Metrics"}</legend>
+          <div>
+            {CHART_SERIES.map((entry) => (
+              <label key={entry.key}>
+                <input
+                  type="checkbox"
+                  checked={series.includes(entry)}
+                  onChange={(event) => {
+                    const { checked } = event.currentTarget;
+                    setMetrics((prev) =>
+                      checked
+                        ? [...prev, entry.key]
+                        : prev.filter((key) => key !== entry.key),
+                    );
+                  }}
+                />
+                {th ? (entry.key === "voc" ? "ค่า VOC" : entry.th) : entry.en}
+              </label>
+            ))}
+          </div>
+        </fieldset>
+        <div className="chart-period">
+          <div className="chart-period-label">
+            <label htmlFor="chart-period">
+              {th ? "ช่วงเวลา" : "Time range"}
+            </label>
+            <strong>{th ? period[1] : period[2]}</strong>
+          </div>
+          <input
+            id="chart-period"
+            type="range"
+            min={0}
+            max={periods.length - 1}
+            step={1}
+            value={periodIndex}
+            aria-valuetext={th ? period[1] : period[2]}
+            onChange={(event) => {
+              const next = periods[Number(event.currentTarget.value)];
+              if (next && next[0] !== range) {
+                setRange(next[0]);
+                setSelectedTime(null);
+              }
+            }}
+          />
+          <div className="chart-period-stops" aria-hidden="true">
+            {periods.map(([key, thai, english]) => (
+              <span key={key}>{th ? thai : english}</span>
+            ))}
+          </div>
+        </div>
+        {nodes.length > 1 && (
+          <label>
+            {th ? "เซนเซอร์" : "Sensor"}
+            <select
+              value={activeNode}
+              onChange={(event) => {
+                setNode(event.target.value);
+                setSelectedTime(null);
               }}
             >
-              {value}
-            </button>
-          ))}
-        </div>
+              {nodes.map((id) => (
+                <option key={id} value={id}>
+                  {id}
+                </option>
+              ))}
+            </select>
+          </label>
+        )}
       </div>
-      {nodes.length > 1 && (
-        <label className="sensor-node-filter">
-          {th ? "เซนเซอร์" : "Sensor"}
-          <select
-            value={activeNode}
-            onChange={(event) => {
-              setNode(event.target.value);
-              setIndex(null);
-            }}
-          >
-            {nodes.map((id) => (
-              <option key={id} value={id}>
-                {id}
-              </option>
-            ))}
-          </select>
-        </label>
+      {state.error && (
+        <StatusAlert
+          action={
+            <button
+              type="button"
+              className="btn sm"
+              onClick={() => void state.mutate()}
+            >
+              {th ? "ลองใหม่" : "Retry"}
+            </button>
+          }
+        >
+          {th ? "โหลดค่าจากเซนเซอร์ไม่ได้" : "Could not load sensor readings"}
+        </StatusAlert>
       )}
-    </>
-  );
-}
-function ChartPanel({ view }: { view: ChartView }) {
-  const { th, points, now, language } = view;
-  return (
-    <>
-      <section className="surface sensor-chart">
-        <h2>{th ? "ค่าจากเซนเซอร์ในตู้เย็น" : "Fridge sensors"}</h2>
-        <p className="small">
+      {state.isLoading && <output>{th ? "กำลังโหลด…" : "Loading…"}</output>}
+      {!series.length ? (
+        <p className="empty-state">
           {th
-            ? "เส้นแดงคือ 100% ของค่าอ้างอิง: 8°C · VOC 250 · แสง 200 แตะหรือเลื่อนแถบด้านล่างเพื่อดูค่าจริง"
-            : "Red line = reference: 8°C · VOC 250 · light 200. Scrub below to see actual readings."}
+            ? "เลือกค่าที่ต้องการแสดงบนกราฟ"
+            : "Select metrics to show on the chart."}
         </p>
-        <ChartSeriesControls view={view} />
-        <SensorPlot view={view} />
-        <ChartDoorEvents view={view} />
-        <ChartReadings view={view} />
-        <p className="small">
-          {th
-            ? "แสดงได้สูงสุด 2,000 ตัวอย่างและเหตุการณ์ประตูล่าสุด 25 รายการ ไม่ใช่จำนวนเหตุการณ์ทั้งหมดในช่วงเวลา"
-            : "Up to 2,000 readings and 25 recent door events; not a complete event total."}
-        </p>
-      </section>
-      <Metrics
-        latest={points.at(-1) ?? null}
-        history={points}
-        now={now}
-        language={language}
-        failed={false}
-      />
-    </>
-  );
-}
-function ChartHistoryBody({ view }: { view: ChartView }) {
-  const { th, state, points } = view;
-  if (state.error)
-    return (
-      <StatusAlert>
-        {th ? "โหลดประวัติไม่ได้ กรุณาลองใหม่" : "Could not load history. Try again."}
-      </StatusAlert>
-    );
-  if (state.isLoading) return <output>{th ? "กำลังโหลด…" : "Loading…"}</output>;
-  if (!points.length)
-    return (
-      <p className="surface">
-        {th
-          ? "ยังไม่มีข้อมูลจากเซนเซอร์ในช่วงเวลานี้"
-          : "No sensor readings in this period."}
-      </p>
-    );
-  return <ChartPanel view={view} />;
-}
-export function Charts(props: Parameters<typeof useChartHistory>[0]) {
-  const view = useChartHistory(props);
-  return (
-    <section className="charts-page">
-      <ChartHistoryControls view={view} />
-      <ChartHistoryBody view={view} />
+      ) : selected ? (
+        <>
+          <section
+            className="panel sensor-plot"
+            aria-label={th ? "ค่าจากเซนเซอร์" : "Sensor values"}
+          >
+            <div className="sensor-series-list">
+              {series.map((item) => (
+                <SensorPlot
+                  key={item.key}
+                  series={item}
+                  points={points}
+                  language={language}
+                  axisTime={axisTime}
+                  height={series.length > 1 ? 170 : 230}
+                  readingTime={index >= 0 ? selected.timeS : null}
+                />
+              ))}
+            </div>
+            <label className="chart-scrubber">
+              {th ? "เลือกเวลาที่ต้องการดู" : "Choose a reading"}
+              <input
+                type="range"
+                min={0}
+                max={points.length - 1}
+                value={index === -1 ? points.length - 1 : index}
+                disabled={points.length === 1}
+                aria-valuetext={localTimestamp(selected.timeS, language)}
+                onChange={(event) =>
+                  setSelectedTime(
+                    points[Number(event.target.value)]?.timeS ?? null,
+                  )
+                }
+              />
+            </label>
+            <output className="reading-selected">
+              <time dateTime={new Date(selected.timeS * 1000).toISOString()}>
+                {localTimestamp(selected.timeS, language)}
+              </time>
+              {series.map(({ key, th: thai, en, unit }) => (
+                <strong key={key}>
+                  {th ? thai : en}: {selected[key] ?? "—"} {unit}
+                </strong>
+              ))}
+            </output>
+          </section>
+          <ReadingTable
+            key={range + activeNode}
+            points={points}
+            language={language}
+            series={series}
+          />
+        </>
+      ) : (
+        !state.error &&
+        !state.isLoading && (
+          <p className="empty-state">
+            {th
+              ? "ยังไม่มีค่าจากเซนเซอร์ในช่วงนี้"
+              : "No sensor readings in this period."}
+          </p>
+        )
+      )}
     </section>
   );
 }

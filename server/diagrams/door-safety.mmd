@@ -1,0 +1,21 @@
+flowchart TB
+    accTitle: Door closer local safety design
+    accDescr: Intended state transitions and independent safety inputs from CBD and project constraints. This is not implemented firmware in feat/server.
+    boot["Boot with motor safe"] --> home["Bounded retract toward home<br/>Home limit switch ISR stops reverse drive"]
+    home -->|"Home confirmed"| idle["Idle at home<br/>MQTT TLS connected or reconnecting"]
+    home -->|"Cannot home safely"| fault["Motor off and fault lockout<br/>Require fault handling before new motion"]
+    idle --> trigger["Gateway: door open over 60 s<br/>No person detected by local YOLO11n"]
+    trigger --> command["MQTT QoS 1 CLOSE_DOOR<br/>Target node and unique cmd_id<br/>Deduplicate and acknowledge"]
+    command --> closing["Forward drive via TB6612FNG<br/>Monitor IR, INA219 and motion deadline"]
+    closing -->|"IR confirms closed"| retract["Stop forward motion<br/>Retract with independent safety bounds"]
+    closing -->|"INA219 current at least 1200 mA"| abort["Stop drive immediately<br/>Record obstruction and retract safely"]
+    closing -->|"Hard motion deadline"| abort
+    closing -->|"MQTT ABORT: person or user cancel"| abort
+    abort --> retract
+    retract -->|"Home ISR"| result["Motor off<br/>Publish result and cmd_id acknowledgement"]
+    retract -->|"Timeout or failed safety input"| fault
+    result --> idle
+    result --> report["Gateway records door event<br/>Buffers cloud report while offline<br/>Worker sends safety notification"]
+    fault --> report
+    Note["Designed safety loop is local<br/>Cloud and Gemini are outside motor control<br/>CBD default command timeout is 30 s"]
+    Note --- closing

@@ -1,21 +1,29 @@
-import { LineConnection } from "./LineConnection";
 import {
-  Select,
-  SelectTrigger,
-  SelectValue,
-  SelectContent,
-  SelectItem,
-} from "./components/ui/select";
-import useSWR from "swr";
-import { getJson, swrOptions, isAccessError } from "./lib/api";
-import { useConfirm } from "./components/confirmation";
-import { StatusAlert } from "./components/status-alert";
-import { toast } from "sonner";
+  Camera,
+  CheckCircle2,
+  ChevronDown,
+  ChevronRight,
+  Circle,
+  Copy,
+  KeyRound,
+  RotateCcw,
+  Sparkles,
+  Trash2,
+} from "lucide-react";
 import { useState } from "react";
 import type { FormEvent } from "react";
 import { useNavigate } from "react-router-dom";
+import { toast } from "sonner";
+import useSWR from "swr";
+import { LineConnection } from "./LineConnection";
+import { useConfirm } from "./components/confirmation";
+import { StatusAlert } from "./components/status-alert";
+import { getJson, swrOptions, isAccessError } from "./lib/api";
+import { useLineStatus } from "./line-data";
 import { readFridgeSettings } from "./model";
 import type { FridgeSettings, Language, MemberRole } from "./model";
+import { computeSetupProgress } from "./state/dashboard-machine";
+import { useUiVersion } from "./components/ui-version-context";
 import { words } from "./words";
 
 function useSettings({
@@ -36,6 +44,7 @@ function useSettings({
     (url) => getJson(url, readFridgeSettings),
     swrOptions,
   );
+  const lineStatus = useLineStatus(`${baseUrl}/line`);
   const settings: FridgeSettings | null = isAccessError(state.error)
     ? null
     : (state.data ?? null);
@@ -235,7 +244,9 @@ function useSettings({
   return {
     t,
     settings,
+    lineLinked: Boolean(lineStatus.data?.linked),
     loading,
+    loadSettings,
     busy,
     notice,
     error,
@@ -265,57 +276,95 @@ type SettingsView = SettingsController & {
   settings: NonNullable<SettingsController["settings"]>;
   language: Language;
   fridgeId: string;
+  hasDevices: boolean;
 };
+
 function FamilySetupGuide({ view }: { view: SettingsView }) {
-  const { language } = view;
+  const { language, lineLinked, settings, hasDevices } = view;
+  const th = language === "th";
+  const progress = computeSetupProgress({
+    lineLinked,
+    hasDevices,
+    memberCount: settings.members.length,
+    hasGeminiKey: settings.hasGeminiApiKey,
+  });
+
+  const stepList = [
+    {
+      done: progress.steps.fridgeCreated,
+      label: th ? "สร้างตู้เย็นแล้ว" : "Fridge created",
+    },
+    {
+      done: progress.steps.lineLinked,
+      label: th ? "เชื่อม LINE ของครอบครัว" : "Connect family LINE",
+    },
+    {
+      done: progress.steps.hasDevices,
+      label: th
+        ? "เชื่อม Gateway ด้วยโทเคนและรับข้อมูลจริง"
+        : "Connect gateway with token & verify device heartbeat",
+    },
+    {
+      done: progress.steps.hasFamilyOrKey,
+      label: th
+        ? "เชิญคนในครอบครัว หรือใส่ Gemini API key"
+        : "Invite family members or add Gemini API key",
+    },
+  ];
+
   return (
-    <section className="surface setup-flow">
-      <h2>
-        {language === "th"
-          ? "เตรียมตู้เย็นให้ครอบครัวใช้งาน"
-          : "Set up your family fridge"}
-      </h2>
-      <ol>
-        <li>
-          {language === "th"
-            ? "เชื่อม LINE ของครอบครัวด้านบน"
-            : "Connect your family LINE above"}
-        </li>
-        <li>
-          {language === "th"
-            ? "นำโทเคนกล้องด้านล่างไปตั้งค่า Gateway"
-            : "Configure your gateway with its camera token below"}
-        </li>
-        <li>
-          {language === "th"
-            ? "เพิ่มอีเมล Google ของสมาชิก ทุกคนใช้บัญชีของตัวเอง"
-            : "Add each family member’s Google email; everyone signs in with their own account"}
-        </li>
-        <li>
-          {language === "th"
-            ? "เปิดหน้าอุปกรณ์เพื่อดูว่ามีข้อมูลเข้าจริง และให้แต่ละคนตั้ง LINE ส่วนตัวในหน้าของฉัน"
-            : "Verify real device reports and let each person connect LINE under Me"}
-        </li>
-      </ol>
+    <section className="panel flex flex-col gap-3">
+      <div className="page-head">
+        <div>
+          <h2>
+            {th ? "เตรียมตู้เย็นให้ครอบครัวใช้งาน" : "Set up your family fridge"}
+          </h2>
+          <p className="sub">
+            {th
+              ? `คืบหน้าแล้ว ${progress.completed} จาก ${progress.total} ขั้นตอน`
+              : `${progress.completed} of ${progress.total} setup steps complete`}
+          </p>
+        </div>
+        <span className="pill accent num">{progress.percent}%</span>
+      </div>
+      <div className="progress-track" aria-hidden="true">
+        <div
+          className="progress-fill"
+          style={{ width: `${progress.percent}%` }}
+        />
+      </div>
+      <ul className="setup-steps">
+        {stepList.map((step) => (
+          <li
+            key={step.label}
+            className={`setup-step${step.done ? "done" : ""}`}
+          >
+            {step.done ? (
+              <CheckCircle2 size={18} aria-hidden="true" />
+            ) : (
+              <Circle size={18} aria-hidden="true" />
+            )}
+            <span>{step.label}</span>
+          </li>
+        ))}
+      </ul>
     </section>
   );
 }
+
 function GeneralSettings({ view }: { view: SettingsView }) {
-  const {
-    t,
-    settings,
-    busy,
-    name,
-    setName,
-    geminiKeyInput,
-    setGeminiKeyInput,
-    saveGeneral,
-    clearGeminiKey,
-  } = view;
+  const { t, busy, name, setName, saveGeneral } = view;
+  const th = view.language === "th";
   return (
-    <section className="surface add-form" aria-labelledby="general-title">
-      <h2 id="general-title">{t.generalSettings}</h2>
-      <form onSubmit={(event) => void saveGeneral(event)}>
+    <section
+      className="panel flex flex-col gap-3"
+      aria-labelledby="general-title"
+    >
+      <h2 id="general-title">{th ? "ข้อมูลตู้เย็น" : "Fridge details"}</h2>
+      <form
+        className="add-form fridge-name-form"
+        onSubmit={(event) => void saveGeneral(event)}
+      >
         <fieldset disabled={busy}>
           <label>
             {t.fridgeName}
@@ -326,30 +375,6 @@ function GeneralSettings({ view }: { view: SettingsView }) {
               maxLength={80}
             />
           </label>
-          <label>
-            {t.geminiKey}
-            <input
-              type="password"
-              value={geminiKeyInput}
-              onChange={(event) => setGeminiKeyInput(event.target.value)}
-              maxLength={256}
-              placeholder={t.geminiKeyPlaceholder}
-              autoComplete="off"
-            />
-          </label>
-          {settings.hasGeminiApiKey && (
-            <div className="inline-note">
-              <span className="small">{t.geminiKeySaved}</span>
-              <button
-                type="button"
-                className="secondary"
-                disabled={busy}
-                onClick={() => void clearGeminiKey()}
-              >
-                {t.clearGeminiKey}
-              </button>
-            </div>
-          )}
         </fieldset>
         <div className="form-actions">
           <button className="primary" disabled={busy} type="submit">
@@ -360,7 +385,16 @@ function GeneralSettings({ view }: { view: SettingsView }) {
     </section>
   );
 }
-function GatewaySettings({ view }: { view: SettingsView }) {
+
+function GatewayTokenAccordionItem({
+  view,
+  expanded,
+  onToggle,
+}: {
+  view: SettingsView;
+  expanded: boolean;
+  onToggle: () => void;
+}) {
   const {
     t,
     settings,
@@ -375,40 +409,189 @@ function GatewaySettings({ view }: { view: SettingsView }) {
     settings.gatewayToken.slice(0, 10) +
     "••••••••••••••••" +
     settings.gatewayToken.slice(-4);
+
   return (
-    <section className="surface settings-card" aria-labelledby="token-title">
-      <h2 id="token-title">{t.gatewayToken}</h2>
-      <p className="small">{t.gatewayTokenHelp}</p>
-      <code className="token-box">
-        {showToken ? settings.gatewayToken : maskedToken}
-      </code>
-      <div className="form-actions">
-        <button
-          type="button"
-          className="secondary"
-          onClick={() => setShowToken((prev) => !prev)}
+    <div className="conn">
+      <button
+        type="button"
+        className="conn-row"
+        aria-expanded={expanded}
+        onClick={onToggle}
+      >
+        <span className="connection-icon" aria-hidden="true">
+          <Camera size={20} />
+        </span>
+        <span className="min-w-0 flex-1">
+          <strong className="block">{t.gatewayToken}</strong>
+          <span className="small">{t.gatewayTokenHelp}</span>
+        </span>
+        {expanded ? (
+          <ChevronDown size={18} aria-hidden="true" />
+        ) : (
+          <ChevronRight size={18} aria-hidden="true" />
+        )}
+      </button>
+
+      {expanded && (
+        <div className="conn-body">
+          <code className="connection-token">
+            {showToken ? settings.gatewayToken : maskedToken}
+          </code>
+          <div className="form-actions">
+            <button
+              type="button"
+              className="text-action"
+              onClick={() => setShowToken((prev) => !prev)}
+            >
+              <KeyRound size={16} aria-hidden="true" />
+              {showToken ? t.hideToken : t.showToken}
+            </button>
+            <button
+              type="button"
+              className="text-action"
+              onClick={() => void copyToken()}
+            >
+              <Copy size={16} aria-hidden="true" />
+              {copied ? t.copied : t.copyToken}
+            </button>
+            <button
+              type="button"
+              className="text-action text-action-danger"
+              disabled={busy}
+              onClick={() => void rotateToken()}
+            >
+              <RotateCcw size={16} aria-hidden="true" />
+              {t.rotateToken}
+            </button>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function GeminiKeyAccordionItem({
+  view,
+  expanded,
+  onToggle,
+}: {
+  view: SettingsView;
+  expanded: boolean;
+  onToggle: () => void;
+}) {
+  const {
+    t,
+    settings,
+    busy,
+    geminiKeyInput,
+    setGeminiKeyInput,
+    saveGeneral,
+    clearGeminiKey,
+    language,
+  } = view;
+  const th = language === "th";
+  const statusSubtitle = settings.hasGeminiApiKey
+    ? t.geminiKeySaved
+    : th
+      ? "ยังไม่ตั้งค่าคีย์ส่วนตัว"
+      : "No custom key saved";
+
+  return (
+    <div className="conn">
+      <button
+        type="button"
+        className="conn-row"
+        aria-expanded={expanded}
+        onClick={onToggle}
+      >
+        <span className="connection-icon" aria-hidden="true">
+          <Sparkles size={20} />
+        </span>
+        <span className="min-w-0 flex-1">
+          <strong className="block">{t.geminiKey}</strong>
+          <span className="small">{statusSubtitle}</span>
+        </span>
+        {expanded ? (
+          <ChevronDown size={18} aria-hidden="true" />
+        ) : (
+          <ChevronRight size={18} aria-hidden="true" />
+        )}
+      </button>
+
+      {expanded && (
+        <form
+          className="conn-body add-form"
+          onSubmit={(event) => void saveGeneral(event)}
         >
-          {showToken ? t.hideToken : t.showToken}
-        </button>
-        <button
-          type="button"
-          className="secondary"
-          onClick={() => void copyToken()}
-        >
-          {copied ? t.copied : t.copyToken}
-        </button>
-        <button
-          type="button"
-          className="danger"
-          disabled={busy}
-          onClick={() => void rotateToken()}
-        >
-          {t.rotateToken}
-        </button>
+          <fieldset disabled={busy}>
+            <label>
+              {t.geminiKey}
+              <input
+                type="password"
+                value={geminiKeyInput}
+                onChange={(event) => setGeminiKeyInput(event.target.value)}
+                maxLength={256}
+                placeholder={t.geminiKeyPlaceholder}
+                autoComplete="off"
+              />
+            </label>
+          </fieldset>
+          <div className="form-actions">
+            <button className="primary sm" disabled={busy} type="submit">
+              {busy ? t.saving : t.save}
+            </button>
+            {settings.hasGeminiApiKey && (
+              <button
+                type="button"
+                className="text-action text-action-danger"
+                disabled={busy}
+                onClick={() => void clearGeminiKey()}
+              >
+                {t.clearGeminiKey}
+              </button>
+            )}
+          </div>
+        </form>
+      )}
+    </div>
+  );
+}
+
+function ConnectionsAccordion({ view }: { view: SettingsView }) {
+  const th = view.language === "th";
+  const [openKey, setOpenKey] = useState<"gateway" | "gemini" | null>(null);
+
+  return (
+    <section className="panel flex flex-col gap-3">
+      <div>
+        <h2>{th ? "การเชื่อมต่ออุปกรณ์และ AI" : "Connections"}</h2>
+        <p className="sub">
+          {th
+            ? "โทเคนสำหรับ Raspberry Pi Gateway และ Gemini API Key"
+            : "Camera gateway Bearer token and optional Gemini AI key."}
+        </p>
+      </div>
+
+      <div className="conns">
+        <GatewayTokenAccordionItem
+          view={view}
+          expanded={openKey === "gateway"}
+          onToggle={() =>
+            setOpenKey((prev) => (prev === "gateway" ? null : "gateway"))
+          }
+        />
+        <GeminiKeyAccordionItem
+          view={view}
+          expanded={openKey === "gemini"}
+          onToggle={() =>
+            setOpenKey((prev) => (prev === "gemini" ? null : "gemini"))
+          }
+        />
       </div>
     </section>
   );
 }
+
 function MemberSettings({ view }: { view: SettingsView }) {
   const {
     t,
@@ -425,89 +608,125 @@ function MemberSettings({ view }: { view: SettingsView }) {
   } = view;
   const ownerCount = settings.members.filter((m) => m.role === "owner").length;
   return (
-    <section className="surface settings-card" aria-labelledby="members-title">
-      <h2 id="members-title">{t.members}</h2>
-      <p className="small">
-        {language === "th"
-          ? "เพิ่มอีเมลเพื่อให้สิทธิ์ จากนั้นส่งลิงก์เว็บให้สมาชิกเข้าด้วย Google อีเมลเดียวกัน ระบบไม่ได้ส่งอีเมลเชิญให้อัตโนมัติ"
-          : "Add an email to grant access, then share this link. Sign in with the same Google email. Invitation emails are not sent automatically."}
-      </p>
-      <button
-        type="button"
-        className="secondary"
-        onClick={() =>
-          void navigator.clipboard
-            .writeText(
-              new URL(
-                "/fridges/" + encodeURIComponent(fridgeId),
-                window.location.origin,
-              ).href,
-            )
-            .then(() =>
-              toast.success(language === "th" ? "คัดลอกลิงก์แล้ว" : "Link copied"),
-            )
-            .catch(() =>
-              toast.error(
-                language === "th"
-                  ? "คัดลอกไม่ได้ กรุณาคัดลอกจากแถบที่อยู่"
-                  : "Copy the link from your address bar",
-              ),
-            )
-        }
-      >
-        {language === "th" ? "คัดลอกลิงก์ให้ครอบครัว" : "Copy family link"}
-      </button>
+    <section
+      className="panel flex flex-col gap-3"
+      aria-labelledby="members-title"
+    >
+      <div className="page-head">
+        <div>
+          <h2 id="members-title">{t.members}</h2>
+          <p className="sub">
+            {language === "th"
+              ? "เพิ่มอีเมลเพื่อให้สิทธิ์ จากนั้นส่งลิงก์เว็บให้สมาชิกเข้าด้วย Google อีเมลเดียวกัน"
+              : "Add an email to grant access, then share this link for Google sign-in."}
+          </p>
+        </div>
+        <button
+          type="button"
+          className="btn sm"
+          onClick={() =>
+            void navigator.clipboard
+              .writeText(
+                new URL(
+                  "/fridges/" + encodeURIComponent(fridgeId),
+                  window.location.origin,
+                ).href,
+              )
+              .then(() =>
+                toast.success(
+                  language === "th" ? "คัดลอกลิงก์แล้ว" : "Link copied",
+                ),
+              )
+              .catch(() =>
+                toast.error(
+                  language === "th"
+                    ? "คัดลอกไม่ได้ กรุณาคัดลอกจากแถบที่อยู่"
+                    : "Copy the link from your address bar",
+                ),
+              )
+          }
+        >
+          <Copy size={15} aria-hidden="true" />
+          {language === "th" ? "คัดลอกลิงก์ให้ครอบครัว" : "Copy family link"}
+        </button>
+      </div>
+
       <ul className="member-list">
         {settings.members.map((member) => {
           const isLastOwner = member.role === "owner" && ownerCount <= 1;
           return (
             <li key={member.email} className="member-row">
-              <div>
+              <div className="flex flex-wrap items-center gap-2">
                 <strong>{member.email}</strong>
-                <span className="badge">
+                <span className="small">
                   {member.role === "owner" ? t.ownerBadge : t.memberBadge}
                 </span>
               </div>
               <button
                 type="button"
-                className="secondary"
+                className="text-action text-action-danger"
                 disabled={busy || isLastOwner}
                 onClick={() => void removeMember(member.email)}
               >
+                <Trash2 size={16} aria-hidden="true" />
                 {t.removeMember}
               </button>
             </li>
           );
         })}
       </ul>
+
       <form
         className="invite-form"
         onSubmit={(event) => void inviteMember(event)}
       >
-        <input
-          type="email"
-          value={inviteEmail}
-          onChange={(event) => setInviteEmail(event.target.value)}
-          aria-label={t.inviteEmail}
-          placeholder={t.inviteEmail}
-          required
-        />
-        <Select
-          value={inviteRole}
-          onValueChange={(value) =>
-            setInviteRole(value === "owner" ? "owner" : "member")
-          }
-        >
-          <SelectTrigger aria-label={t.inviteRole}>
-            <SelectValue>
-              {inviteRole === "owner" ? t.ownerBadge : t.memberBadge}
-            </SelectValue>
-          </SelectTrigger>
-          <SelectContent>
-            <SelectItem value="member">{t.memberBadge}</SelectItem>
-            <SelectItem value="owner">{t.ownerBadge}</SelectItem>
-          </SelectContent>
-        </Select>
+        <label className="invite-email">
+          {t.inviteEmail}
+          <input
+            type="email"
+            value={inviteEmail}
+            onChange={(event) => setInviteEmail(event.target.value)}
+            autoComplete="email"
+            required
+          />
+        </label>
+        <fieldset className="visible-choices invite-role" disabled={busy}>
+          <legend>{t.inviteRole}</legend>
+          <div>
+            <label>
+              <input
+                type="radio"
+                name="invite-role"
+                checked={inviteRole === "member"}
+                onChange={() => setInviteRole("member")}
+              />
+              <span>
+                {t.memberBadge}
+                <small>
+                  {language === "th"
+                    ? "ดูและจัดการอาหาร"
+                    : "View and manage food"}
+                </small>
+              </span>
+            </label>
+            <label>
+              <input
+                type="radio"
+                name="invite-role"
+                checked={inviteRole === "owner"}
+                onChange={() => setInviteRole("owner")}
+              />
+              <span>
+                {t.ownerBadge}
+                <small>
+                  {language === "th"
+                    ? "จัดการสมาชิกและการตั้งค่าด้วย"
+                    : "Also manage members and settings"}
+                </small>
+              </span>
+            </label>
+          </div>
+        </fieldset>
         <button className="primary" disabled={busy} type="submit">
           {t.inviteMember}
         </button>
@@ -515,11 +734,22 @@ function MemberSettings({ view }: { view: SettingsView }) {
     </section>
   );
 }
+
 function DangerZone({ view }: { view: SettingsView }) {
-  const { t, busy, removeFridge } = view;
+  const { t, busy, removeFridge, language } = view;
   return (
-    <section className="surface danger-zone" aria-labelledby="danger-title">
-      <h2 id="danger-title">{t.dangerZone}</h2>
+    <section
+      className="panel flex flex-col gap-3"
+      aria-labelledby="danger-title"
+    >
+      <h2 id="danger-title" className="text-[var(--bad)]">
+        {t.dangerZone}
+      </h2>
+      <p className="sub">
+        {language === "th"
+          ? "การลบตู้เย็นจะลบข้อมูลอาหาร ค่าเซนเซอร์ และรูปภาพทั้งหมดอย่างถาวร"
+          : "Deleting this fridge permanently removes all food items, telemetry, and photos."}
+      </p>
       <div className="form-actions">
         <button
           type="button"
@@ -527,45 +757,69 @@ function DangerZone({ view }: { view: SettingsView }) {
           disabled={busy}
           onClick={() => void removeFridge()}
         >
+          <Trash2 size={17} aria-hidden="true" />
           {t.deleteFridge}
         </button>
       </div>
     </section>
   );
 }
+
 export function Settings(props: {
   fridgeId: string;
   language: Language;
   onFridgesChanged: () => void;
+  hasDevices?: boolean;
 }) {
   const controller = useSettings(props);
-  const { t, settings, loading, notice, error } = controller;
-  if (loading) return <p role="status">{t.loading}</p>;
-  if (!settings) return <StatusAlert>{error ?? t.failed}</StatusAlert>;
-  const view = {
+  const { t, settings, loading, loadSettings, notice, error } = controller;
+  const { version: uiVersion } = useUiVersion();
+  const th = props.language === "th";
+
+  if (loading) return <output className="sub">{t.loading}</output>;
+  if (!settings) {
+    return (
+      <StatusAlert
+        action={
+          <button
+            type="button"
+            className="btn sm"
+            onClick={() => void loadSettings()}
+          >
+            <RotateCcw size={15} aria-hidden="true" />
+            {th ? "ลองใหม่" : "Retry"}
+          </button>
+        }
+      >
+        {error ?? t.failed}
+      </StatusAlert>
+    );
+  }
+
+  const view: SettingsView = {
     ...controller,
     settings,
     language: props.language,
     fridgeId: props.fridgeId,
+    hasDevices: Boolean(props.hasDevices),
   };
+
   return (
-    <div className="settings-stack">
+    <div className="settings">
       <h1>{t.settings}</h1>
-      {notice && (
-        <p role="status" className="notice">
-          {notice}
-        </p>
-      )}
+      {notice && <output className="pill accent">{notice}</output>}
       {error && <StatusAlert>{error}</StatusAlert>}
+      <GeneralSettings view={view} />
+      {uiVersion === "v2" && !view.hasDevices && (
+        <FamilySetupGuide view={view} />
+      )}
+      <MemberSettings view={view} />
       <LineConnection
         language={props.language}
         fridgeId={props.fridgeId}
         fridgeName={settings.name}
       />
-      <FamilySetupGuide view={view} />
-      <GeneralSettings view={view} />
-      <GatewaySettings view={view} />
-      <MemberSettings view={view} />
+      <ConnectionsAccordion view={view} />
       <DangerZone view={view} />
     </div>
   );

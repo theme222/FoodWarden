@@ -1,0 +1,37 @@
+sequenceDiagram
+    accTitle: Inventory camera draft and commit implemented on server
+    accDescr: Gateway behavior is the intended contract, Worker, D1, R2 and Gemini orchestration are implemented. Draft and commit use separate UUID v4 idempotency keys.
+    participant C as C0 / gateway client design
+    participant S as Hono Worker
+    participant D as D1 receipts and inventory
+    participant G as Gemini
+    participant R as Private R2
+    participant W as FridgeRoom
+    C->>S: POST checkin/draft - Bearer, JPEG, Idempotency-Key
+    S->>D: Claim draft operation and inference quota
+    alt Existing matching completed draft
+        D-->>S: Cached response
+    else New draft
+        S->>G: Classify food with bilingual structured output
+        G-->>S: Food flag, confidence, category and expiry
+        Note over S,G: Reject unidentifiable images, do not create inventory
+        S->>R: Save immutable tenant-scoped JPEG
+        S->>D: Store completed draft receipt
+    end
+    S-->>C: Draft metadata and private image storage path
+    Note over C: User reviews expiry, intended LCD auto-confirm flow
+    C->>S: POST checkin - confirmed fields and new Idempotency-Key
+    S->>D: Atomically insert inventory and commit receipt
+    S->>W: Broadcast inventory_changed after commit
+    S-->>C: Created item or matching prior outcome
+    C->>S: POST checkout/draft - JPEG and Idempotency-Key
+    S->>D: Read current inventory and claim draft
+    S->>G: Match photo against current inventory candidates
+    G-->>S: Candidate IDs and confidence
+    Note over S,D: Filter unknown IDs, order candidates by FEFO
+    S-->>C: Ranked real inventory items, no inventory mutation
+    C->>S: POST checkout - confirmed item_id
+    S->>D: Delete selected inventory item
+    S->>R: Retire photo only after last inventory reference
+    S->>W: Broadcast inventory_changed
+    S-->>C: Checkout result

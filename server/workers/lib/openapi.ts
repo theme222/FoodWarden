@@ -102,6 +102,8 @@ const schemas: Record<string, Schema> = {
     role: { type: "string", enum: ["owner", "member"] },
     last_seen_s: timestamp,
     last_telemetry: { anyOf: [ref("TelemetrySample"), { type: "null" }] },
+    inventory_count: { type: "integer", minimum: 0 },
+    expiring_soon_count: { type: "integer", minimum: 0, description: "Items expiring today through three calendar days ahead in Asia/Bangkok." },
   }),
   Settings: object({
     id: text,
@@ -250,6 +252,24 @@ route(
         object({
           googleEnabled: { type: "boolean" },
           devLoginEnabled: { type: "boolean" },
+        }),
+      ),
+    },
+  },
+);
+route(
+  "/api/ui/config",
+  get,
+  "Read default dashboard UI version and emergency lock flag",
+  "Authentication",
+  {
+    security: [],
+    responses: {
+      "200": response(
+        "UI version feature flag configuration",
+        object({
+          defaultVersion: { type: "string", enum: ["v1", "v2"] },
+          locked: { type: "boolean" },
         }),
       ),
     },
@@ -530,6 +550,41 @@ route(
   },
 );
 route(
+  "/api/fridges/{fridgeId}/activity",
+  get,
+  "Read paginated fridge activity",
+  "Monitoring",
+  {
+    parameters: [
+      { in: "query", name: "kind", schema: { type: "string", enum: ["inventory", "door", "sensor"], default: "inventory" } },
+      { in: "query", name: "date", schema: { type: "string", format: "date" }, description: "Calendar date in Asia/Bangkok. Omit to browse all dates." },
+      { in: "query", name: "before", schema: { type: "string" }, description: "Opaque next cursor from the previous page." },
+    ],
+    responses: {
+      "200": response("Up to 15 activities in newest-first order", object({
+        rows: {
+          type: "array",
+          maxItems: 15,
+          items: { anyOf: [
+            { allOf: [ref("DoorEvent"), object({ id: { type: "integer" } })] },
+            { allOf: [ref("TelemetrySample"), object({ id: { type: "integer" } })] },
+            object({
+              id: { type: "integer" },
+              timestamp_s: timestamp,
+              action: { type: "string", enum: ["created", "updated", "deleted"] },
+              name_th: text,
+              name_en: text,
+              source: { enum: ["CAMERA", "WEB_MANUAL", null] },
+            }),
+          ] },
+        },
+        next: { type: ["string", "null"] },
+      })),
+      "400": response("Invalid activity filter", ref("Error")),
+    },
+  },
+);
+route(
   "/api/fridges/{fridgeId}/door_events",
   get,
   "Read recent door events",
@@ -693,7 +748,7 @@ route("/api/telemetry", post, "Upload a telemetry batch", "Gateway", {
     }),
   ),
   description:
-    "Deduplicates by node_id and timestamp_s. Sensor failures use null readings.",
+    "First-write-wins deduplication by (node_id, timestamp_s); duplicate or conflicting retries are ignored and do not broadcast or alert. Sensor failures use null readings. Optional ?bypass_cooldown=1 works only in development with an authenticated fridge owner session.",
   responses: {
     "200": response(
       "Ingest result",
@@ -749,7 +804,7 @@ route("/api/door_events", post, "Upload door safety events", "Gateway", {
     }),
   ),
   description:
-    "Deduplicates node_id, timestamp_s and status; may dispatch LINE alerts.",
+    "First-write-wins deduplication by (node_id, timestamp_s, status); duplicate retries are ignored. May dispatch LINE alerts; optional ?bypass_cooldown=1 works only in development with an authenticated fridge owner session.",
   responses: {
     "200": response(
       "Ingest result",

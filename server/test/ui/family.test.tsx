@@ -191,7 +191,7 @@ test("inventory search, private favorites and bulk removal use real scoped endpo
   expect(calls).not.toContain("DELETE /api/fridges/kitchen/inventory/apple");
 });
 
-test("charts keep sensor histories separate, support scrubbing and retain one visible series", async () => {
+test("charts keep sensor histories separate, support scrubbing and show the selected metric", async () => {
   const { Charts } = await import("@/Charts");
   const urls: string[] = [];
   const now = Math.floor(Date.now() / 1000);
@@ -228,42 +228,54 @@ test("charts keep sensor histories separate, support scrubbing and retain one vi
   );
   const { container } = render(
     <SWRConfig value={{ provider: () => new Map(), dedupingInterval: 0 }}>
-      <Charts
-        fridgeId="kitchen"
-        language="en"
-        latest={{
-          nodeId: "F1",
-          timeS: now,
-          temperature: 20,
-          voc: 250,
-          light: 200,
-        }}
-        doorEvents={[]}
-      />
+      <MemoryRouter>
+        <Charts
+          fridgeId="kitchen"
+          language="en"
+          latest={{
+            nodeId: "F1",
+            timeS: now,
+            temperature: 20,
+            voc: 250,
+            light: 200,
+          }}
+        />
+      </MemoryRouter>
     </SWRConfig>,
   );
   const user = userEvent.setup({ document });
   const sensor = await screen.findByRole("combobox", { name: "Sensor" });
-  expect(container.querySelector(".chart-readout")?.textContent).toContain(
+  expect(container.querySelector(".reading-selected")?.textContent).toContain(
     "Temperature: 20",
   );
   await user.selectOptions(sensor, "F0");
-  expect(container.querySelector(".chart-readout")?.textContent).toContain(
+  expect(container.querySelector(".reading-selected")?.textContent).toContain(
     "Temperature: 6",
   );
   fireEvent.change(screen.getByRole("slider", { name: "Choose a reading" }), {
     target: { value: "0" },
   });
-  expect(container.querySelector(".chart-readout")?.textContent).toContain(
+  expect(container.querySelector(".reading-selected")?.textContent).toContain(
     "Temperature: 4",
   );
-  await user.click(screen.getByRole("button", { name: "VOC" }));
-  await user.click(screen.getByRole("button", { name: "Light" }));
+  await user.click(screen.getByRole("checkbox", { name: "Light" }));
   expect(
-    (screen.getByRole("button", { name: "Temperature" }) as HTMLButtonElement)
-      .disabled,
+    (screen.getByRole("checkbox", { name: "Temperature" }) as HTMLInputElement)
+      .checked,
   ).toBe(true);
-  await user.click(screen.getByRole("button", { name: "7d" }));
+  expect(container.querySelector(".reading-selected")?.textContent).toContain(
+    "Light: 10",
+  );
+  expect(
+    container.querySelector(".history-table th:last-child")?.textContent,
+  ).toBe("Light (LDR)");
+  await user.click(screen.getByRole("checkbox", { name: "Temperature" }));
+  expect(
+    container.querySelector(".reading-selected")?.textContent,
+  ).not.toContain("Temperature:");
+  fireEvent.change(screen.getByRole("slider", { name: "Time range" }), {
+    target: { value: "2" },
+  });
   await waitFor(() =>
     expect(urls.some((url) => url.endsWith("range=7d"))).toBe(true),
   );
@@ -271,6 +283,7 @@ test("charts keep sensor histories separate, support scrubbing and retain one vi
 
 test("private account preferences save selected values and favorite changes stay scoped", async () => {
   const { MyAccount } = await import("@/MyAccount");
+  const { FridgeFavorites } = await import("@/FridgeFavorites");
   const changes: { url: string; method: string; body: unknown }[] = [];
   let preferences = {
     morning_enabled: true,
@@ -326,7 +339,8 @@ test("private account preferences save selected values and favorite changes stay
   render(
     <SWRConfig value={{ provider: () => new Map(), dedupingInterval: 0 }}>
       <ConfirmationProvider language="en">
-        <MyAccount fridgeId="kitchen" language="en" />
+        <MyAccount language="en" />
+        <FridgeFavorites fridgeId="kitchen" language="en" />
       </ConfirmationProvider>
     </SWRConfig>,
   );
@@ -349,6 +363,7 @@ test("private account preferences save selected values and favorite changes stay
       inst_spoil: true,
     }),
   );
+  await user.click(await screen.findByText("Favorite food types"));
   await user.click(await screen.findByRole("button", { name: "Dairy (0)" }));
   expect(changes.find((change) => change.method === "PUT")).toEqual({
     url: "/api/fridges/kitchen/favorites/categories",
@@ -434,6 +449,7 @@ test("GatewaySimulator flag toggles panel and posts telemetry, door events, and 
     url: string;
     method: string;
     auth: string | null;
+    credentials: RequestCredentials | undefined;
     body: unknown;
   }> = [];
 
@@ -445,6 +461,7 @@ test("GatewaySimulator flag toggles panel and posts telemetry, door events, and 
       url,
       method: init?.method ?? "GET",
       auth: headers.get("Authorization"),
+      credentials: init?.credentials,
       body: bodyText ? JSON.parse(bodyText) : null,
     });
     return new Response(JSON.stringify({ ok: true, accepted: 1 }), {
@@ -469,28 +486,45 @@ test("GatewaySimulator flag toggles panel and posts telemetry, door events, and 
   expect(localStorage.getItem("foodwarden_gateway_sim")).toBe("1");
 
   await user.click(screen.getByRole("button", { name: "Send Telemetry" }));
-  await screen.findByText(/200 POST \/api\/telemetry\?bypass_cooldown=1/);
+  await screen.findByText(/200 POST \/api\/telemetry(?!\?)/);
 
   await user.click(screen.getByRole("button", { name: "Send Door Event" }));
-  await screen.findByText(/200 POST \/api\/door_events\?bypass_cooldown=1/);
+  await screen.findByText(/200 POST \/api\/door_events(?!\?)/);
+
+  const bypassCheckboxes = screen.getAllByRole("checkbox", {
+    name: /Bypass LINE alert cooldown/i,
+  });
+  expect(bypassCheckboxes.length).toBe(2);
+  await user.click(bypassCheckboxes[0]!);
+  await user.click(screen.getByRole("button", { name: "Send Telemetry" }));
+  await screen.findByText(/200 POST \/api\/telemetry\?bypass_cooldown=1/);
 
   await user.click(screen.getByRole("button", { name: "Send Device Status" }));
   await screen.findByText(/200 POST \/api\/status/);
 
-  expect(calls.length).toBe(3);
+  expect(calls.length).toBe(4);
   expect(calls[0]).toMatchObject({
+    url: "/api/telemetry",
+    method: "POST",
+    auth: "Bearer tok_secret_sim",
+    credentials: "same-origin",
+  });
+  expect(calls[1]).toMatchObject({
+    url: "/api/door_events",
+    method: "POST",
+    auth: "Bearer tok_secret_sim",
+    credentials: "same-origin",
+  });
+  expect(calls[2]).toMatchObject({
     url: "/api/telemetry?bypass_cooldown=1",
     method: "POST",
     auth: "Bearer tok_secret_sim",
+    credentials: "same-origin",
   });
-  expect(calls[1]).toMatchObject({
-    url: "/api/door_events?bypass_cooldown=1",
-    method: "POST",
-    auth: "Bearer tok_secret_sim",
-  });
-  expect(calls[2]).toMatchObject({
+  expect(calls[3]).toMatchObject({
     url: "/api/status",
     method: "POST",
     auth: "Bearer tok_secret_sim",
+    credentials: "same-origin",
   });
 });

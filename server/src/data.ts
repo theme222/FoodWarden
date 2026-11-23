@@ -38,6 +38,7 @@ export interface FridgeRoomState {
   error: boolean;
   connectionState: SocketConnectionState;
   reloadInventory: () => void;
+  reloadAll: () => void;
 }
 
 export function useFridgeRoom(
@@ -69,17 +70,32 @@ export function useFridgeRoom(
   );
   const [connectionState, setConnectionState] =
     useState<SocketConnectionState>("connecting");
+
+  const { mutate: mutateInventory } = inventory;
+  const { mutate: mutateHistory } = history;
+  const { mutate: mutateStatus } = status;
+  const { mutate: mutateDoors } = doors;
+
+  const reloadAll = useCallback(() => {
+    void Promise.allSettled([
+      mutateInventory(),
+      mutateHistory(),
+      mutateStatus(),
+      mutateDoors(),
+    ]);
+  }, [mutateInventory, mutateHistory, mutateStatus, mutateDoors]);
+
   const notifyAccessLost = useEffectEvent((reason: "revoked" | "deleted") =>
     onAccessLost?.(reason),
   );
-  const revalidate = useEffectEvent(() => {
-    void Promise.allSettled([
-      inventory.mutate(),
-      history.mutate(),
-      status.mutate(),
-      doors.mutate(),
-    ]);
-  });
+  const revalidate = useEffectEvent(() => reloadAll());
+
+  const reloadInventory = useCallback(() => {
+    void mutateInventory().catch(() => {});
+    void mutateCache(`${base}/favorites`).catch(() => {});
+    void mutateCache("/api/fridges").catch(() => {});
+  }, [mutateInventory, mutateCache, base]);
+
   const applyEvent = useEffectEvent(
     (event: ReturnType<typeof parseFridgeRoomEvent>) => {
       if (!event) return;
@@ -91,10 +107,10 @@ export function useFridgeRoom(
         case "telemetry":
           // Revalidate while the first snapshot is loading so a streamed sample cannot discard history.
           if (history.data === undefined) {
-            void history.mutate().catch(() => {});
+            void mutateHistory().catch(() => {});
             break;
           }
-          void history.mutate(
+          void mutateHistory(
             (previous) =>
               mergeTelemetrySamples(
                 previous ?? [],
@@ -105,7 +121,7 @@ export function useFridgeRoom(
           );
           break;
         case "status":
-          void status.mutate(
+          void mutateStatus(
             (previous) =>
               previous && previous.gatewaySeenS >= event.status.gatewaySeenS
                 ? previous
@@ -115,17 +131,16 @@ export function useFridgeRoom(
           break;
         case "door_events":
           if (doors.data === undefined) {
-            void doors.mutate().catch(() => {});
+            void mutateDoors().catch(() => {});
             break;
           }
-          void doors.mutate(
+          void mutateDoors(
             (previous) => mergeDoorEvents(previous ?? [], event.events),
             { revalidate: false },
           );
           break;
         case "inventory_changed":
-          void mutateCache(`${base}/favorites`);
-          void inventory.mutate().catch(() => {});
+          reloadInventory();
           break;
         case "member_revoked":
           setConnectionState("closed");
@@ -215,11 +230,7 @@ export function useFridgeRoom(
       socket?.close(1000, "Cleanup");
     };
   }, [base]);
-  const mutateInventory = inventory.mutate;
-  const reloadInventory = useCallback(() => {
-    void mutateInventory().catch(() => {});
-    void mutateCache(`${base}/favorites`).catch(() => {});
-  }, [mutateInventory, mutateCache, base]);
+
   const latest = (history.data ?? []).reduce<Sample | null>(
     (best, sample) => (!best || sample.timeS > best.timeS ? sample : best),
     initialLatest,
@@ -235,6 +246,7 @@ export function useFridgeRoom(
     ),
     connectionState,
     reloadInventory,
+    reloadAll,
   };
 }
 export function useNow() {

@@ -3,14 +3,17 @@ import { toast } from "sonner";
 import { Star } from "lucide-react";
 import { useFavorites, lineAction, favoriteMatches } from "./line-data";
 import type { Food, Language } from "./model";
+
 export function FavoriteToggle({
   food,
   fridgeId,
   language,
+  className = "starbtn",
 }: {
   food: Food;
   fridgeId: string;
   language: Language;
+  className?: string;
 }) {
   const state = useFavorites(fridgeId);
   const [busy, setBusy] = useState(false);
@@ -18,6 +21,7 @@ export function FavoriteToggle({
   const favorite = state.data?.items.find((item) =>
     favoriteMatches(item, food),
   );
+
   async function toggle() {
     if (busy || !state.data) return;
     setBusy(true);
@@ -42,10 +46,11 @@ export function FavoriteToggle({
       setBusy(false);
     }
   }
+
   return (
     <button
       type="button"
-      className="favorite-toggle"
+      className={className}
       disabled={busy || !state.data}
       aria-pressed={Boolean(favorite)}
       aria-label={
@@ -60,7 +65,7 @@ export function FavoriteToggle({
       onClick={() => void toggle()}
     >
       <Star
-        size={21}
+        size={17}
         fill={favorite ? "currentColor" : "none"}
         aria-hidden="true"
       />

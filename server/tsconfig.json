@@ -9,7 +9,6 @@
     "jsx": "react-jsx",
     "allowJs": true,
     "types": ["bun", "node"],
-    "baseUrl": ".",
     "paths": {
       "@/*": ["./src/*"]
     },

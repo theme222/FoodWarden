@@ -9,6 +9,8 @@ export interface AppBindings {
   GOOGLE_CLIENT_ID?: string;
   GOOGLE_CLIENT_SECRET?: string;
   DEV_AUTH_BYPASS_EMAIL?: string;
+  UI_VERSION?: string;
+  UI_VERSION_LOCK?: string;
   GEMINI_API_KEY?: string;
   GEMINI_MODEL?: string;
   GEMINI_FALLBACK_MODEL?: string;

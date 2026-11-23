@@ -3,6 +3,11 @@ import { retireUnreferencedPhoto } from "./storage";
 import type { AppBindings } from "../types";
 import type { DoorEvent, DoorEventStatus } from "./door-events";
 import { addDaysToIsoDate, bangkokIsoDate } from "./gemini";
+import {
+  LINE_MAX_MESSAGES_PER_REQUEST,
+  LINE_MAX_TEXT_LENGTH,
+  capLineText,
+} from "./line-format";
 import type { TelemetrySample } from "./telemetry";
 
 const DEFAULT_LINE_BASE_URL = "https://api.line.me";
@@ -97,10 +102,12 @@ async function sendLinePush(
       signal: AbortSignal.timeout(10_000),
       body: JSON.stringify({
         to,
-        messages: messages.slice(0, 5).map((msg) => ({
-          type: "text",
-          text: msg.text.slice(0, 5000),
-        })),
+        messages: messages
+          .slice(0, LINE_MAX_MESSAGES_PER_REQUEST)
+          .map((msg) => ({
+            type: "text",
+            text: capLineText(msg.text, LINE_MAX_TEXT_LENGTH),
+          })),
       }),
     });
     const ok =
@@ -397,6 +404,12 @@ async function queueLineAlert(
   cooldownS: number,
   eventKeys: string[],
 ): Promise<boolean> {
+  const boundedMessages = messages
+    .slice(0, LINE_MAX_MESSAGES_PER_REQUEST)
+    .map((msg) => ({
+      type: "text" as const,
+      text: capLineText(msg.text, LINE_MAX_TEXT_LENGTH),
+    }));
   const id = crypto.randomUUID();
   const [insert] = await env.DB.batch([
     env.DB.prepare(
@@ -410,7 +423,7 @@ async function queueLineAlert(
       fridgeId,
       alertType,
       targetId,
-      JSON.stringify(messages),
+      JSON.stringify(boundedMessages),
       nowS,
       nowS,
       fridgeId,

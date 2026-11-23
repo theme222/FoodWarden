@@ -86,16 +86,18 @@ The web dashboard is a responsive Single Page Application designed for mobile an
 │
 └── /fridges (Protected Routes: requires verified Better Auth session cookie)
     │
-    ├── /fridges .................. Multi-fridge hub: lists accessible fridges (owner/member), create new fridge form
+    ├── /fridges .................. Fridge list with sensor freshness, inventory counts, and upcoming expiry counts
     │
-    ├── /me ....................... Personal LINE pairing & notification preferences across memberships
+    ├── /me ....................... Appearance, personal LINE pairing, and notifications across memberships
     │
     └── /fridges/:fridgeId (Fridge Workspace: contextual navigation bar + live WebSocket pill)
         │
         ├── /fridges/:fridgeId ................ Food Dashboard & Live Metrics (optional `?sim=1` redirects owner to `/sim`)
-        │                                       - Live environmental readings & FEFO-sorted grocery inventory with favorites
+        │                                       - Live readings, FEFO-sorted inventory, and private favorites below inventory
         │
-        ├── /fridges/:fridgeId/charts ......... 1h / 24h / 7d / 30d multi-sensor telemetry charts & door event scrubbing
+        ├── /fridges/:fridgeId/charts ......... Multi-sensor charts with a 1h / 24h / 7d / 30d period slider and reading cursor
+        │
+        ├── /fridges/:fridgeId/history ........ Paginated inventory, door, and sensor history with a Bangkok date filter
         │
         ├── /fridges/:fridgeId/food/add ....... Manual food check-in with bilingual mapping & optional JPEG crop upload
         │
@@ -103,7 +105,7 @@ The web dashboard is a responsive Single Page Application designed for mobile an
         │
         ├── /fridges/:fridgeId/devices ........ Gateway heartbeat tree (node last_seen_s vs last_known_seen_s) & door safety event timeline
         │
-        ├── /fridges/:fridgeId/me ............. Account personal LINE connection & per-fridge favorite alerts
+        ├── /fridges/:fridgeId/me ............. Legacy bookmark that redirects to /me
         │
         ├── /fridges/:fridgeId/settings ....... Owner-only fridge configuration:
         │                                       - Fridge rename & verified 1-use Family LINE pairing / disconnect
@@ -113,7 +115,7 @@ The web dashboard is a responsive Single Page Application designed for mobile an
         │                                       - Delete fridge (cleans up D1, R2, and closes active sockets with 4004)
         │
         └── /fridges/:fridgeId/sim ............ Owner-only hidden Gateway Data Simulator (`/simulator` alias & `?sim=1`)
-                                                - Sends real Bearer-authenticated test payloads with optional `?bypass_cooldown=1`
+                                                - Sends real Bearer-authenticated test payloads with optional dev-only `?bypass_cooldown=1` (requires authenticated owner session)
 ```
 
 ### 3.2 Internationalization (i18n) Architecture
@@ -136,8 +138,8 @@ All gateway routes authenticate Node `'C'` by hashing the Bearer token with SHA-
 - **`POST /api/inventory/checkin`**: Requires `Idempotency-Key` UUID v4. Validates `CheckInCommitPayload` + tenant-scoped `image_storage_path`, atomically inserts D1 `inventory` (`check_in_source = 'CAMERA'`) + `inventory_operations` receipt, broadcasts `inventory_changed` (`created`), and returns `201 Created`.
 - **`POST /api/inventory/checkout/draft`**: Requires `Idempotency-Key` UUID v4. Accepts `multipart/form-data` JPEG (`image`, max 5 MB), fetches active D1 inventory, invokes Gemini `CHECK_OUT`, filters returned IDs against real D1 rows (anti-hallucination guard), deterministically sorts matches by **FEFO** (`estimated_expiry_date ASC, check_in_timestamp_s ASC`), and caches the `draft_operations` receipt with zero inventory mutations.
 - **`POST /api/inventory/checkout`**: Hard-deletes the confirmed `item_id` from D1 `inventory` and retires its photo from R2 `PHOTOS`, broadcasts `inventory_changed` (`deleted`), and returns `200 OK`.
-- **`POST /api/telemetry`**: Deduplicates samples by `(fridge_id, node_id, timestamp_s)`, enforces bounded event times, updates `fridges.last_seen_s` and `last_telemetry_json` monotonically, broadcasts `telemetry` over `FridgeRoom`, and dispatches `voc_high` (`>= 250`) / `temp_high` (`> 8.0°C`) LINE push alerts (1800s cooldown; optional `?bypass_cooldown=1` for simulator testing).
-- **`POST /api/door_events`**: Deduplicates door events by `(fridge_id, node_id, timestamp_s, status)`, broadcasts `door_events` over `FridgeRoom`, and dispatches LINE alerts for `OBSTRUCTION_ERROR`, `TIMEOUT_ERROR`, `FAULT_LOCKOUT`, and `CONTRADICTION_ERROR` (300s cooldown; optional `?bypass_cooldown=1` for simulator testing).
+- **`POST /api/telemetry`**: Deduplicates samples first-write-wins by `(fridge_id, node_id, timestamp_s)` (conflicting or duplicate retries are ignored without broadcasting or alerting), enforces bounded event times, updates `fridges.last_seen_s` and `last_telemetry_json` from accepted rows, broadcasts `telemetry` over `FridgeRoom`, and dispatches `voc_high` (`>= 250`) / `temp_high` (`> 8.0°C`) LINE push alerts (1800s cooldown; optional `?bypass_cooldown=1` is gated to `APP_ENV=development` + authenticated owner session and preserves replay receipts).
+- **`POST /api/door_events`**: Deduplicates door events first-write-wins by `(fridge_id, node_id, timestamp_s, status)` (duplicate retries do not re-broadcast or re-alert), broadcasts `door_events` over `FridgeRoom`, and dispatches LINE alerts for `OBSTRUCTION_ERROR`, `TIMEOUT_ERROR`, `FAULT_LOCKOUT`, and `CONTRADICTION_ERROR` (300s cooldown; optional `?bypass_cooldown=1` is gated to `APP_ENV=development` + authenticated owner session and preserves replay receipts).
 - **`POST /api/status`**: Stores gateway/subnode heartbeats in `system_status`, retains `last_known_seen_s` when a node reports `null`, ignores stale out-of-order reports, and broadcasts `status` over `FridgeRoom`.
 
 ### 4.2 Dashboard Member & Owner Endpoints (Better Auth Cookie)

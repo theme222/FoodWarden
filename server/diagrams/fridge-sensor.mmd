@@ -5,16 +5,16 @@ flowchart TB
     %% PlatformIO C++ / FreeRTOS with deep sleep. BLE GATT telemetry uses AES-128-GCM.
     %% Onboard LDR GPIO 36, HT16K33 LED matrix (0x70), S1 GPIO 16 and S2 GPIO 14.
     %% SGP40 VOC index 0–500. A MOSFET on GPIO 18 gates the heater.
-    %% SHT31 relative humidity is used for SGP40 compensation.
+    %% Canonical temperature sensor is onboard LM73. SHT31 in the old drawing is not in the current contract.
 
     battery["18650 battery + BMS"]
     fridge_sensor["F0 · KidBright32 / ESP32<br/>Deep sleep · IP65 with desiccant"]
     light["Onboard LDR · GPIO 36"]
     voc["SGP40 · VOC"]
-    temperature["SHT31 · Temperature and humidity"]
+    temperature["Onboard LM73 · Temperature"]
 
     battery --> fridge_sensor
     fridge_sensor --- light
     fridge_sensor ---|"I2C1 · 0x59"| voc
-    fridge_sensor ---|"I2C1 · 0x44"| temperature
+    fridge_sensor ---|"I2C0 · 0x4D"| temperature
     %% I2C1 uses GPIO 21/22.
