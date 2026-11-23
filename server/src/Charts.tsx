@@ -20,18 +20,23 @@ import { CHART_SERIES } from "./state/dashboard-machine";
 import type { ChartRange, SeriesKey } from "./state/dashboard-machine";
 
 const ranges = { "1h": 3600, "24h": 86400, "7d": 604800, "30d": 2592000 };
+const periods = [
+  ["1h", "1 ชั่วโมง", "1 hour"],
+  ["24h", "24 ชั่วโมง", "24 hours"],
+  ["7d", "7 วัน", "7 days"],
+  ["30d", "30 วัน", "30 days"],
+] as const;
 const PAGE_SIZE = 10;
+type Series = (typeof CHART_SERIES)[number];
 
 function ReadingTable({
   points,
   language,
-  unit,
-  metric,
+  series,
 }: {
   points: Sample[];
   language: Language;
-  unit: string;
-  metric: SeriesKey;
+  series: Series[];
 }) {
   const [page, setPage] = useState(0);
   const th = language === "th";
@@ -45,20 +50,24 @@ function ReadingTable({
       <summary>
         {th ? "ตารางค่าที่วัดได้" : "Readings table"} ({points.length})
       </summary>
-      <table className="history-table">
+      <table className="history-table chart-reading-table">
         <thead>
           <tr>
             <th scope="col">{th ? "เวลา (ไทย)" : "Time (Bangkok)"}</th>
-            <th scope="col">
-              {th ? "ค่าที่วัดได้" : "Reading"} ({unit})
-            </th>
+            {series.map(({ key, th: thai, en, unit }) => (
+              <th key={key} scope="col">
+                {key === "voc" ? "VOC" : (th ? thai : en) + " (" + unit + ")"}
+              </th>
+            ))}
           </tr>
         </thead>
         <tbody>
           {rows.map((row) => (
             <tr key={row.timeS}>
               <td>{localTimestamp(row.timeS, language)}</td>
-              <td>{row[metric] ?? "—"}</td>
+              {series.map(({ key }) => (
+                <td key={key}>{row[key] ?? "—"}</td>
+              ))}
             </tr>
           ))}
         </tbody>
@@ -88,24 +97,119 @@ function ReadingTable({
   );
 }
 
-export function Charts({
-  fridgeId,
+function SensorPlot({
+  series,
+  points,
   language,
-  latest,
+  axisTime,
+  height,
+  readingTime,
 }: {
+  series: Series;
+  points: Sample[];
+  language: Language;
+  axisTime: Intl.DateTimeFormat;
+  height: number;
+  readingTime: number | null;
+}) {
+  const th = language === "th";
+  const metric = series.key;
+  const label = th ? series.th : series.en;
+  const valueCount = points.filter((point) => point[metric] !== null).length;
+  return (
+    <div className="sensor-series">
+      <h2>{metric === "voc" ? label : `${label} (${series.unit})`}</h2>
+      {valueCount > 0 ? (
+        <ResponsiveContainer width="100%" height={height} minWidth={0}>
+          <LineChart data={points} margin={{ right: 16, top: 12, left: 0 }}>
+            <CartesianGrid strokeDasharray="3 3" vertical={false} />
+            <XAxis
+              dataKey="timeS"
+              type="number"
+              domain={["dataMin", "dataMax"]}
+              tickFormatter={(time: number) => axisTime.format(time * 1000)}
+              minTickGap={28}
+            />
+            <YAxis
+              width={42}
+              domain={[
+                (min: number) => Math.min(min, series.limit),
+                (max: number) => Math.max(max, series.limit),
+              ]}
+            />
+            <ReferenceLine
+              y={series.limit}
+              stroke="var(--muted-ink)"
+              strokeDasharray="4 4"
+            />
+            {readingTime !== null && (
+              <ReferenceLine x={readingTime} stroke="var(--control-border)" />
+            )}
+            <Tooltip
+              labelFormatter={(time) => localTimestamp(Number(time), language)}
+            />
+            <Line
+              dataKey={metric}
+              name={label}
+              unit={" " + series.unit}
+              stroke={series.textColor}
+              strokeWidth={2}
+              dot={valueCount === 1}
+              isAnimationActive={false}
+            />
+          </LineChart>
+        </ResponsiveContainer>
+      ) : (
+        <p className="small">
+          {th
+            ? "เซนเซอร์ไม่ได้ส่งค่านี้ในช่วงที่เลือก"
+            : "No values for this metric in the selected period."}
+        </p>
+      )}
+      {valueCount > 0 && (
+        <p className="small">
+          {th ? "เส้นประแสดงเกณฑ์" : "Dashed line shows the threshold"} (
+          {series.limit} {series.unit})
+        </p>
+      )}
+    </div>
+  );
+}
+
+type ChartsProps = {
   fridgeId: string;
   language: Language;
   latest: Sample | null;
-}) {
+};
+
+export function Charts(props: ChartsProps) {
+  const [params] = useSearchParams();
+  const linkedMetric = CHART_SERIES.find(
+    ({ key }) => key === params.get("metric"),
+  );
+  const initialMetric = linkedMetric?.key ?? "temperature";
+  return (
+    <ChartContents
+      key={props.fridgeId + "/" + initialMetric}
+      initialMetric={initialMetric}
+      {...props}
+    />
+  );
+}
+
+function ChartContents({
+  fridgeId,
+  language,
+  latest,
+  initialMetric,
+}: ChartsProps & { initialMetric: SeriesKey }) {
   const th = language === "th";
   const now = useNow();
-  const [params, setParams] = useSearchParams();
-  const series =
-    CHART_SERIES.find((entry) => entry.key === params.get("metric")) ??
-    CHART_SERIES[0];
-  const metric = series.key;
-  const label = th ? series.th : series.en;
+  const [metrics, setMetrics] = useState<SeriesKey[]>([initialMetric]);
+  const series = CHART_SERIES.filter(({ key }) => metrics.includes(key));
   const [range, setRange] = useState<ChartRange>("24h");
+  const periodIndex = periods.findIndex(([key]) => key === range);
+  const period = periods[periodIndex] ?? periods[1];
   const [node, setNode] = useState("");
   const [selectedTime, setSelectedTime] = useState<number | null>(null);
   const base = "/api/fridges/" + encodeURIComponent(fridgeId);
@@ -164,36 +268,57 @@ export function Charts({
         </Link>
       </div>
       <div className="chart-filters">
-        <label>
-          {th ? "ข้อมูล" : "Metric"}
-          <select
-            value={metric}
-            onChange={(event) =>
-              setParams({ metric: event.target.value }, { replace: true })
-            }
-          >
+        <fieldset className="visible-choices">
+          <legend>{th ? "ค่าที่แสดง" : "Metrics"}</legend>
+          <div>
             {CHART_SERIES.map((entry) => (
-              <option key={entry.key} value={entry.key}>
+              <label key={entry.key}>
+                <input
+                  type="checkbox"
+                  checked={series.includes(entry)}
+                  onChange={(event) => {
+                    const { checked } = event.currentTarget;
+                    setMetrics((prev) =>
+                      checked
+                        ? [...prev, entry.key]
+                        : prev.filter((key) => key !== entry.key),
+                    );
+                  }}
+                />
                 {th ? (entry.key === "voc" ? "ค่า VOC" : entry.th) : entry.en}
-              </option>
+              </label>
             ))}
-          </select>
-        </label>
-        <label>
-          {th ? "ช่วงเวลา" : "Time range"}
-          <select
-            value={range}
+          </div>
+        </fieldset>
+        <div className="chart-period">
+          <div className="chart-period-label">
+            <label htmlFor="chart-period">
+              {th ? "ช่วงเวลา" : "Time range"}
+            </label>
+            <strong>{th ? period[1] : period[2]}</strong>
+          </div>
+          <input
+            id="chart-period"
+            type="range"
+            min={0}
+            max={periods.length - 1}
+            step={1}
+            value={periodIndex}
+            aria-valuetext={th ? period[1] : period[2]}
             onChange={(event) => {
-              setRange(event.target.value as ChartRange);
-              setSelectedTime(null);
+              const next = periods[Number(event.currentTarget.value)];
+              if (next && next[0] !== range) {
+                setRange(next[0]);
+                setSelectedTime(null);
+              }
             }}
-          >
-            <option value="1h">{th ? "1 ชั่วโมง" : "1 hour"}</option>
-            <option value="24h">{th ? "24 ชั่วโมง" : "24 hours"}</option>
-            <option value="7d">{th ? "7 วัน" : "7 days"}</option>
-            <option value="30d">{th ? "30 วัน" : "30 days"}</option>
-          </select>
-        </label>
+          />
+          <div className="chart-period-stops" aria-hidden="true">
+            {periods.map(([key, thai, english]) => (
+              <span key={key}>{th ? thai : english}</span>
+            ))}
+          </div>
+        </div>
         {nodes.length > 1 && (
           <label>
             {th ? "เซนเซอร์" : "Sensor"}
@@ -229,65 +354,31 @@ export function Charts({
         </StatusAlert>
       )}
       {state.isLoading && <output>{th ? "กำลังโหลด…" : "Loading…"}</output>}
-      {selected ? (
+      {!series.length ? (
+        <p className="empty-state">
+          {th
+            ? "เลือกค่าที่ต้องการแสดงบนกราฟ"
+            : "Select metrics to show on the chart."}
+        </p>
+      ) : selected ? (
         <>
-          <section className="panel sensor-plot" aria-label={label}>
-            <h2>{metric === "voc" ? label : `${label} (${series.unit})`}</h2>
-            {points.some((point) => point[metric] !== null) ? (
-              <ResponsiveContainer width="100%" height={230} minWidth={0}>
-                <LineChart
-                  data={points}
-                  margin={{ right: 16, top: 12, left: 0 }}
-                >
-                  <CartesianGrid strokeDasharray="3 3" vertical={false} />
-                  <XAxis
-                    dataKey="timeS"
-                    type="number"
-                    domain={["dataMin", "dataMax"]}
-                    tickFormatter={(time: number) =>
-                      axisTime.format(time * 1000)
-                    }
-                    minTickGap={28}
-                  />
-                  <YAxis
-                    width={42}
-                    domain={[
-                      (min: number) => Math.min(min, series.limit),
-                      (max: number) => Math.max(max, series.limit),
-                    ]}
-                  />
-                  <ReferenceLine
-                    y={series.limit}
-                    stroke="var(--muted-ink)"
-                    strokeDasharray="4 4"
-                  />
-                  <Tooltip
-                    labelFormatter={(time) =>
-                      localTimestamp(Number(time), language)
-                    }
-                  />
-                  <Line
-                    dataKey={metric}
-                    name={label}
-                    unit={" " + series.unit}
-                    stroke={series.textColor}
-                    strokeWidth={2}
-                    dot={points.length === 1}
-                    isAnimationActive={false}
-                  />
-                </LineChart>
-              </ResponsiveContainer>
-            ) : (
-              <p className="small">
-                {th
-                  ? "เซนเซอร์ไม่ได้ส่งค่านี้ในช่วงที่เลือก"
-                  : "No values for this metric in the selected period."}
-              </p>
-            )}
-            <p className="small">
-              {th ? "เส้นประแสดงเกณฑ์" : "Dashed line shows the threshold"} (
-              {series.limit} {series.unit})
-            </p>
+          <section
+            className="panel sensor-plot"
+            aria-label={th ? "ค่าจากเซนเซอร์" : "Sensor values"}
+          >
+            <div className="sensor-series-list">
+              {series.map((item) => (
+                <SensorPlot
+                  key={item.key}
+                  series={item}
+                  points={points}
+                  language={language}
+                  axisTime={axisTime}
+                  height={series.length > 1 ? 170 : 230}
+                  readingTime={index >= 0 ? selected.timeS : null}
+                />
+              ))}
+            </div>
             <label className="chart-scrubber">
               {th ? "เลือกเวลาที่ต้องการดู" : "Choose a reading"}
               <input
@@ -308,17 +399,18 @@ export function Charts({
               <time dateTime={new Date(selected.timeS * 1000).toISOString()}>
                 {localTimestamp(selected.timeS, language)}
               </time>
-              <strong>
-                {label}: {selected[metric] ?? "—"} {series.unit}
-              </strong>
+              {series.map(({ key, th: thai, en, unit }) => (
+                <strong key={key}>
+                  {th ? thai : en}: {selected[key] ?? "—"} {unit}
+                </strong>
+              ))}
             </output>
           </section>
           <ReadingTable
-            key={range + activeNode + metric}
+            key={range + activeNode}
             points={points}
             language={language}
-            metric={metric}
-            unit={series.unit}
+            series={series}
           />
         </>
       ) : (

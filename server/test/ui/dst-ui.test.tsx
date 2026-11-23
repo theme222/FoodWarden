@@ -1,5 +1,11 @@
 import { afterEach, expect, test } from "bun:test";
-import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import {
+  cleanup,
+  fireEvent,
+  render,
+  screen,
+  waitFor,
+} from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { MemoryRouter } from "react-router-dom";
 import { SWRConfig } from "swr";
@@ -81,7 +87,9 @@ test("DST UI: seeded inventory interactions recover cleanly from empty filters w
     const term = rng.pick(terms);
     fireEvent.change(searchbox, { target: { value: term } });
     if (term === "no-such-food") {
-      expect(await screen.findByText("No food matches these filters")).toBeTruthy();
+      expect(
+        await screen.findByText("No food matches these filters"),
+      ).toBeTruthy();
       await user.click(screen.getByRole("button", { name: "Reset filters" }));
       expect(await screen.findByText("Milk")).toBeTruthy();
     }
@@ -111,13 +119,9 @@ test("DST UI: Charts recovers from fetch error via Retry button and supports met
 
   render(
     <SWRConfig value={{ provider: () => new Map(), dedupingInterval: 0 }}>
-<MemoryRouter>
-      <Charts
-        fridgeId="dst-fridge"
-        language="en"
-        latest={null}
-      />
-</MemoryRouter>
+      <MemoryRouter>
+        <Charts fridgeId="dst-fridge" language="en" latest={null} />
+      </MemoryRouter>
     </SWRConfig>,
   );
 
@@ -127,10 +131,15 @@ test("DST UI: Charts recovers from fetch error via Retry button and supports met
   await user.click(retry);
 
   await waitFor(() =>
-    expect(screen.getByRole("combobox", { name: "Metric" })).toBeTruthy(),
+    expect(screen.getByRole("checkbox", { name: "Temperature" })).toBeTruthy(),
   );
-  await user.selectOptions(screen.getByRole("combobox", { name: "Metric" }), "light");
-  expect((screen.getByRole("combobox", { name: "Metric" }) as HTMLSelectElement).value).toBe("light");
+  await user.click(screen.getByRole("checkbox", { name: "Temperature" }));
+  expect(screen.getByText("Select metrics to show on the chart.")).toBeTruthy();
+  await user.click(screen.getByRole("checkbox", { name: "Light" }));
+  expect(
+    (screen.getByRole("checkbox", { name: "Light" }) as HTMLInputElement)
+      .checked,
+  ).toBe(true);
 });
 
 test("DST UI: Devices renders schematic, auto-expands degraded node, and offers troubleshooting", () => {
@@ -142,7 +151,12 @@ test("DST UI: Devices renders schematic, auto-expands degraded node, and offers 
         receivedS: now,
         nodes: [
           { id: "C0", reported: true, reportedS: now, lastKnownS: now },
-          { id: "F0", reported: true, reportedS: now - 900, lastKnownS: now - 900 },
+          {
+            id: "F0",
+            reported: true,
+            reportedS: now - 900,
+            lastKnownS: now - 900,
+          },
           { id: "D0", reported: true, reportedS: now, lastKnownS: now },
         ],
       }}
@@ -152,6 +166,8 @@ test("DST UI: Devices renders schematic, auto-expands degraded node, and offers 
     />,
   );
 
-  expect(screen.getByRole("alert").textContent).toContain("1 device(s) need attention");
+  expect(screen.getByRole("alert").textContent).toContain(
+    "1 device(s) need attention",
+  );
   expect(screen.getByText(/Fridge sensor F0 sleeps/)).toBeTruthy();
 });

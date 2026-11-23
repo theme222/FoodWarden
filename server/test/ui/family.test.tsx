@@ -228,19 +228,19 @@ test("charts keep sensor histories separate, support scrubbing and show the sele
   );
   const { container } = render(
     <SWRConfig value={{ provider: () => new Map(), dedupingInterval: 0 }}>
-<MemoryRouter>
-      <Charts
-        fridgeId="kitchen"
-        language="en"
-        latest={{
-          nodeId: "F1",
-          timeS: now,
-          temperature: 20,
-          voc: 250,
-          light: 200,
-        }}
-      />
-</MemoryRouter>
+      <MemoryRouter>
+        <Charts
+          fridgeId="kitchen"
+          language="en"
+          latest={{
+            nodeId: "F1",
+            timeS: now,
+            temperature: 20,
+            voc: 250,
+            light: 200,
+          }}
+        />
+      </MemoryRouter>
     </SWRConfig>,
   );
   const user = userEvent.setup({ document });
@@ -258,9 +258,24 @@ test("charts keep sensor histories separate, support scrubbing and show the sele
   expect(container.querySelector(".reading-selected")?.textContent).toContain(
     "Temperature: 4",
   );
-  await user.selectOptions(screen.getByRole("combobox", { name: "Metric" }), "light");
-  expect((screen.getByRole("combobox", { name: "Metric" }) as HTMLSelectElement).value).toBe("light");
-  await user.selectOptions(screen.getByRole("combobox", { name: "Time range" }), "7d");
+  await user.click(screen.getByRole("checkbox", { name: "Light" }));
+  expect(
+    (screen.getByRole("checkbox", { name: "Temperature" }) as HTMLInputElement)
+      .checked,
+  ).toBe(true);
+  expect(container.querySelector(".reading-selected")?.textContent).toContain(
+    "Light: 10",
+  );
+  expect(
+    container.querySelector(".history-table th:last-child")?.textContent,
+  ).toBe("Light (LDR)");
+  await user.click(screen.getByRole("checkbox", { name: "Temperature" }));
+  expect(
+    container.querySelector(".reading-selected")?.textContent,
+  ).not.toContain("Temperature:");
+  fireEvent.change(screen.getByRole("slider", { name: "Time range" }), {
+    target: { value: "2" },
+  });
   await waitFor(() =>
     expect(urls.some((url) => url.endsWith("range=7d"))).toBe(true),
   );
