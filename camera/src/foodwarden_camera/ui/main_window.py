@@ -168,9 +168,6 @@ class FoodWardenMainWindow(QMainWindow):
         self.idle_screen = IdleScreen(
             parent=self.stack,
             on_open_settings=self.show_settings_screen,
-            on_minimize=self.minimize_window,
-            on_toggle_fullscreen=self.toggle_fullscreen,
-            on_quit=self.quit_application,
         )
         self.stack.addWidget(self.idle_screen)
 

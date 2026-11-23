@@ -32,6 +32,7 @@ from foodwarden_camera.ui.styles import (
     pill_style,
 )
 from foodwarden_camera.ui.widgets import (
+    FitLabel,
     create_key_guide,
     create_screen_header,
     days_left_badge,
@@ -134,16 +135,14 @@ class CheckInScreen(QWidget):
         card_layout.setContentsMargins(16, 10, 16, 12)
         card_layout.setSpacing(4)
 
-        self.name_th = QLabel("กำลังวิเคราะห์...", self.card)
-        self.name_th.setWordWrap(True)
+        self.name_th = FitLabel("กำลังวิเคราะห์...", self.card, min_px=24)
 
-        self.name_en = QLabel("Gemini AI", self.card)
-        self.name_en.setWordWrap(True)
+        self.name_en = FitLabel("Gemini AI", self.card, min_px=15)
         self.name_en.setStyleSheet(
             f"font-size: {FS_LABEL}px; font-weight: bold; color: {COLOR_MUTED};"
         )
 
-        self.category_label = QLabel("หมวดหมู่: -", self.card)
+        self.category_label = FitLabel("หมวดหมู่: -", self.card, min_px=15)
         self.category_label.setStyleSheet(
             f"font-size: {FS_LABEL}px; font-weight: bold; color: {COLOR_INK};"
         )
@@ -314,7 +313,7 @@ class CheckInScreen(QWidget):
 
         self.name_th.setText(draft.name_th)
         self._set_name_style(COLOR_FRESH)
-        self.name_en.setText(f"{draft.name_en}  ·  มั่นใจ {draft.confidence * 100:.0f}%")
+        self.name_en.setText(f"มั่นใจ {draft.confidence * 100:.0f}%  ·  {draft.name_en}")
         self.category_label.setText(f"หมวดหมู่: {draft.category_th}")
         self.storage_label.setText(f"วิธีเก็บ: {draft.storage_recommendation_th}")
 

@@ -4,8 +4,9 @@ from __future__ import annotations
 
 from datetime import date
 
-from PyQt6.QtCore import Qt
-from PyQt6.QtWidgets import QFrame, QHBoxLayout, QLabel, QWidget
+from PyQt6.QtCore import QSize, Qt
+from PyQt6.QtGui import QFont, QFontMetrics, QPainter, QPaintEvent
+from PyQt6.QtWidgets import QFrame, QHBoxLayout, QLabel, QSizePolicy, QWidget
 
 from foodwarden_camera.ui.styles import (
     COLOR_BAD,
@@ -97,3 +98,43 @@ def days_left_badge(expiry: date, today: date | None = None) -> tuple[str, str, 
     if days_left <= 3:
         return f"อีก {days_left} วัน", COLOR_SOON, COLOR_ON_SOON
     return f"อีก {days_left} วัน", COLOR_LIME_SOFT, COLOR_LIME_INK
+
+
+class FitLabel(QLabel):
+    """Single-line label that never clips mid-glyph.
+
+    Thai has no spaces, so Qt word-wrap can't break long names and the text
+    gets cut off at the card edge. This label instead shrinks its font one
+    pixel at a time (down to ``min_px``) until the text fits, then elides
+    with "…" as a last resort. ``text()`` always returns the full string and
+    the full text is shown as a tooltip when it had to be shortened.
+    """
+
+    def __init__(self, text: str, parent: QWidget | None = None, *, min_px: int = 14) -> None:
+        super().__init__(text, parent)
+        self.min_px = min_px
+        self.setWordWrap(False)
+        self.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Preferred)
+
+    def minimumSizeHint(self) -> QSize:
+        return QSize(0, super().minimumSizeHint().height())
+
+    def paintEvent(self, event: QPaintEvent | None) -> None:
+        self.ensurePolished()
+        rect = self.contentsRect()
+        text = self.text()
+        font = QFont(self.font())
+        base_px = font.pixelSize() if font.pixelSize() > 0 else round(font.pointSizeF() * 4 / 3)
+        px = base_px
+        while px > self.min_px and QFontMetrics(font).horizontalAdvance(text) > rect.width():
+            px -= 1
+            font.setPixelSize(px)
+        metrics = QFontMetrics(font)
+        shown = metrics.elidedText(text, Qt.TextElideMode.ElideRight, rect.width())
+        self.setToolTip(text if shown != text or px != base_px else "")
+
+        painter = QPainter(self)
+        painter.setFont(font)
+        painter.setPen(self.palette().color(self.foregroundRole()))
+        painter.drawText(rect, int(self.alignment() | Qt.AlignmentFlag.AlignVCenter), shown)
+        painter.end()

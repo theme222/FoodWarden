@@ -38,6 +38,7 @@ from foodwarden_camera.ui.styles import (
     pill_style,
 )
 from foodwarden_camera.ui.widgets import (
+    FitLabel,
     create_key_guide,
     create_screen_header,
     days_left_badge,
@@ -58,7 +59,7 @@ class _CandidateRow(QFrame):
 
         text_col = QVBoxLayout()
         text_col.setSpacing(0)
-        self.name_label = QLabel(cand.name_th, self)
+        self.name_label = FitLabel(cand.name_th, self, min_px=17)
         self.detail_label = QLabel(self._detail_text(cand), self)
         text_col.addWidget(self.name_label)
         text_col.addWidget(self.detail_label)
@@ -71,7 +72,7 @@ class _CandidateRow(QFrame):
             self.fefo_label = QLabel("หมดก่อน", self)
             self.fefo_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
             self.fefo_label.setStyleSheet(
-                pill_style(COLOR_TAKE_SOLID, COLOR_ON_TAKE, font_px=FS_LABEL - 3, pad_v=2, pad_h=8)
+                pill_style(COLOR_TAKE_SOLID, COLOR_ON_TAKE, font_px=FS_LABEL - 3, pad_v=4, pad_h=8)
             )
             badge_col.addWidget(self.fefo_label, alignment=Qt.AlignmentFlag.AlignRight)
         self.days_label = QLabel("", self)
@@ -84,7 +85,7 @@ class _CandidateRow(QFrame):
             text, bg, fg = days_left_badge(expiry)
             self.days_label.setText(text)
             self.days_label.setStyleSheet(
-                pill_style(bg, fg, font_px=FS_LABEL - 2, pad_v=2, pad_h=8, radius=10)
+                pill_style(bg, fg, font_px=FS_LABEL - 2, pad_v=4, pad_h=8, radius=10)
             )
         except ValueError:
             self.days_label.hide()
