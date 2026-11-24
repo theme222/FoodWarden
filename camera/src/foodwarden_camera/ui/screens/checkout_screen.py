@@ -1,0 +1,485 @@
+"""Check-Out Flow Screen with Web Prototype styling and FEFO priority selection."""
+
+from __future__ import annotations
+
+from collections.abc import Callable
+from datetime import datetime
+
+from PyQt6.QtCore import QSize, Qt, QTimer
+from PyQt6.QtGui import QImage, QPixmap
+from PyQt6.QtWidgets import (
+    QAbstractItemView,
+    QHBoxLayout,
+    QLabel,
+    QListWidget,
+    QListWidgetItem,
+    QVBoxLayout,
+    QWidget,
+)
+
+from foodwarden_camera.models.cloud_cbs import CheckOutCandidate
+from foodwarden_camera.ui.i18n import pick, t
+from foodwarden_camera.ui.smooth import SmoothFrame, SmoothLabel
+from foodwarden_camera.ui.styles import (
+    COLOR_DARK,
+    COLOR_INK,
+    COLOR_LIME,
+    COLOR_MUTED,
+    COLOR_ON_DARK,
+    COLOR_ON_DARK_2,
+    COLOR_ON_TAKE,
+    COLOR_RULE,
+    COLOR_SURFACE,
+    COLOR_SURFACE_2,
+    COLOR_TAKE_SOLID,
+    COLOR_WARN_TEXT,
+    FS_BODY,
+    FS_LABEL,
+    card_style,
+    pill_style,
+    smooth_css,
+)
+from foodwarden_camera.ui.widgets import (
+    DEFAULT_AUTOCOMPLETE_S,
+    EDIT_TIMEOUT_S,
+    FitLabel,
+    countdown_style,
+    create_key_guide,
+    create_screen_header,
+    days_left_badge,
+)
+
+_ROW_HEIGHT = 78
+
+
+class _CandidateRow(SmoothFrame):
+    """One selectable FEFO candidate: Thai name, expiry date and days-left badge."""
+
+    def __init__(self, cand: CheckOutCandidate, is_fefo: bool, parent: QWidget) -> None:
+        super().__init__(parent)
+        self.setObjectName("CandidateRow")
+        layout = QHBoxLayout(self)
+        layout.setContentsMargins(14, 6, 12, 6)
+        layout.setSpacing(10)
+
+        text_col = QVBoxLayout()
+        text_col.setSpacing(0)
+        self.name_label = FitLabel(pick(cand.name_th, cand.name_en), self, min_px=17)
+        self.detail_label = SmoothLabel(self._detail_text(cand), self)
+        text_col.addWidget(self.name_label)
+        text_col.addWidget(self.detail_label)
+
+        badge_col = QVBoxLayout()
+        badge_col.setSpacing(4)
+        badge_col.addStretch()
+        self.fefo_label: QLabel | None = None
+        if is_fefo:
+            self.fefo_label = SmoothLabel(t("checkout.fefo"), self)
+            self.fefo_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+            self.fefo_label.setStyleSheet(
+                pill_style(COLOR_TAKE_SOLID, COLOR_ON_TAKE, font_px=FS_LABEL - 3, pad_v=4, pad_h=8)
+            )
+            badge_col.addWidget(self.fefo_label, alignment=Qt.AlignmentFlag.AlignRight)
+        self.days_label = SmoothLabel("", self)
+        self.days_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        badge_col.addWidget(self.days_label, alignment=Qt.AlignmentFlag.AlignRight)
+        badge_col.addStretch()
+
+        try:
+            expiry = datetime.strptime(cand.expiry_date, "%Y-%m-%d").date()
+            text, bg, fg = days_left_badge(expiry)
+            self.days_label.setText(text)
+            self.days_label.setStyleSheet(
+                pill_style(bg, fg, font_px=FS_LABEL - 2, pad_v=4, pad_h=8, radius=10)
+            )
+        except ValueError:
+            self.days_label.hide()
+
+        layout.addLayout(text_col, stretch=1)
+        layout.addLayout(badge_col)
+        self.set_selected(False)
+
+    @staticmethod
+    def _detail_text(cand: CheckOutCandidate) -> str:
+        try:
+            exp = datetime.strptime(cand.expiry_date, "%Y-%m-%d").strftime("%d/%m/%Y")
+        except ValueError:
+            exp = cand.expiry_date
+        return t("common.expires_on", date=exp)
+
+    def set_selected(self, selected: bool) -> None:
+        if selected:
+            bg, border, border_w = COLOR_DARK, COLOR_LIME, 3
+            name_fg, detail_fg = COLOR_ON_DARK, COLOR_ON_DARK_2
+        else:
+            bg, border, border_w = COLOR_SURFACE_2, COLOR_RULE, 2
+            name_fg, detail_fg = COLOR_INK, COLOR_MUTED
+        self.setStyleSheet(
+            f"#CandidateRow {{ {smooth_css(bg, radius=16, border=border, width=border_w)} }}"
+        )
+        self.name_label.setStyleSheet(
+            f"font-size: {FS_BODY + 1}px; font-weight: bold; color: {name_fg};"
+        )
+        self.detail_label.setStyleSheet(
+            f"font-size: {FS_LABEL - 1}px; font-weight: bold; color: {detail_fg};"
+        )
+
+
+class CheckOutScreen(QWidget):
+    """High-contrast Check-Out screen highlighting top FEFO candidates.
+
+    Countdown rules (every expiry does NOT remove anything; removal only
+    happens on an explicit O on the confirmation screen):
+      * No button pressed → ``autocomplete_timeout_s`` (default 10 s) runs out →
+        ``on_timeout(candidate)``: nothing is removed, the user is told so.
+      * The user changes the selected item (Pi-top ↑/↓, keyboard, or touch)
+        → countdown switches to ``EDIT_TIMEOUT_S`` (30 s), restarting on every
+        move; expiry → ``on_timeout`` as above.
+      * O opens the confirmation step (``on_review``), which has its own 7 s
+        countdown (also "don't remove" on expiry).
+    """
+
+    def __init__(
+        self,
+        on_confirm_callback: Callable[[CheckOutCandidate], None],
+        on_cancel_callback: Callable[[], None],
+        autocomplete_timeout_s: int = DEFAULT_AUTOCOMPLETE_S,
+        parent: QWidget | None = None,
+        on_review_callback: Callable[[CheckOutCandidate], None] | None = None,
+        on_timeout_callback: Callable[[CheckOutCandidate], None] | None = None,
+    ) -> None:
+        super().__init__(parent)
+        self.on_confirm = on_confirm_callback
+        self.on_cancel = on_cancel_callback
+        self.on_review = on_review_callback or on_confirm_callback
+        self.on_timeout: Callable[[CheckOutCandidate], None] = on_timeout_callback or (
+            lambda _cand: self.on_cancel()
+        )
+        self._manual = False  # True once the user changed the selection
+        self.autocomplete_timeout_s = max(1, autocomplete_timeout_s)
+        self._candidates: list[CheckOutCandidate] = []
+        self._rows: list[_CandidateRow] = []
+        self._is_loading = False
+        self._countdown_seconds = self.autocomplete_timeout_s
+
+        self._countdown_timer = QTimer(self)
+        self._countdown_timer.timeout.connect(self._tick_countdown)
+
+        self._init_ui()
+
+    # ------------------------------------------------------------------
+    # Layout
+    # ------------------------------------------------------------------
+
+    def _init_ui(self) -> None:
+        root_layout = QVBoxLayout(self)
+        root_layout.setContentsMargins(14, 10, 14, 12)
+        root_layout.setSpacing(10)
+
+        header, self.countdown_label = create_screen_header("checkout.title", self)
+        self.countdown_label.setText(t("countdown.cancel", n=self.autocomplete_timeout_s))
+        root_layout.addLayout(header)
+
+        body = QHBoxLayout()
+        body.setSpacing(12)
+
+        photo_card = SmoothFrame(self)
+        photo_card.setObjectName("CheckOutPhotoCard")
+        photo_card.setFixedWidth(210)
+        photo_card.setStyleSheet(card_style("CheckOutPhotoCard", radius=16))
+        photo_layout = QVBoxLayout(photo_card)
+        photo_layout.setContentsMargins(8, 8, 8, 8)
+
+        self.img_frame = SmoothFrame(photo_card)
+        self.img_frame.setObjectName("CheckOutImgFrame")
+        self.img_frame.setStyleSheet(
+            f"#CheckOutImgFrame {{ {smooth_css(COLOR_DARK, radius=15, border=COLOR_RULE)} }}"
+        )
+        img_layout = QVBoxLayout(self.img_frame)
+        img_layout.setContentsMargins(4, 4, 4, 4)
+        self.image_label = SmoothLabel(t("common.preparing_image"), self.img_frame)
+        self.image_label.image_radius = 11.0
+        self.image_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.image_label.setStyleSheet(
+            f"color: {COLOR_ON_DARK}; font-size: {FS_LABEL}px; font-weight: bold;"
+        )
+        img_layout.addWidget(self.image_label)
+        photo_layout.addWidget(self.img_frame)
+
+        list_card = SmoothFrame(self)
+        list_card.setObjectName("CheckOutListCard")
+        list_card.setStyleSheet(card_style("CheckOutListCard", radius=16))
+        list_layout = QVBoxLayout(list_card)
+        list_layout.setContentsMargins(10, 8, 10, 10)
+        list_layout.setSpacing(6)
+
+        hint_row = QHBoxLayout()
+        self.hint_label = SmoothLabel(t("checkout.choose"), list_card)
+        self.position_label = SmoothLabel("", list_card)
+        self.position_label.setStyleSheet(
+            f"font-size: {FS_LABEL}px; font-weight: bold; color: {COLOR_MUTED};"
+        )
+        hint_row.addWidget(self.hint_label)
+        hint_row.addStretch()
+        hint_row.addWidget(self.position_label)
+        self._set_hint_style(COLOR_INK)
+
+        self.list_widget = QListWidget(list_card)
+        # The window-level key handler owns ↑/↓; a focused list would swallow them.
+        self.list_widget.setFocusPolicy(Qt.FocusPolicy.NoFocus)
+        self.list_widget.setSelectionMode(QAbstractItemView.SelectionMode.SingleSelection)
+        self.list_widget.setVerticalScrollMode(QAbstractItemView.ScrollMode.ScrollPerPixel)
+        self.list_widget.setSpacing(3)
+        # Scrollbar would cover the badges; the "n / total" counter shows position.
+        self.list_widget.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        self.list_widget.setStyleSheet(
+            "QListWidget { background: transparent; border: none; padding: 0; }"
+            "QListWidget::item, QListWidget::item:selected "
+            "{ background: transparent; border: none; margin: 0; padding: 0; }"
+        )
+        self.list_widget.currentRowChanged.connect(self._on_row_changed)
+
+        list_layout.addLayout(hint_row)
+        list_layout.addWidget(self.list_widget, stretch=1)
+
+        body.addWidget(photo_card)
+        body.addWidget(list_card, stretch=1)
+        root_layout.addLayout(body, stretch=1)
+
+        nav_bar = QHBoxLayout()
+        nav_bar.setSpacing(10)
+        pill_o = create_key_guide(
+            "CheckOutPillO", "O", "checkout.remove", COLOR_TAKE_SOLID, COLOR_ON_TAKE, self
+        )
+        pill_arrows = create_key_guide(
+            "CheckOutPillArrows",
+            "↑↓",
+            "checkout.select",
+            COLOR_SURFACE,
+            COLOR_INK,
+            self,
+            border_color=COLOR_RULE,
+        )
+        pill_x = create_key_guide(
+            "CheckOutPillX", "X", "common.cancel", COLOR_DARK, COLOR_ON_DARK, self
+        )
+        nav_bar.addWidget(pill_o, stretch=1)
+        nav_bar.addWidget(pill_arrows, stretch=1)
+        nav_bar.addWidget(pill_x, stretch=1)
+        root_layout.addLayout(nav_bar)
+
+    def _set_hint_style(self, color: str) -> None:
+        self.hint_label.setStyleSheet(
+            f"font-size: {FS_LABEL + 1}px; font-weight: bold; color: {color};"
+        )
+
+    def _add_message_row(self, text: str, color: str = COLOR_MUTED) -> None:
+        """Adds a non-selectable informational row (loading / empty)."""
+        item = QListWidgetItem(self.list_widget)
+        item.setFlags(Qt.ItemFlag.NoItemFlags)
+        label = SmoothLabel(text, self.list_widget)
+        label.setWordWrap(True)
+        label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        label.setStyleSheet(
+            f"font-size: {FS_BODY}px; font-weight: bold; color: {color}; padding: 18px;"
+        )
+        item.setSizeHint(QSize(0, 120))
+        self.list_widget.setItemWidget(item, label)
+
+    # ------------------------------------------------------------------
+    # Countdown
+    # ------------------------------------------------------------------
+
+    def set_autocomplete_timeout(self, seconds: int) -> None:
+        """Updates inactivity auto-confirm duration in seconds."""
+        self.autocomplete_timeout_s = max(1, seconds)
+
+    def _start_countdown(self, seconds: int) -> None:
+        """(Re)starts the auto-cancel countdown; the next tick is a full second away."""
+        self._countdown_seconds = max(1, seconds)
+        self._update_countdown_label()
+        self._countdown_timer.start(1000)
+
+    def _update_countdown_label(self) -> None:
+        self.countdown_label.setText(t("countdown.cancel", n=self._countdown_seconds))
+
+    def _on_user_interaction(self) -> None:
+        """User is choosing: switch to / restart the 30 s browse countdown."""
+        self._manual = True
+        self._start_countdown(EDIT_TIMEOUT_S)
+
+    @property
+    def is_manual(self) -> bool:
+        """Whether the user has changed the selection (30 s countdown active)."""
+        return self._manual
+
+    def _tick_countdown(self) -> None:
+        self._countdown_seconds -= 1
+        if self._countdown_seconds <= 0:
+            self._countdown_timer.stop()
+            self._time_out()
+        else:
+            self._update_countdown_label()
+
+    def resume_selecting(self) -> None:
+        """Back from the confirm step (X): keep the selection, 30 s countdown."""
+        if self._candidates:
+            self._on_user_interaction()
+
+    # ------------------------------------------------------------------
+    # Data loading
+    # ------------------------------------------------------------------
+
+    def _set_preview_image(self, image_bytes: bytes) -> None:
+        if not image_bytes:
+            self.image_label.clear()
+            self.image_label.setText(t("common.preparing_image"))
+            return
+        qimg = QImage.fromData(image_bytes)
+        if not qimg.isNull():
+            pixmap = QPixmap.fromImage(qimg).scaled(
+                max(self.img_frame.width() - 8, 178),
+                max(self.img_frame.height() - 8, 178),
+                Qt.AspectRatioMode.KeepAspectRatio,
+                Qt.TransformationMode.SmoothTransformation,
+            )
+            self.image_label.setText("")
+            self.image_label.setPixmap(pixmap)
+
+    def load_loading(self, image_bytes: bytes = b"") -> None:
+        """Displays snapshot immediately while inventory matching loads."""
+        self._countdown_timer.stop()
+        self._is_loading = True
+        self._candidates = []
+        self._rows = []
+        self._manual = False
+        self.countdown_label.setStyleSheet(countdown_style())
+        self._set_preview_image(image_bytes)
+
+        self.countdown_label.setText(t("common.loading_ai"))
+        self.hint_label.setText(t("checkout.searching"))
+        self._set_hint_style(COLOR_WARN_TEXT)
+        self.position_label.setText("")
+
+        self.list_widget.clear()
+        self._add_message_row(t("checkout.analyzing"), COLOR_WARN_TEXT)
+
+    def load_candidates(
+        self, candidates: list[CheckOutCandidate], image_bytes: bytes = b""
+    ) -> None:
+        """Populates FEFO candidates and initiates countdown."""
+        self._countdown_timer.stop()
+        self._candidates = candidates
+        self._rows = []
+        self._manual = False
+        self.countdown_label.setStyleSheet(countdown_style())
+        if image_bytes:
+            self._set_preview_image(image_bytes)
+
+        self.hint_label.setText(t("checkout.choose"))
+        self._set_hint_style(COLOR_INK)
+
+        # Block signals while rebuilding so clear()/setCurrentRow don't fire
+        # _on_row_changed against a half-built row list.
+        self.list_widget.blockSignals(True)
+        self.list_widget.clear()
+
+        if not candidates:
+            self.list_widget.blockSignals(False)
+            self._is_loading = False
+            self.position_label.setText("")
+            self._add_message_row(t("checkout.not_found"))
+            self.countdown_label.setText(t("checkout.not_found_short"))
+            return
+
+        for idx, cand in enumerate(candidates):
+            item = QListWidgetItem(self.list_widget)
+            item.setSizeHint(QSize(0, _ROW_HEIGHT))
+            row = _CandidateRow(cand, is_fefo=idx == 0, parent=self.list_widget)
+            self.list_widget.setItemWidget(item, row)
+            self._rows.append(row)
+
+        self.list_widget.setCurrentRow(0)
+        self.list_widget.blockSignals(False)
+        self._is_loading = False
+        self._apply_selection(0)
+
+        self._start_countdown(self.autocomplete_timeout_s)
+
+    # ------------------------------------------------------------------
+    # Selection
+    # ------------------------------------------------------------------
+
+    def _apply_selection(self, row: int) -> None:
+        for idx, row_widget in enumerate(self._rows):
+            row_widget.set_selected(idx == row)
+        if 0 <= row < len(self._rows):
+            self.position_label.setText(f"{row + 1} / {len(self._rows)}")
+            item = self.list_widget.item(row)
+            if item is not None:
+                self.list_widget.scrollToItem(item)
+
+    def _on_row_changed(self, row: int) -> None:
+        if self._is_loading or not self._rows:
+            return
+        self._apply_selection(row)
+        self._on_user_interaction()
+
+    def handle_up(self) -> None:
+        """Selects previous candidate item."""
+        if self._is_loading or not self._candidates:
+            return
+        current_row = self.list_widget.currentRow()
+        if current_row > 0:
+            self.list_widget.setCurrentRow(current_row - 1)  # restarts via _on_row_changed
+        else:
+            self._on_user_interaction()  # still choosing at the top edge
+
+    def handle_down(self) -> None:
+        """Selects next candidate item."""
+        if self._is_loading or not self._candidates:
+            return
+        current_row = self.list_widget.currentRow()
+        if current_row < self.list_widget.count() - 1:
+            self.list_widget.setCurrentRow(current_row + 1)  # restarts via _on_row_changed
+        else:
+            self._on_user_interaction()  # still choosing at the bottom edge
+
+    def handle_select(self) -> None:
+        """Opens the confirm step for the selected candidate."""
+        if self._is_loading:
+            return
+        candidate = self.selected_candidate
+        if candidate is None:
+            self.on_cancel()  # "not found" list: O just goes back
+            return
+        self._manual = True
+        self._countdown_timer.stop()  # the confirm step runs its own countdown
+        self.on_review(candidate)
+
+    @property
+    def selected_candidate(self) -> CheckOutCandidate | None:
+        """Currently highlighted candidate, if any."""
+        row = self.list_widget.currentRow()
+        return self._candidates[row] if 0 <= row < len(self._candidates) else None
+
+    @property
+    def current_pixmap(self) -> QPixmap | None:
+        """Snapshot currently shown, for the confirm summary card."""
+        pixmap = self.image_label.pixmap()
+        return pixmap if pixmap is not None and not pixmap.isNull() else None
+
+    def handle_cancel(self) -> None:
+        """Cancels checkout without committing."""
+        self._is_loading = False
+        self._countdown_timer.stop()
+        self.on_cancel()
+
+    def _time_out(self) -> None:
+        """Countdown ran out: do NOT remove anything; report which item was left in."""
+        self._countdown_timer.stop()
+        candidate = self.selected_candidate
+        if candidate is not None:
+            self.on_timeout(candidate)
+        else:
+            self.on_cancel()

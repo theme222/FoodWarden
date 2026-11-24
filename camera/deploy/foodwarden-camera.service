@@ -1,0 +1,19 @@
+[Unit]
+Description=FoodWarden Camera Logger & Edge Gateway (Node C)
+After=network-online.target mosquitto.service bluetooth.target graphical.target
+Wants=network-online.target mosquitto.service
+
+[Service]
+Type=simple
+User=pi
+WorkingDirectory=/home/pi/FoodWarden/camera
+Environment=DISPLAY=:0
+Environment=XAUTHORITY=/home/pi/.Xauthority
+Environment=PYTHONUNBUFFERED=1
+ExecStart=/home/pi/.local/bin/uv run foodwarden-camera
+Restart=always
+RestartSec=3
+
+[Install]
+WantedBy=graphical.target
+

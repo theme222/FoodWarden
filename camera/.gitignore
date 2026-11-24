@@ -18,3 +18,13 @@ build/
 *.pt
 *.onnx
 captures/
+
+# Secrets, TLS certificates & local databases
+.env
+*.db
+*.sqlite
+*.sqlite3
+certs/
+*.key
+*.crt
+*.pem

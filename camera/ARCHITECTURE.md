@@ -73,14 +73,14 @@ This document specifies the hardware configuration, physical interconnections, p
 | **Operating System** | **Raspberry Pi OS (64-bit) Bookworm** | Debian 12 (Kernel 6.6 LTS, `aarch64`) | Base OS for Pi-top [4] hardware drivers and modern Python 3.11 runtime. |
 | **Language & Runtime** | **Python** | **`3.11.x` (`==3.11.*`)** | Strictly pinned in [`.python-version`](.python-version) and [`pyproject.toml`](pyproject.toml). |
 | **Project Manager** | **`uv`** | `>=0.12` | Fast dependency resolution, virtual environment management, and script execution. |
-| **Object Detection AI** | **YOLO11 Nano (`yolo11n.pt`)** via **`ultralytics`** & **`opencv-python`** | `ultralytics >=8.3`, `opencv-python >=4.10` | Runs real-time local bounding-box object detection on CPU to crop grocery items (falling back to the full webcam frame if no bounding box is detected), compresses frames into JPEG (`image/jpeg`), and detects `person` class during door safety checks. |
+| **Object Detection AI** | **YOLO26 Nano (`yolo26n.pt`)** via **`ultralytics`** & **`opencv-python`** | `ultralytics >=8.3`, `opencv-python >=4.10` | Runs real-time local bounding-box object detection on CPU to crop grocery items (falling back to the full webcam frame if no bounding box is detected), compresses frames into JPEG (`image/jpeg`), and detects `person` class during door safety checks. |
 | **Graphical UI** | **PyQt6 (`PyQt6`)** | `PyQt6 >=6.7` | Renders the user-facing full-screen 5-inch LCD interface controlled via hardware button events (`Up`, `Down`, `O`, `X`) with bilingual display support. |
 | **Bilingual Fonts** | **Thai OpenType/TrueType Fonts** | `fonts-thai-tlwg` / `fonts-noto-core` | Ensures proper rendering of Thai tone marks and consonants alongside English typography on the framebuffer. |
 | **Hardware Buttons SDK** | **`pitop` (`pitop.miniscreen`)** | `pitop` (via PyPI / `uv`) | Registers interrupt-driven callbacks for the `Up`, `Down`, `O` (Select), and `X` (Cancel) buttons. |
 | **MQTT Broker (Server)** | **Eclipse Mosquitto (`mosquitto`)** | `mosquitto >=2.0` (Systemd Daemon) | Local TLS-encrypted MQTT broker (`MQTTS`, port `8883`). Client (Node `'D'`) validates the broker certificate using `MQTT_TLS_CA_CERT`, while the broker authenticates Node `'D'` via username/password credentials (`MQTT_USERNAME`, `MQTT_PASSWORD`). (Node `'F'` communicates via BLE GATT, not MQTT). |
 | **MQTT Client** | **`paho-mqtt`** | `paho-mqtt >=2.1.0` | Connects local Python gateway services to the Mosquitto broker to publish `CLOSE_DOOR` / `ABORT` and receive door events ([`CBD.md`](../interface/CBD.md)). |
 | **Bluetooth GATT Client** | **`bleak`** + **`cryptography`** | `bleak >=0.22`, `cryptography >=43.0` | Scans for Node `'F'`, connects to Service `0000FFF0...`, writes current Unix timestamp to `0000FFF2...`, reads telemetry on `0000FFF1...`, and decrypts `AES-128-GCM` payloads with AAD verification using `AESGCM` ([`FUC.md`](../interface/FUC.md)). |
-| **Cloud Client & Cache** | **`httpx`** + **`sqlite3`** | `httpx >=0.27` | Communicates with Firebase Cloud Functions ([`CBS.md`](../interface/CBS.md)) and buffers telemetry locally in SQLite during Internet outages (E4 store-and-forward). |
+| **Cloud Client & Cache** | **`httpx`** + **`sqlite3`** | `httpx >=0.27` | Communicates with Firebase Cloud Functions ([`CBS.md`](../interface/CBS.md)) — including 60-second `POST /api/status` component connectivity heartbeats (`C0`, `F0`, `D0`) — and buffers telemetry locally in SQLite during Internet outages (E4 store-and-forward). |
 | **Code Quality Tools** | **`ruff`**, **`mypy`**, **`pytest`** | Dev dependency group | Linting, formatting, strict static type checking, and unit testing. |
 
 ---
@@ -158,3 +158,13 @@ class BilingualFoodItem:
     image_storage_path: str              # Firebase Storage path to uploaded JPEG
     confidence: float
 ```
+
+---
+
+## 4. Component Connectivity Heartbeat (`CBS.md` §3.7)
+
+Because Node `'D'` communicates exclusively on the local LAN via MQTTS (and Node `'F'` via BLE GATT), Gateway `'C'` acts as the telemetry aggregator for subsystem liveness:
+
+1. **Contact Timestamp Tracking:** `CloudSyncManager.record_node_seen()` records monotonic latest contact timestamps for `"F0"` (BLE packet reception) and `"D0"` (MQTT `fridge/door/time/req`, `fridge/door/status` `ONLINE`, `fridge/door/event`, or `fridge/door/telemetry`), clamped against Gateway wall-clock time (`int(time.time())`) so unsynced boot clocks or forward clock skew cannot trigger server validation errors.
+2. **Offline Handling:** Initial `"F0"` and `"D0"` states default to `None` (`null` in JSON) until first contact after boot; MQTT LWT `"OFFLINE"` messages leave the last recorded `last_seen_s` unchanged rather than advancing it.
+3. **60-Second Dispatch:** `CloudSyncManager` dispatches `POST /api/status` every 60 seconds with `"C0"` always populated at dispatch time alongside `"F0"` and `"D0"`.

@@ -1,0 +1,336 @@
+"""Digital PIR Motion Sensor and Display Sleep Manager (Rubric M1 Gateway Sensor #2).
+
+Monitors HC-SR501 / AM312 PIR sensor connected to Pi-top GPIO 22.
+Wakes the 5-inch LCD display and webcam stream upon motion detection, and blanks
+the display after 10 minutes (600s) of continuous inactivity per SUMMARY.md §5.
+"""
+
+from __future__ import annotations
+
+import logging
+import shutil
+import subprocess
+import sys
+import threading
+import time
+from collections.abc import Callable
+from typing import Any
+
+logger = logging.getLogger(__name__)
+
+
+class PIRController:
+    """Manages PIR human motion sensing and automatic screen power saving."""
+
+    def __init__(
+        self,
+        gpio_pin: int = 22,
+        inactivity_timeout_s: float = 600.0,  # 10 minutes
+        on_wake: Callable[[], None] | None = None,
+        on_sleep: Callable[[], None] | None = None,
+        on_motion_change: Callable[[bool, float], None] | None = None,
+        min_motion_duration_s: float = 1.0,
+    ) -> None:
+        self.gpio_pin = gpio_pin
+        self.inactivity_timeout_s = inactivity_timeout_s
+        self.min_motion_duration_s = max(0.0, float(min_motion_duration_s))
+        self.on_wake = on_wake
+        self.on_sleep = on_sleep
+        self.on_motion_change = on_motion_change
+
+        self._is_motion_detected: bool = False
+        self._is_display_awake: bool = True
+        self._last_motion_time: float = time.time()
+        self._motion_high_since: float | None = None
+        self.is_hardware_available: bool = False
+        self._pir_device: Any = None
+        self._use_pinctrl: bool = False
+
+        self._running: bool = False
+        self._thread: threading.Thread | None = None
+        self._lock = threading.Lock()
+
+        self._init_hardware()
+
+    @property
+    def is_motion_detected(self) -> bool:
+        return self._is_motion_detected
+
+    @property
+    def is_display_awake(self) -> bool:
+        return self._is_display_awake
+
+    @property
+    def last_motion_time(self) -> float:
+        return self._last_motion_time
+
+    @property
+    def idle_duration_s(self) -> float:
+        """Seconds elapsed since last detected human motion."""
+        if self._is_motion_detected:
+            return 0.0
+        return max(0.0, time.time() - self._last_motion_time)
+
+    @property
+    def hardware_status_text(self) -> str:
+        """Human-readable status of the PIR GPIO hardware binding."""
+        if self.gpio_pin < 0:
+            return "PIR Disabled"
+        if self.is_hardware_available:
+            return f"GPIO {self.gpio_pin}: HW"
+        return f"GPIO {self.gpio_pin}: Sim"
+
+    def _close_hardware(self) -> None:
+        """Releases any bound gpiozero device."""
+        if self._pir_device is not None:
+            close_fn = getattr(self._pir_device, "close", None)
+            if callable(close_fn):
+                try:
+                    close_fn()
+                except Exception:
+                    logger.debug("Ignoring error closing old PIR device", exc_info=True)
+        self._pir_device = None
+        self._use_pinctrl = False
+        self.is_hardware_available = False
+
+    def _init_hardware(self) -> None:
+        """Attempts to bind to hardware GPIO pin on Raspberry Pi OS."""
+        self._close_hardware()
+
+        if self.gpio_pin < 0:
+            logger.info(
+                "PIR sensor disabled (gpio_pin=%d). Display will stay awake.", self.gpio_pin
+            )
+            return
+
+        try:
+            from gpiozero import DigitalInputDevice  # type: ignore[import-not-found]
+
+            self._pir_device = DigitalInputDevice(self.gpio_pin, pull_up=False)
+            self._pir_device.when_activated = lambda: self.update_raw_motion(True)
+            self._pir_device.when_deactivated = lambda: self.update_raw_motion(False)
+            self.is_hardware_available = True
+            if bool(self._pir_device.value):
+                self.update_raw_motion(True)
+            logger.info("Bound PIR sensor to GPIO %d via gpiozero", self.gpio_pin)
+            return
+        except Exception as exc:  # noqa: BLE001
+            logger.info(
+                "gpiozero PIR init failed on GPIO %d (%s); checking pinctrl", self.gpio_pin, exc
+            )
+
+        if sys.platform.startswith("linux") and shutil.which("pinctrl"):
+            try:
+                subprocess.run(
+                    ["pinctrl", "set", str(self.gpio_pin), "ip", "pd"],
+                    check=True,
+                    timeout=2.0,
+                    stdout=subprocess.DEVNULL,
+                    stderr=subprocess.DEVNULL,
+                )
+                self._use_pinctrl = True
+                self.is_hardware_available = True
+                logger.info("Bound PIR sensor to GPIO %d via pinctrl fallback", self.gpio_pin)
+                return
+            except (OSError, subprocess.SubprocessError) as exc:
+                logger.warning("pinctrl fallback failed on GPIO %d: %s", self.gpio_pin, exc)
+
+        self.is_hardware_available = False
+        logger.info(
+            "GPIO hardware not available for PIR pin %d. Running in Sim mode.", self.gpio_pin
+        )
+
+    def reconfigure_pin(self, new_gpio_pin: int) -> None:
+        """Re-binds PIR sensor to a different GPIO pin (or -1 to disable)."""
+        with self._lock:
+            self.gpio_pin = new_gpio_pin
+            self._is_motion_detected = False
+            self._motion_high_since = None
+            self._last_motion_time = time.time()
+            self._init_hardware()
+            motion_state = self._is_motion_detected
+            idle_s = 0.0 if motion_state else max(0.0, time.time() - self._last_motion_time)
+
+        if self.on_motion_change is not None:
+            try:
+                self.on_motion_change(motion_state, idle_s)
+            except Exception:
+                logger.exception("Error in PIR on_motion_change callback")
+
+    def _read_hardware_pin(self) -> bool | None:
+        """Reads current logical level of PIR sensor pin via gpiozero or pinctrl."""
+        if not self.is_hardware_available or self.gpio_pin < 0:
+            return None
+
+        if self._pir_device is not None:
+            return bool(self._pir_device.value)
+
+        if self._use_pinctrl:
+            res = subprocess.run(
+                ["pinctrl", "get", str(self.gpio_pin)],
+                capture_output=True,
+                text=True,
+                check=False,
+                timeout=1.0,
+            )
+            if res.returncode == 0:
+                return "| hi" in res.stdout.lower()
+
+        return None
+
+    def update_raw_motion(self, raw_high: bool, now_monotonic: float | None = None) -> None:
+        """Filters raw PIR GPIO samples, confirming motion only after min_motion_duration_s."""
+        now_m = time.monotonic() if now_monotonic is None else now_monotonic
+        confirmed_state: bool | None = None
+
+        with self._lock:
+            if raw_high:
+                if self._motion_high_since is None:
+                    self._motion_high_since = now_m
+                if (now_m - self._motion_high_since) >= self.min_motion_duration_s:
+                    confirmed_state = True
+            else:
+                self._motion_high_since = None
+                if self._is_motion_detected:
+                    confirmed_state = False
+
+        if confirmed_state is not None:
+            self.record_motion(confirmed_state)
+
+    def record_motion(self, has_motion: bool) -> None:
+        """Called upon sensor reading changes or simulation events."""
+        wake_cb: Callable[[], None] | None = None
+        motion_cb: Callable[[bool, float], None] | None = None
+        motion_state = False
+        idle_s = 0.0
+
+        with self._lock:
+            was_motion = self._is_motion_detected
+            self._is_motion_detected = has_motion
+            if has_motion or (was_motion and not has_motion):
+                self._last_motion_time = time.time()
+            if has_motion and not self._is_display_awake:
+                logger.info("Motion detected after sleep. Waking display and camera stream.")
+                self._is_display_awake = True
+                wake_cb = self.on_wake
+            motion_cb = self.on_motion_change
+            motion_state = self._is_motion_detected
+            idle_s = 0.0 if motion_state else max(0.0, time.time() - self._last_motion_time)
+
+        if wake_cb is not None:
+            try:
+                wake_cb()
+            except Exception:
+                logger.exception("Error in PIR on_wake callback")
+
+        if motion_cb is not None:
+            try:
+                motion_cb(motion_state, idle_s)
+            except Exception:
+                logger.exception("Error in PIR on_motion_change callback")
+
+    def check_inactivity(self) -> bool:
+        """Checks if idle duration exceeded timeout; puts display to sleep if so.
+
+        Returns:
+            True if display was put to sleep, False otherwise.
+        """
+        with self._lock:
+            if self.gpio_pin < 0 or not self._is_display_awake:
+                return False
+
+            if self.idle_duration_s >= self.inactivity_timeout_s:
+                logger.info(
+                    "No motion for %.1f s (>= %.1f s). Putting display to sleep to prevent burn-in.",
+                    self.idle_duration_s,
+                    self.inactivity_timeout_s,
+                )
+                self._is_display_awake = False
+                if self.on_sleep:
+                    try:
+                        self.on_sleep()
+                    except Exception:
+                        logger.exception("Error in PIR on_sleep callback")
+                return True
+
+        return False
+
+    def wake(self) -> None:
+        """Manually forces display wake without latching motion state."""
+        wake_cb: Callable[[], None] | None = None
+        motion_cb: Callable[[bool, float], None] | None = None
+        motion_state = False
+        idle_s = 0.0
+
+        with self._lock:
+            self._last_motion_time = time.time()
+            if not self._is_display_awake:
+                self._is_display_awake = True
+                wake_cb = self.on_wake
+            motion_cb = self.on_motion_change
+            motion_state = self._is_motion_detected
+            idle_s = 0.0 if motion_state else max(0.0, time.time() - self._last_motion_time)
+
+        if wake_cb is not None:
+            try:
+                wake_cb()
+            except Exception:
+                logger.exception("Error in PIR on_wake callback")
+
+        if motion_cb is not None:
+            try:
+                motion_cb(motion_state, idle_s)
+            except Exception:
+                logger.exception("Error in PIR on_motion_change callback")
+
+    def sleep(self) -> None:
+        """Manually forces display sleep."""
+        with self._lock:
+            self._is_display_awake = False
+            if self.on_sleep:
+                try:
+                    self.on_sleep()
+                except Exception:
+                    logger.exception("Error in PIR on_sleep callback")
+
+    def start_monitor(self, poll_interval_s: float = 2.0) -> None:
+        """Starts background inactivity monitoring loop."""
+        if self._running:
+            return
+        self._running = True
+        self._thread = threading.Thread(
+            target=self._monitor_loop,
+            args=(poll_interval_s,),
+            daemon=True,
+            name="PIRInactivityMonitor",
+        )
+        self._thread.start()
+        logger.info("PIR inactivity monitor started (timeout=%.1fs)", self.inactivity_timeout_s)
+
+    def _monitor_loop(self, poll_interval_s: float) -> None:
+        while self._running:
+            if self.is_hardware_available:
+                try:
+                    current_val = self._read_hardware_pin()
+                    if current_val is not None:
+                        self.update_raw_motion(current_val)
+                except Exception:
+                    logger.exception("Error polling PIR hardware state")
+
+            self.check_inactivity()
+
+            if self.on_motion_change is not None:
+                try:
+                    self.on_motion_change(self.is_motion_detected, self.idle_duration_s)
+                except Exception:
+                    logger.exception("Error in PIR on_motion_change callback")
+
+            time.sleep(poll_interval_s)
+
+    def stop_monitor(self) -> None:
+        """Stops background monitoring loop."""
+        self._running = False
+        if self._thread is not None and self._thread.is_alive():
+            self._thread.join(timeout=2.0)
+        self._close_hardware()
+        logger.info("PIR monitor stopped")

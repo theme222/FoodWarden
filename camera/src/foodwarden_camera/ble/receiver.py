@@ -1,0 +1,307 @@
+"""BLE GATT Central Client for Node 'F' (Internal Fridge Sensor).
+
+Handles BLE connection, 64-bit Unix time synchronization, AES-128-GCM telemetry
+decryption, anti-replay verification, and Packet Delivery Rate (PDR) tracking per FUC.md.
+"""
+
+from __future__ import annotations
+
+import asyncio
+import logging
+import struct
+import threading
+import time
+from collections.abc import Callable
+from typing import Any
+
+from bleak import BleakClient, BleakScanner
+from bleak.backends.characteristic import BleakGATTCharacteristic
+from bleak.backends.device import BLEDevice
+from bleak.backends.scanner import AdvertisementData
+from bleak.exc import BleakError
+from cryptography.exceptions import InvalidTag
+
+from foodwarden_camera.models.ble_fuc import (
+    AntiReplayValidator,
+    SensorPacket,
+)
+
+logger = logging.getLogger(__name__)
+
+# Canonical UUIDs from FUC.md §1
+TELEMETRY_SERVICE_UUID = "0000fff0-0000-1000-8000-00805f9b34fb"
+TELEMETRY_CHAR_UUID = "0000fff1-0000-1000-8000-00805f9b34fb"
+TIME_SYNC_CHAR_UUID = "0000fff2-0000-1000-8000-00805f9b34fb"
+
+
+class PDRTracker:
+    """Tracks Packet Delivery Rate (PDR) metrics for Rubric verification."""
+
+    def __init__(self) -> None:
+        self.received_count: int = 0
+        self.missed_count: int = 0
+        self.corrupted_count: int = 0
+        self.replay_dropped_count: int = 0
+        self._last_counter_per_node: dict[str, int] = {}
+
+    def record_received(self, node_id: str, counter: int, is_new_session: bool) -> None:
+        """Updates sequence tracking and records packet delivery."""
+        self.received_count += 1
+        if not is_new_session and node_id in self._last_counter_per_node:
+            last_cnt = self._last_counter_per_node[node_id]
+            if counter > last_cnt + 1:
+                missed = counter - last_cnt - 1
+                self.missed_count += missed
+                logger.warning(
+                    "Detected sequence gap on %s: missed %d packets (%d -> %d)",
+                    node_id,
+                    missed,
+                    last_cnt,
+                    counter,
+                )
+        self._last_counter_per_node[node_id] = counter
+
+    def record_corrupted(self) -> None:
+        self.corrupted_count += 1
+
+    def record_replay_dropped(self) -> None:
+        self.replay_dropped_count += 1
+
+    @property
+    def packet_delivery_rate(self) -> float:
+        """Returns PDR as a fraction (0.0 to 1.0)."""
+        total = self.received_count + self.missed_count
+        if total == 0:
+            return 1.0
+        return self.received_count / total
+
+    def summary(self) -> dict[str, Any]:
+        return {
+            "received": self.received_count,
+            "missed": self.missed_count,
+            "corrupted": self.corrupted_count,
+            "replay_dropped": self.replay_dropped_count,
+            "pdr_percentage": round(self.packet_delivery_rate * 100, 2),
+        }
+
+
+class BLEReceiver:
+    """GATT Central Client managing communication with Node 'F'."""
+
+    def __init__(
+        self,
+        aes_key: bytes,
+        device_name_prefix: str = "FoodWarden-F",
+        target_mac_address: str | None = None,
+        on_telemetry_callback: Callable[[SensorPacket], None] | None = None,
+    ) -> None:
+        self.aes_key = aes_key
+        self.device_name_prefix = device_name_prefix
+        self.target_mac_address = target_mac_address
+        self.on_telemetry_callback = on_telemetry_callback
+
+        self.replay_validator = AntiReplayValidator()
+        self.pdr_tracker = PDRTracker()
+
+        self._client: BleakClient | None = None
+        self._running: bool = False
+        self._connected: bool = False
+        self._thread: threading.Thread | None = None
+        self.last_contact_time: float | None = None
+
+    @property
+    def is_connected(self) -> bool:
+        return self._connected and self._client is not None and self._client.is_connected
+
+    def handle_raw_telemetry(self, raw_bytes: bytes) -> SensorPacket | None:
+        """Decodes, decrypts, and validates raw characteristic payload.
+
+        Returns decoded SensorPacket if valid, or None if corrupted / replayed.
+        """
+        try:
+            packet = SensorPacket.decrypt_and_unpack(raw_bytes, self.aes_key)
+        except (InvalidTag, ValueError) as exc:
+            logger.warning("Failed to decrypt BLE telemetry packet: %s", exc)
+            self.pdr_tracker.record_corrupted()
+            return None
+
+        newest_ts = packet.samples[-1].timestamp_s if packet.samples else int(time.time())
+        is_valid, reason = self.replay_validator.is_valid_and_update(packet.header, newest_ts)
+
+        if not is_valid:
+            logger.warning(
+                "Dropped BLE telemetry packet from %s: %s", packet.header.node_id, reason
+            )
+            self.pdr_tracker.record_replay_dropped()
+            return None
+
+        is_new_session = reason == "new_session"
+        self.last_contact_time = time.time()
+        self.pdr_tracker.record_received(
+            packet.header.node_id, packet.header.counter, is_new_session
+        )
+
+        logger.info(
+            "Successfully decrypted %d samples from %s (counter=%d, session_salt=%s)",
+            len(packet.samples),
+            packet.header.node_id,
+            packet.header.counter,
+            packet.header.session_salt.hex()[:8],
+        )
+
+        if self.on_telemetry_callback:
+            try:
+                self.on_telemetry_callback(packet)
+            except Exception:
+                logger.exception("Error in telemetry callback")
+
+        return packet
+
+    def _notification_handler(
+        self, characteristic: BleakGATTCharacteristic, data: bytearray
+    ) -> None:
+        """Callback invoked by Bleak when characteristic notification fires."""
+        self.handle_raw_telemetry(bytes(data))
+
+    async def sync_time(self, client: BleakClient) -> bool:
+        """Writes current 64-bit Unix timestamp to Time Sync Characteristic 0000FFF2."""
+        now_s = int(time.time())
+        # Little-Endian uint64_t
+        time_bytes = struct.pack("<Q", now_s)
+        try:
+            await client.write_gatt_char(TIME_SYNC_CHAR_UUID, time_bytes, response=True)
+            logger.info("Successfully synchronized RTC time on Node 'F': %d", now_s)
+            return True
+        except (BleakError, OSError) as exc:
+            logger.error("Failed to write RTC timestamp to Node 'F': %s", exc)
+            return False
+
+    async def connect_and_listen(self, timeout_s: float = 10.0) -> None:
+        """Discovers Node 'F', synchronizes time, receives telemetry, and closes cleanly."""
+        logger.info("Scanning for Node 'F' (Service UUID: %s)...", TELEMETRY_SERVICE_UUID)
+
+        device: BLEDevice | None = None
+        rssis: dict[str, int] = {}
+        if self.target_mac_address:
+            device = await BleakScanner.find_device_by_address(
+                self.target_mac_address, timeout=timeout_s
+            )
+        else:
+
+            def _matches_node_f(candidate: BLEDevice, adv_data: AdvertisementData) -> bool:
+                name = candidate.name or adv_data.local_name or ""
+                rssis[candidate.address] = adv_data.rssi
+                if self.device_name_prefix in name:
+                    return True
+                uuids = [u.lower() for u in (adv_data.service_uuids or ())]
+                return not name and TELEMETRY_SERVICE_UUID in uuids
+
+            device = await BleakScanner.find_device_by_filter(
+                _matches_node_f,
+                timeout=timeout_s,
+                service_uuids=[TELEMETRY_SERVICE_UUID],
+            )
+
+        if not device:
+            logger.debug("Node 'F' not found during scan window (sensor may be in deep sleep)")
+            return
+
+        logger.info(
+            "Discovered Node 'F' at %s (name=%s, rssi=%s). Connecting...",
+            device.address,
+            device.name,
+            rssis.get(device.address, "unknown"),
+        )
+
+        packet_received = asyncio.Event()
+
+        def _on_notify(_characteristic: BleakGATTCharacteristic, data: bytearray) -> None:
+            if self.handle_raw_telemetry(bytes(data)) is not None:
+                packet_received.set()
+
+        async with BleakClient(
+            device,
+            timeout=8.0,
+            services=[TELEMETRY_SERVICE_UUID],
+        ) as client:
+            self._client = client
+            self._connected = True
+            self.last_contact_time = time.time()
+            logger.info("Connected to Node 'F' at %s", device.address)
+            try:
+                # 1. Synchronize 64-bit Unix RTC time on FFF2 first per FUC.md §6
+                if not await self.sync_time(client):
+                    return
+
+                # 2. Subscribe to telemetry notifications; fallback to long read if MTU was small
+                await client.start_notify(TELEMETRY_CHAR_UUID, _on_notify)
+                logger.info("Subscribed to BLE telemetry notifications on %s", TELEMETRY_CHAR_UUID)
+
+                try:
+                    await asyncio.wait_for(packet_received.wait(), timeout=1.5)
+                except TimeoutError:
+                    initial_bytes = await client.read_gatt_char(TELEMETRY_CHAR_UUID)
+                    if initial_bytes:
+                        self.handle_raw_telemetry(bytes(initial_bytes))
+
+            except (BleakError, OSError, asyncio.CancelledError) as exc:
+                logger.warning(
+                    "BLE communication exception with Node 'F' (%s): %s",
+                    type(exc).__name__,
+                    exc or repr(exc),
+                )
+            finally:
+                self._connected = False
+                self._client = None
+                logger.info("Disconnected from Node 'F'")
+
+    async def run_loop(self) -> None:
+        """Continuous background loop scanning and connecting with backoff."""
+        self._running = True
+        backoff_s = 1.0
+        while self._running:
+            try:
+                await self.connect_and_listen()
+                backoff_s = 1.0  # Reset backoff on successful cycle
+            except (BleakError, OSError) as exc:
+                logger.warning(
+                    "Error in BLE run loop (%s): %s",
+                    type(exc).__name__,
+                    exc or repr(exc),
+                )
+                await asyncio.sleep(backoff_s)
+                backoff_s = min(backoff_s * 1.5, 10.0)
+            except Exception as exc:  # noqa: BLE001
+                logger.warning(
+                    "Unexpected BLE adapter error (%s): %s",
+                    type(exc).__name__,
+                    exc or repr(exc),
+                )
+                await asyncio.sleep(backoff_s)
+                backoff_s = min(backoff_s * 1.5, 10.0)
+            await asyncio.sleep(0.5)
+
+    def start(self) -> None:
+        """Starts the BLE GATT scanner loop in a background daemon thread."""
+        if self._running:
+            return
+        self._running = True
+        self._thread = threading.Thread(
+            target=self._run_thread_entry,
+            daemon=True,
+            name="BLEReceiverLoop",
+        )
+        self._thread.start()
+        logger.info("BLE GATT receiver background thread started")
+
+    def _run_thread_entry(self) -> None:
+        try:
+            asyncio.run(self.run_loop())
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("BLE background loop exited: %s", exc)
+
+    def stop(self) -> None:
+        """Stops the BLE scanning loop."""
+        self._running = False
+        if self._thread is not None and self._thread.is_alive():
+            self._thread.join(timeout=2.0)

@@ -1,2 +1,5 @@
-def main() -> None:
-    print("Hello from foodwarden-camera!")
+"""FoodWarden Camera Logger & Edge Gateway package."""
+
+from foodwarden_camera.main import main
+
+__all__ = ["main"]
