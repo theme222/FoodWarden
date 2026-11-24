@@ -12,7 +12,6 @@ from PyQt6.QtWidgets import (
     QFrame,
     QGridLayout,
     QHBoxLayout,
-    QLabel,
     QLineEdit,
     QPushButton,
     QSizePolicy,
@@ -22,11 +21,19 @@ from PyQt6.QtWidgets import (
 )
 
 from foodwarden_camera.ui.i18n import bind_text, get_language, t
+from foodwarden_camera.ui.smooth import (
+    SmoothButton,
+    SmoothFrame,
+    SmoothLabel,
+    SmoothLineEdit,
+    SmoothSpinBox,
+)
 from foodwarden_camera.ui.styles import (
     COLOR_BAD,
     COLOR_DARK,
     COLOR_FRESH,
     COLOR_INK,
+    COLOR_LEAF,
     COLOR_LIME,
     COLOR_LIME_SOFT,
     COLOR_MUTED,
@@ -41,6 +48,7 @@ from foodwarden_camera.ui.styles import (
     FS_SMALL,
     FS_TITLE,
     card_style,
+    smooth_css,
 )
 
 _CONTROL_H = 48  # inputs, steppers, token buttons
@@ -64,21 +72,18 @@ def _make_mouse_button(
     border_color: str = COLOR_RULE,
 ) -> QPushButton:
     """Builds a touch-sized button disabled from hardware key focus."""
-    btn = QPushButton(text, parent)
+    btn = SmoothButton(text, parent)
     btn.setFocusPolicy(Qt.FocusPolicy.NoFocus)
     btn.setMinimumSize(min_width, min_height)
     btn.setStyleSheet(
         f"""
         QPushButton {{
-            background-color: {bg_color};
+            {smooth_css(bg_color, radius=14, border=border_color, hover=hover_color)}
             color: {fg_color};
-            border: 1.5px solid {border_color};
-            border-radius: 12px;
             font-size: {font_px}px;
             font-weight: bold;
             padding: 4px 14px;
         }}
-        QPushButton:hover {{ background-color: {hover_color}; }}
         """
     )
     if callback is not None:
@@ -226,7 +231,7 @@ class SettingsScreen(QWidget):
         on_minus: Callable[[], None],
         on_plus: Callable[[], None],
     ) -> QFrame:
-        card = QFrame(self)
+        card = SmoothFrame(self)
         card.setObjectName(object_name)
         card.setStyleSheet(card_style(object_name, bg=COLOR_SURFACE, border=COLOR_RULE, radius=14))
         # Never grow taller than its content (keeps title + stepper together on big screens).
@@ -235,7 +240,7 @@ class SettingsScreen(QWidget):
         col.setContentsMargins(14, 10, 14, 12)
         col.setSpacing(8)
 
-        lbl = bind_text(QLabel(card), title_key)
+        lbl = bind_text(SmoothLabel(card), title_key)
         lbl.setStyleSheet(f"font-size: {FS_BODY}px; font-weight: bold; color: {COLOR_INK};")
 
         row = QHBoxLayout()
@@ -245,8 +250,8 @@ class SettingsScreen(QWidget):
         spin.setFixedHeight(_STEP_H)
         spin.setMinimumWidth(100)
         spin.setStyleSheet(
-            f"background-color: {COLOR_SURFACE_2}; color: {COLOR_INK}; "
-            f"border: 1.5px solid {COLOR_RULE}; border-radius: 10px; "
+            f"{smooth_css(COLOR_SURFACE_2, radius=13, border=COLOR_RULE, focus=COLOR_LEAF)} "
+            f"color: {COLOR_INK}; "
             f"font-size: {FS_LABEL + 2}px; font-weight: bold;"
         )
 
@@ -286,7 +291,7 @@ class SettingsScreen(QWidget):
         # 1. Header: title + icon-only window controls
         header = QHBoxLayout()
         header.setSpacing(8)
-        title = bind_text(QLabel(self), "settings.title")
+        title = bind_text(SmoothLabel(self), "settings.title")
         title.setStyleSheet(f"font-size: {FS_TITLE}px; font-weight: bold; color: {COLOR_INK};")
 
         # Language toggle: each option is written in its own language on purpose,
@@ -337,7 +342,7 @@ class SettingsScreen(QWidget):
         root_layout.addLayout(header)
 
         # 2. Gateway Token Card
-        token_card = QFrame(self)
+        token_card = SmoothFrame(self)
         token_card.setObjectName("TokenCard")
         token_card.setStyleSheet(
             card_style("TokenCard", bg=COLOR_SURFACE, border=COLOR_RULE, radius=14)
@@ -346,18 +351,18 @@ class SettingsScreen(QWidget):
         token_col.setContentsMargins(14, 8, 14, 10)
         token_col.setSpacing(6)
 
-        token_lbl = bind_text(QLabel(token_card), "settings.token")
+        token_lbl = bind_text(SmoothLabel(token_card), "settings.token")
         token_lbl.setStyleSheet(f"font-size: {FS_BODY}px; font-weight: bold; color: {COLOR_INK};")
 
         token_row = QHBoxLayout()
         token_row.setSpacing(8)
-        self.token_input = QLineEdit(token_card)
+        self.token_input = SmoothLineEdit(token_card)
         self.token_input.setEchoMode(QLineEdit.EchoMode.Password)
         self.token_input.setPlaceholderText("GATEWAY_TOKEN")
         self.token_input.setFixedHeight(_CONTROL_H)
         self.token_input.setStyleSheet(
-            f"background-color: {COLOR_SURFACE_2}; color: {COLOR_INK}; "
-            f"border: 1.5px solid {COLOR_RULE}; border-radius: 12px; "
+            f"{smooth_css(COLOR_SURFACE_2, radius=14, border=COLOR_RULE, focus=COLOR_LEAF)} "
+            f"color: {COLOR_INK}; "
             f"padding: 4px 12px; font-size: {FS_LABEL}px; font-weight: bold;"
         )
 
@@ -405,20 +410,20 @@ class SettingsScreen(QWidget):
         grid = QGridLayout()
         grid.setSpacing(10)
 
-        self.autocomplete_spin = QSpinBox(self)
+        self.autocomplete_spin = SmoothSpinBox(self)
         self.autocomplete_spin.setRange(1, 120)
         bind_text(self.autocomplete_spin, "settings.seconds_suffix", _set_suffix)
 
-        self.sleep_spin = QSpinBox(self)
+        self.sleep_spin = SmoothSpinBox(self)
         self.sleep_spin.setRange(5, 7200)
         bind_text(self.sleep_spin, "settings.seconds_suffix", _set_suffix)
 
-        self.pir_pin_spin = QSpinBox(self)
+        self.pir_pin_spin = SmoothSpinBox(self)
         self.pir_pin_spin.setRange(-1, 27)
         bind_text(self.pir_pin_spin, "settings.disabled", _set_special_value_text)
         self.pir_pin_spin.setPrefix("GPIO ")
 
-        self.door_close_spin = QSpinBox(self)
+        self.door_close_spin = SmoothSpinBox(self)
         self.door_close_spin.setRange(3, 600)
         bind_text(self.door_close_spin, "settings.seconds_suffix", _set_suffix)
 
@@ -474,7 +479,7 @@ class SettingsScreen(QWidget):
             font_px=FS_BODY - 1,
         )
         bind_text(self.btn_back, "settings.back")
-        hint = bind_text(QLabel(self), "settings.hint")
+        hint = bind_text(SmoothLabel(self), "settings.hint")
         hint.setAlignment(Qt.AlignmentFlag.AlignCenter)
         hint.setStyleSheet(f"font-size: {FS_SMALL}px; color: {COLOR_MUTED};")
         self.btn_save = _make_mouse_button(
@@ -568,7 +573,7 @@ class SettingsScreen(QWidget):
     # --- Language toggle --------------------------------------------------------
 
     def _make_lang_button(self, text: str, lang: str) -> QPushButton:
-        btn = QPushButton(text, self)
+        btn = SmoothButton(text, self)
         btn.setFocusPolicy(Qt.FocusPolicy.NoFocus)
         btn.setFixedHeight(_ICON_BTN)
         btn.setMinimumWidth(84)
@@ -586,8 +591,7 @@ class SettingsScreen(QWidget):
                 else (COLOR_SURFACE, COLOR_INK, COLOR_RULE)
             )
             btn.setStyleSheet(
-                f"QPushButton {{ background-color: {bg}; color: {fg}; "
-                f"border: 2px solid {border}; border-radius: 12px; "
+                f"QPushButton {{ {smooth_css(bg, radius=14, border=border, width=2)} color: {fg}; "
                 f"font-size: {FS_LABEL}px; font-weight: bold; padding: 4px 14px; }}"
             )
 

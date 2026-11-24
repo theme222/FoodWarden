@@ -772,3 +772,25 @@ def test_language_setting_persists_to_env(tmp_path: Path) -> None:
     )
     settings.save_ui_language("klingon", target_env_path=env_file)
     assert settings.ui_language == "th"
+
+
+def test_smooth_corner_geometry() -> None:
+    from foodwarden_camera.ui.smooth import parse_spec, smooth_path
+    from foodwarden_camera.ui.styles import smooth_css
+
+    # Big card: starts easing well before the corner and stays inside its box.
+    path = smooth_path(0, 0, 400, 300, 20)
+    assert path.boundingRect().width() == pytest.approx(400)
+    assert path.boundingRect().height() == pytest.approx(300)
+    assert path.elementAt(0).x == pytest.approx(400 - 1.52866 * 20)
+
+    # No room for easing (result icon): must be a true circle.
+    circle = smooth_path(0, 0, 110, 110, 55)
+    for i in range(101):
+        pt = circle.pointAtPercent(i / 100)
+        assert ((pt.x() - 55) ** 2 + (pt.y() - 55) ** 2) ** 0.5 == pytest.approx(55, abs=0.1)
+
+    spec = parse_spec(smooth_css("#FFFFFF", radius=14, border="#D3E0B0", hover="#F2F7E3"))
+    assert spec is not None
+    assert (spec.bg, spec.border, spec.radius, spec.hover) == ("#FFFFFF", "#D3E0B0", 14, "#F2F7E3")
+    assert parse_spec("color: red;") is None

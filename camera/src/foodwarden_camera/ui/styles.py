@@ -46,6 +46,31 @@ FS_LABEL = 18  # Secondary text, tile titles, key guides
 FS_SMALL = 15  # Status pills in crowded header rows
 
 
+def smooth_css(
+    bg: str,
+    *,
+    radius: int,
+    border: str | None = None,
+    width: float = 1.5,
+    hover: str | None = None,
+    focus: str | None = None,
+) -> str:
+    """QSS declarations for a ``Smooth*`` widget (continuous corners, see smooth.py).
+
+    The QSS box stays transparent (it only reserves the border width); the real
+    colours travel in the comment and are painted by the widget itself.
+    """
+    spec = f"bg={bg} r={radius}"
+    if border:
+        spec += f" border={border} w={width:g}"
+    if hover:
+        spec += f" hover={hover}"
+    if focus:
+        spec += f" focus={focus}"
+    box = f"border: {width:g}px solid transparent;" if border else "border: none;"
+    return f"/*sq {spec}*/ background-color: transparent; {box}"
+
+
 def pill_style(
     bg: str,
     fg: str,
@@ -57,11 +82,10 @@ def pill_style(
     border: str | None = None,
 ) -> str:
     """Returns QLabel pill stylesheet matching Web Prototype rounded badges."""
-    border_css = f" border: 1px solid {border};" if border else ""
+    box = smooth_css(bg, radius=radius, border=border, width=1)
     return (
-        f"background-color: {bg}; color: {fg}; font-size: {font_px}px; "
-        f"font-weight: bold; padding: {pad_v}px {pad_h}px; "
-        f"border-radius: {radius}px;{border_css}"
+        f"color: {fg}; font-size: {font_px}px; font-weight: bold; "
+        f"padding: {pad_v}px {pad_h}px; {box}"
     )
 
 
@@ -72,11 +96,12 @@ def card_style(
     border: str = COLOR_RULE,
     radius: int = 16,
 ) -> str:
-    """Returns QFrame card stylesheet with scoped selector."""
-    return (
-        f"#{object_name} {{ background-color: {bg}; "
-        f"border: 1.5px solid {border}; border-radius: {radius}px; }}"
-    )
+    """Returns SmoothFrame card stylesheet with scoped selector.
+
+    Continuous corners look tighter than arcs of equal radius, so it is enlarged 25%.
+    """
+    box = smooth_css(bg, radius=round(radius * 1.25), border=border)
+    return f"#{object_name} {{ {box} }}"
 
 
 THEME_STYLESHEET = f"""

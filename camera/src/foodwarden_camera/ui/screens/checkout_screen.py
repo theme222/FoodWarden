@@ -9,7 +9,6 @@ from PyQt6.QtCore import QSize, Qt, QTimer
 from PyQt6.QtGui import QImage, QPixmap
 from PyQt6.QtWidgets import (
     QAbstractItemView,
-    QFrame,
     QHBoxLayout,
     QLabel,
     QListWidget,
@@ -20,6 +19,7 @@ from PyQt6.QtWidgets import (
 
 from foodwarden_camera.models.cloud_cbs import CheckOutCandidate
 from foodwarden_camera.ui.i18n import pick, t
+from foodwarden_camera.ui.smooth import SmoothFrame, SmoothLabel
 from foodwarden_camera.ui.styles import (
     COLOR_DARK,
     COLOR_INK,
@@ -37,6 +37,7 @@ from foodwarden_camera.ui.styles import (
     FS_LABEL,
     card_style,
     pill_style,
+    smooth_css,
 )
 from foodwarden_camera.ui.widgets import (
     DEFAULT_AUTOCOMPLETE_S,
@@ -51,7 +52,7 @@ from foodwarden_camera.ui.widgets import (
 _ROW_HEIGHT = 78
 
 
-class _CandidateRow(QFrame):
+class _CandidateRow(SmoothFrame):
     """One selectable FEFO candidate: Thai name, expiry date and days-left badge."""
 
     def __init__(self, cand: CheckOutCandidate, is_fefo: bool, parent: QWidget) -> None:
@@ -64,7 +65,7 @@ class _CandidateRow(QFrame):
         text_col = QVBoxLayout()
         text_col.setSpacing(0)
         self.name_label = FitLabel(pick(cand.name_th, cand.name_en), self, min_px=17)
-        self.detail_label = QLabel(self._detail_text(cand), self)
+        self.detail_label = SmoothLabel(self._detail_text(cand), self)
         text_col.addWidget(self.name_label)
         text_col.addWidget(self.detail_label)
 
@@ -73,13 +74,13 @@ class _CandidateRow(QFrame):
         badge_col.addStretch()
         self.fefo_label: QLabel | None = None
         if is_fefo:
-            self.fefo_label = QLabel(t("checkout.fefo"), self)
+            self.fefo_label = SmoothLabel(t("checkout.fefo"), self)
             self.fefo_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
             self.fefo_label.setStyleSheet(
                 pill_style(COLOR_TAKE_SOLID, COLOR_ON_TAKE, font_px=FS_LABEL - 3, pad_v=4, pad_h=8)
             )
             badge_col.addWidget(self.fefo_label, alignment=Qt.AlignmentFlag.AlignRight)
-        self.days_label = QLabel("", self)
+        self.days_label = SmoothLabel("", self)
         self.days_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         badge_col.addWidget(self.days_label, alignment=Qt.AlignmentFlag.AlignRight)
         badge_col.addStretch()
@@ -114,8 +115,7 @@ class _CandidateRow(QFrame):
             bg, border, border_w = COLOR_SURFACE_2, COLOR_RULE, 2
             name_fg, detail_fg = COLOR_INK, COLOR_MUTED
         self.setStyleSheet(
-            f"#CandidateRow {{ background-color: {bg}; border: {border_w}px solid {border}; "
-            "border-radius: 12px; }"
+            f"#CandidateRow {{ {smooth_css(bg, radius=16, border=border, width=border_w)} }}"
         )
         self.name_label.setStyleSheet(
             f"font-size: {FS_BODY + 1}px; font-weight: bold; color: {name_fg};"
@@ -183,22 +183,22 @@ class CheckOutScreen(QWidget):
         body = QHBoxLayout()
         body.setSpacing(12)
 
-        photo_card = QFrame(self)
+        photo_card = SmoothFrame(self)
         photo_card.setObjectName("CheckOutPhotoCard")
         photo_card.setFixedWidth(210)
         photo_card.setStyleSheet(card_style("CheckOutPhotoCard", radius=16))
         photo_layout = QVBoxLayout(photo_card)
         photo_layout.setContentsMargins(8, 8, 8, 8)
 
-        self.img_frame = QFrame(photo_card)
+        self.img_frame = SmoothFrame(photo_card)
         self.img_frame.setObjectName("CheckOutImgFrame")
         self.img_frame.setStyleSheet(
-            f"#CheckOutImgFrame {{ background-color: {COLOR_DARK}; "
-            f"border: 1.5px solid {COLOR_RULE}; border-radius: 12px; }}"
+            f"#CheckOutImgFrame {{ {smooth_css(COLOR_DARK, radius=15, border=COLOR_RULE)} }}"
         )
         img_layout = QVBoxLayout(self.img_frame)
         img_layout.setContentsMargins(4, 4, 4, 4)
-        self.image_label = QLabel(t("common.preparing_image"), self.img_frame)
+        self.image_label = SmoothLabel(t("common.preparing_image"), self.img_frame)
+        self.image_label.image_radius = 11.0
         self.image_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self.image_label.setStyleSheet(
             f"color: {COLOR_ON_DARK}; font-size: {FS_LABEL}px; font-weight: bold;"
@@ -206,7 +206,7 @@ class CheckOutScreen(QWidget):
         img_layout.addWidget(self.image_label)
         photo_layout.addWidget(self.img_frame)
 
-        list_card = QFrame(self)
+        list_card = SmoothFrame(self)
         list_card.setObjectName("CheckOutListCard")
         list_card.setStyleSheet(card_style("CheckOutListCard", radius=16))
         list_layout = QVBoxLayout(list_card)
@@ -214,8 +214,8 @@ class CheckOutScreen(QWidget):
         list_layout.setSpacing(6)
 
         hint_row = QHBoxLayout()
-        self.hint_label = QLabel(t("checkout.choose"), list_card)
-        self.position_label = QLabel("", list_card)
+        self.hint_label = SmoothLabel(t("checkout.choose"), list_card)
+        self.position_label = SmoothLabel("", list_card)
         self.position_label.setStyleSheet(
             f"font-size: {FS_LABEL}px; font-weight: bold; color: {COLOR_MUTED};"
         )
@@ -277,7 +277,7 @@ class CheckOutScreen(QWidget):
         """Adds a non-selectable informational row (loading / empty)."""
         item = QListWidgetItem(self.list_widget)
         item.setFlags(Qt.ItemFlag.NoItemFlags)
-        label = QLabel(text, self.list_widget)
+        label = SmoothLabel(text, self.list_widget)
         label.setWordWrap(True)
         label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         label.setStyleSheet(

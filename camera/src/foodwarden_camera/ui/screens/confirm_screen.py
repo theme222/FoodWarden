@@ -12,9 +12,10 @@ from typing import Literal
 
 from PyQt6.QtCore import Qt, QTimer
 from PyQt6.QtGui import QPixmap
-from PyQt6.QtWidgets import QFrame, QHBoxLayout, QLabel, QVBoxLayout, QWidget
+from PyQt6.QtWidgets import QHBoxLayout, QVBoxLayout, QWidget
 
 from foodwarden_camera.ui.i18n import t
+from foodwarden_camera.ui.smooth import SmoothFrame, SmoothLabel
 from foodwarden_camera.ui.styles import (
     COLOR_DARK,
     COLOR_FRESH,
@@ -30,6 +31,7 @@ from foodwarden_camera.ui.styles import (
     FS_TITLE,
     card_style,
     pill_style,
+    smooth_css,
 )
 from foodwarden_camera.ui.widgets import (
     CONFIRM_TIMEOUT_S,
@@ -69,35 +71,36 @@ class ConfirmScreen(QWidget):
         root.setSpacing(10)
 
         header = QHBoxLayout()
-        self.title_label = QLabel(t("confirm.title_in"), self)
+        self.title_label = SmoothLabel(t("confirm.title_in"), self)
         self.title_label.setStyleSheet(
             f"font-size: {FS_TITLE}px; font-weight: bold; color: {COLOR_INK};"
         )
-        self.countdown_label = QLabel("", self)
+        self.countdown_label = SmoothLabel("", self)
         self.countdown_label.setStyleSheet(countdown_style())
         header.addWidget(self.title_label)
         header.addStretch()
         header.addWidget(self.countdown_label)
         root.addLayout(header)
 
-        card = QFrame(self)
+        card = SmoothFrame(self)
         card.setObjectName("ConfirmCard")
         card.setStyleSheet(card_style("ConfirmCard", radius=16))
         body = QHBoxLayout(card)
         body.setContentsMargins(16, 16, 16, 16)
         body.setSpacing(18)
 
-        self.image_label = QLabel(card)
+        self.image_label = SmoothLabel(card)
+        self.image_label.image_radius = 14.0
         self.image_label.setFixedSize(_IMG_SIZE, _IMG_SIZE)
         self.image_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self.image_label.setStyleSheet(
-            f"background-color: {COLOR_DARK}; border-radius: 12px; color: {COLOR_ON_DARK}; "
+            f"{smooth_css(COLOR_DARK, radius=18)} color: {COLOR_ON_DARK}; "
             f"font-size: {FS_LABEL}px; font-weight: bold;"
         )
 
         text_col = QVBoxLayout()
         text_col.setSpacing(8)
-        self.question_label = QLabel("", card)
+        self.question_label = SmoothLabel("", card)
         self.question_label.setStyleSheet(
             f"font-size: {FS_BODY}px; font-weight: bold; color: {COLOR_MUTED};"
         )
@@ -109,7 +112,7 @@ class ConfirmScreen(QWidget):
         self.detail_label.setStyleSheet(
             f"font-size: {FS_BODY}px; font-weight: bold; color: {COLOR_INK};"
         )
-        self.badge_label = QLabel("", card)
+        self.badge_label = SmoothLabel("", card)
 
         text_col.addStretch()
         text_col.addWidget(self.question_label)

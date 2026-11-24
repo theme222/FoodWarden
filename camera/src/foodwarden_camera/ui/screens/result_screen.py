@@ -18,9 +18,10 @@ from collections.abc import Callable
 from typing import Literal
 
 from PyQt6.QtCore import Qt, QTimer
-from PyQt6.QtWidgets import QFrame, QLabel, QVBoxLayout, QWidget
+from PyQt6.QtWidgets import QVBoxLayout, QWidget
 
 from foodwarden_camera.ui.i18n import bind_text, t
+from foodwarden_camera.ui.smooth import SmoothFrame, SmoothLabel
 from foodwarden_camera.ui.styles import (
     COLOR_BAD,
     COLOR_DARK,
@@ -39,6 +40,7 @@ from foodwarden_camera.ui.styles import (
     FS_HERO,
     FS_LABEL,
     card_style,
+    smooth_css,
 )
 from foodwarden_camera.ui.widgets import FitLabel
 
@@ -70,17 +72,17 @@ class ResultScreen(QWidget):
         root = QVBoxLayout(self)
         root.setContentsMargins(14, 14, 14, 14)
 
-        self.card = QFrame(self)
+        self.card = SmoothFrame(self)
         self.card.setObjectName("ResultCard")
         col = QVBoxLayout(self.card)
         col.setContentsMargins(30, 20, 30, 20)
         col.setSpacing(10)
 
-        self.icon_label = QLabel("", self.card)
+        self.icon_label = SmoothLabel("", self.card)
         self.icon_label.setFixedSize(110, 110)
         self.icon_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
 
-        self.headline_label = QLabel("", self.card)
+        self.headline_label = SmoothLabel("", self.card)
         self.headline_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
 
         self.name_label = FitLabel("", self.card, min_px=22)
@@ -89,14 +91,14 @@ class ResultScreen(QWidget):
             f"font-size: {FS_HERO}px; font-weight: bold; color: {COLOR_INK};"
         )
 
-        self.message_label = QLabel("", self.card)
+        self.message_label = SmoothLabel("", self.card)
         self.message_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self.message_label.setWordWrap(True)
         self.message_label.setStyleSheet(
             f"font-size: {FS_BODY}px; font-weight: bold; color: {COLOR_MUTED};"
         )
 
-        self.hint_label = bind_text(QLabel(self.card), "result.any_button")
+        self.hint_label = bind_text(SmoothLabel(self.card), "result.any_button")
         self.hint_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self.hint_label.setStyleSheet(f"font-size: {FS_LABEL}px; color: {COLOR_MUTED};")
 
@@ -172,8 +174,8 @@ class ResultScreen(QWidget):
         self.card.setStyleSheet(card_style("ResultCard", border=accent, radius=20))
         self.icon_label.setText(icon)
         self.icon_label.setStyleSheet(
-            f"background-color: {accent}; color: {on_accent}; font-size: 64px; "
-            "font-weight: bold; border-radius: 55px;"
+            f"color: {on_accent}; font-size: 64px; font-weight: bold; "
+            f"{smooth_css(accent, radius=55)}"
         )
         self.headline_label.setText(headline)
         headline_color = COLOR_INK if status == "saving" else accent

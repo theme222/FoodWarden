@@ -12,6 +12,7 @@ from PyQt6.QtWidgets import QFrame, QHBoxLayout, QLabel, QVBoxLayout, QWidget
 
 from foodwarden_camera.models.cloud_cbs import CheckInDraftResult
 from foodwarden_camera.ui.i18n import bind_text, get_language, pick, t
+from foodwarden_camera.ui.smooth import SmoothFrame, SmoothLabel
 from foodwarden_camera.ui.styles import (
     COLOR_BAD,
     COLOR_DARK,
@@ -31,6 +32,7 @@ from foodwarden_camera.ui.styles import (
     FS_LABEL,
     card_style,
     pill_style,
+    smooth_css,
 )
 from foodwarden_camera.ui.widgets import (
     DEFAULT_AUTOCOMPLETE_S,
@@ -120,22 +122,22 @@ class CheckInScreen(QWidget):
         body = QHBoxLayout()
         body.setSpacing(12)
 
-        photo_card = QFrame(self)
+        photo_card = SmoothFrame(self)
         photo_card.setObjectName("CheckInPhotoCard")
         photo_card.setFixedWidth(250)
         photo_card.setStyleSheet(card_style("CheckInPhotoCard", radius=16))
         photo_layout = QVBoxLayout(photo_card)
         photo_layout.setContentsMargins(8, 8, 8, 8)
 
-        self.img_frame = QFrame(photo_card)
+        self.img_frame = SmoothFrame(photo_card)
         self.img_frame.setObjectName("CheckInImgFrame")
         self.img_frame.setStyleSheet(
-            f"#CheckInImgFrame {{ background-color: {COLOR_DARK}; "
-            f"border: 1.5px solid {COLOR_RULE}; border-radius: 12px; }}"
+            f"#CheckInImgFrame {{ {smooth_css(COLOR_DARK, radius=15, border=COLOR_RULE)} }}"
         )
         img_layout = QVBoxLayout(self.img_frame)
         img_layout.setContentsMargins(4, 4, 4, 4)
-        self.image_label = QLabel(t("common.preparing_image"), self.img_frame)
+        self.image_label = SmoothLabel(t("common.preparing_image"), self.img_frame)
+        self.image_label.image_radius = 11.0
         self.image_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self.image_label.setStyleSheet(
             f"color: {COLOR_ON_DARK}; font-size: {FS_LABEL}px; font-weight: bold;"
@@ -143,7 +145,7 @@ class CheckInScreen(QWidget):
         img_layout.addWidget(self.image_label)
         photo_layout.addWidget(self.img_frame)
 
-        self.card = QFrame(self)
+        self.card = SmoothFrame(self)
         self.card.setObjectName("CheckInCard")
         self.card.setStyleSheet(card_style("CheckInCard", radius=16))
         card_layout = QVBoxLayout(self.card)
@@ -162,7 +164,7 @@ class CheckInScreen(QWidget):
             f"font-size: {FS_LABEL}px; font-weight: bold; color: {COLOR_INK};"
         )
 
-        self.storage_label = QLabel(t("checkin.storage", v="-"), self.card)
+        self.storage_label = SmoothLabel(t("checkin.storage", v="-"), self.card)
         self.storage_label.setWordWrap(True)
         self.storage_label.setStyleSheet(f"font-size: {FS_LABEL}px; color: {COLOR_MUTED};")
 
@@ -204,7 +206,7 @@ class CheckInScreen(QWidget):
         self._set_name_style(COLOR_WARN_TEXT)
 
     def _build_date_tile(self, parent: QWidget) -> QFrame:
-        tile = QFrame(parent)
+        tile = SmoothFrame(parent)
         tile.setObjectName("ExpiryTile")
         tile.setStyleSheet(card_style("ExpiryTile", bg=COLOR_SURFACE_2, radius=12))
         col = QVBoxLayout(tile)
@@ -212,11 +214,11 @@ class CheckInScreen(QWidget):
         col.setSpacing(6)
 
         title_row = QHBoxLayout()
-        exp_title = bind_text(QLabel(tile), "checkin.expiry_title")
+        exp_title = bind_text(SmoothLabel(tile), "checkin.expiry_title")
         exp_title.setStyleSheet(
             f"font-size: {FS_LABEL}px; font-weight: bold; color: {COLOR_MUTED};"
         )
-        self.days_left_label = QLabel("", tile)
+        self.days_left_label = SmoothLabel("", tile)
         title_row.addWidget(exp_title)
         title_row.addStretch()
         title_row.addWidget(self.days_left_label)
@@ -225,13 +227,13 @@ class CheckInScreen(QWidget):
         seg_row.setSpacing(8)
 
         def _seg(text: str, width: int) -> QLabel:
-            lbl = QLabel(text, tile)
+            lbl = SmoothLabel(text, tile)
             lbl.setFixedSize(width, _DATE_SEG_HEIGHT)
             lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
             return lbl
 
         def _sep() -> QLabel:
-            lbl = QLabel("/", tile)
+            lbl = SmoothLabel("/", tile)
             lbl.setStyleSheet(f"font-size: 28px; font-weight: bold; color: {COLOR_MUTED};")
             return lbl
 
@@ -327,8 +329,7 @@ class CheckInScreen(QWidget):
 
         muted_style = (
             f"font-size: {_DATE_SEG_FONT_PX}px; font-weight: bold; color: {COLOR_WAIT_FG}; "
-            f"background-color: {COLOR_WAIT_BG}; border: 1.5px solid {COLOR_RULE}; "
-            "border-radius: 12px;"
+            f"{smooth_css(COLOR_WAIT_BG, radius=15, border=COLOR_RULE)}"
         )
         self.day_label.setText("--")
         self.month_label.setText("--")
@@ -388,13 +389,11 @@ class CheckInScreen(QWidget):
 
         active_style = (
             f"font-size: {_DATE_SEG_FONT_PX}px; font-weight: bold; color: {COLOR_ON_DARK}; "
-            f"background-color: {COLOR_DARK}; border: 3px solid {COLOR_LIME}; "
-            "border-radius: 12px;"
+            f"{smooth_css(COLOR_DARK, radius=15, border=COLOR_LIME, width=3)}"
         )
         inactive_style = (
             f"font-size: {_DATE_SEG_FONT_PX}px; font-weight: bold; color: {COLOR_INK}; "
-            f"background-color: {COLOR_SURFACE}; border: 1.5px solid {COLOR_RULE}; "
-            "border-radius: 12px;"
+            f"{smooth_css(COLOR_SURFACE, radius=15, border=COLOR_RULE)}"
         )
         segments = (self.day_label, self.month_label, self.year_label)
         for idx, lbl in enumerate(segments):

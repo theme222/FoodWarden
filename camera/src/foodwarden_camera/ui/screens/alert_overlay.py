@@ -3,9 +3,10 @@
 from __future__ import annotations
 
 from PyQt6.QtCore import QTimer
-from PyQt6.QtWidgets import QFrame, QHBoxLayout, QLabel, QVBoxLayout, QWidget
+from PyQt6.QtWidgets import QHBoxLayout, QVBoxLayout, QWidget
 
 from foodwarden_camera.ui.i18n import get_language
+from foodwarden_camera.ui.smooth import SmoothFrame, SmoothLabel
 from foodwarden_camera.ui.styles import (
     COLOR_BAD,
     COLOR_FRESH,
@@ -17,7 +18,7 @@ from foodwarden_camera.ui.styles import (
 )
 
 
-class AlertBanner(QFrame):
+class AlertBanner(SmoothFrame):
     """Concise, high-contrast dismissible alert banner at top of the LCD."""
 
     def __init__(self, parent: QWidget | None = None) -> None:
@@ -30,8 +31,8 @@ class AlertBanner(QFrame):
 
         text_layout = QVBoxLayout()
         text_layout.setSpacing(1)
-        self.label_th = QLabel("แจ้งเตือนความปลอดภัย", self)
-        self.label_en = QLabel("Safety Alert", self)
+        self.label_th = SmoothLabel("แจ้งเตือนความปลอดภัย", self)
+        self.label_en = SmoothLabel("Safety Alert", self)
         text_layout.addWidget(self.label_th)
         text_layout.addWidget(self.label_en)
         layout.addLayout(text_layout)

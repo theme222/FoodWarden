@@ -9,6 +9,7 @@ from PyQt6.QtGui import QFont, QFontMetrics, QPainter, QPaintEvent
 from PyQt6.QtWidgets import QFrame, QHBoxLayout, QLabel, QSizePolicy, QWidget
 
 from foodwarden_camera.ui.i18n import bind_text, t
+from foodwarden_camera.ui.smooth import SmoothFrame, SmoothLabel
 from foodwarden_camera.ui.styles import (
     COLOR_BAD,
     COLOR_INK,
@@ -21,6 +22,7 @@ from foodwarden_camera.ui.styles import (
     FS_TITLE,
     card_style,
     pill_style,
+    smooth_css,
 )
 
 KEY_GUIDE_HEIGHT = 58
@@ -40,7 +42,7 @@ def create_key_guide(
 
     ``label_key`` is an i18n key; the label follows language switches.
     """
-    pill = QFrame(parent)
+    pill = SmoothFrame(parent)
     pill.setObjectName(object_name)
     pill.setFixedHeight(KEY_GUIDE_HEIGHT)
     pill.setStyleSheet(
@@ -50,15 +52,15 @@ def create_key_guide(
     row.setContentsMargins(10, 6, 12, 6)
     row.setSpacing(10)
 
-    badge = QLabel(key_text, pill)
+    badge = SmoothLabel(key_text, pill)
     badge.setAlignment(Qt.AlignmentFlag.AlignCenter)
     badge.setFixedSize(40, 40)
     badge.setStyleSheet(
-        f"background-color: {fg_color}; color: {bg_color}; "
-        f"font-size: {FS_LABEL + 2}px; font-weight: bold; border-radius: 10px;"
+        f"color: {bg_color}; font-size: {FS_LABEL + 2}px; font-weight: bold; "
+        f"{smooth_css(fg_color, radius=11)}"
     )
 
-    lbl = QLabel(pill)
+    lbl = SmoothLabel(pill)
     lbl.setObjectName(f"{object_name}Label")
     bind_text(lbl, label_key)
     lbl.setStyleSheet(f"font-size: {FS_LABEL + 2}px; font-weight: bold; color: {fg_color};")
@@ -76,10 +78,10 @@ def create_screen_header(title_key: str, parent: QWidget) -> tuple[QHBoxLayout, 
     header = QHBoxLayout()
     header.setSpacing(10)
 
-    title = bind_text(QLabel(parent), title_key)
+    title = bind_text(SmoothLabel(parent), title_key)
     title.setStyleSheet(f"font-size: {FS_TITLE}px; font-weight: bold; color: {COLOR_INK};")
 
-    countdown = QLabel("", parent)
+    countdown = SmoothLabel("", parent)
     countdown.setStyleSheet(countdown_style())
 
     header.addWidget(title)

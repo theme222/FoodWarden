@@ -18,6 +18,7 @@ from PyQt6.QtWidgets import (
 )
 
 from foodwarden_camera.ui.i18n import bind_text, t
+from foodwarden_camera.ui.smooth import SmoothButton, SmoothFrame, SmoothLabel
 from foodwarden_camera.ui.styles import (
     COLOR_BAD,
     COLOR_DARK,
@@ -42,6 +43,7 @@ from foodwarden_camera.ui.styles import (
     COLOR_WARN_TEXT,
     card_style,
     pill_style,
+    smooth_css,
 )
 from foodwarden_camera.ui.widgets import FitLabel
 
@@ -135,22 +137,19 @@ def _create_header_button(
     callback: Callable[[], None] | None,
 ) -> QPushButton:
     """Builds the touch-friendly header settings button."""
-    btn = QPushButton(text, parent)
+    btn = SmoothButton(text, parent)
     btn.setFocusPolicy(Qt.FocusPolicy.NoFocus)
     btn.setFixedHeight(40)
     btn.setSizePolicy(QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Fixed)
     btn.setStyleSheet(
         f"""
         QPushButton {{
-            background-color: {COLOR_SURFACE};
+            {smooth_css(COLOR_SURFACE, radius=13, border=COLOR_RULE, hover=COLOR_SURFACE_2)}
             color: {COLOR_INK};
-            border: 1.5px solid {COLOR_RULE};
-            border-radius: 10px;
             font-size: 17px;
             font-weight: bold;
             padding: 4px 14px;
         }}
-        QPushButton:hover {{ background-color: {COLOR_SURFACE_2}; }}
         """
     )
     if callback is not None:
@@ -164,7 +163,7 @@ def _fixed(widget: QWidget) -> QWidget:
     return widget
 
 
-class _StatusTile(QFrame):
+class _StatusTile(SmoothFrame):
     """#F2F7E3 tile: [title ........ status pill] over one single-line value."""
 
     def __init__(
@@ -190,7 +189,7 @@ class _StatusTile(QFrame):
 
         top = QHBoxLayout()
         top.setSpacing(6)
-        self.title_label = bind_text(QLabel(self), title_key)
+        self.title_label = bind_text(SmoothLabel(self), title_key)
         self.title_label.setStyleSheet(
             f"font-size: {TILE_TITLE_PX}px; font-weight: bold; color: {COLOR_MUTED};"
         )
@@ -198,7 +197,7 @@ class _StatusTile(QFrame):
         top.addStretch()
         self.pill: QLabel | None = None
         if pill_text is not None:
-            self.pill = QLabel(pill_text, self)
+            self.pill = SmoothLabel(pill_text, self)
             self.pill.setStyleSheet(pill_style(COLOR_WAIT_BG, COLOR_WAIT_FG, font_px=PILL_PX))
             top.addWidget(self.pill)
 
@@ -232,7 +231,7 @@ def _create_action_pill(
     parent: QWidget,
 ) -> QFrame:
     """Builds a bold bottom action guidance pill matching Web Prototype CTAs."""
-    frame = QFrame(parent)
+    frame = SmoothFrame(parent)
     frame.setObjectName(object_name)
     frame.setFixedHeight(60)
     frame.setStyleSheet(card_style(object_name, bg=bg_color, border=bg_color, radius=14))
@@ -241,15 +240,14 @@ def _create_action_pill(
     row.setContentsMargins(10, 6, 14, 6)
     row.setSpacing(12)
 
-    badge = QLabel(key_text, frame)
+    badge = SmoothLabel(key_text, frame)
     badge.setAlignment(Qt.AlignmentFlag.AlignCenter)
     badge.setFixedSize(42, 42)
     badge.setStyleSheet(
-        f"background-color: {badge_bg}; color: {badge_fg}; "
-        "font-size: 22px; font-weight: bold; border-radius: 10px;"
+        f"color: {badge_fg}; font-size: 22px; font-weight: bold; {smooth_css(badge_bg, radius=12)}"
     )
 
-    label = bind_text(QLabel(frame), title_key)
+    label = bind_text(SmoothLabel(frame), title_key)
     label.setStyleSheet(f"font-size: 22px; font-weight: bold; color: {fg_color};")
 
     row.addWidget(badge)
@@ -353,25 +351,25 @@ class IdleScreen(QWidget):
         header = QHBoxLayout()
         header.setSpacing(6)
 
-        brand_dot = QLabel("FW", self)
+        brand_dot = SmoothLabel("FW", self)
         brand_dot.setAlignment(Qt.AlignmentFlag.AlignCenter)
         brand_dot.setFixedSize(36, 36)
         brand_dot.setStyleSheet(
-            f"background-color: {COLOR_LIME}; color: {COLOR_LIME_INK}; "
-            "font-size: 16px; font-weight: bold; border-radius: 10px;"
+            f"color: {COLOR_LIME_INK}; font-size: 16px; font-weight: bold; "
+            f"{smooth_css(COLOR_LIME, radius=11)}"
         )
 
-        title = QLabel("FoodWarden", self)
+        title = SmoothLabel("FoodWarden", self)
         title.setStyleSheet(f"font-size: 24px; font-weight: bold; color: {COLOR_INK};")
 
-        self.pill_wifi = QLabel("Wi-Fi: --", self)
+        self.pill_wifi = SmoothLabel("Wi-Fi: --", self)
         self.pill_wifi.setStyleSheet(pill_style(COLOR_WAIT_BG, COLOR_WAIT_FG, font_px=PILL_PX))
 
-        self.pill_node_f = QLabel("● Fridge: Wait", self)
+        self.pill_node_f = SmoothLabel("● Fridge: Wait", self)
         self.pill_node_f.setStyleSheet(pill_style(COLOR_WAIT_BG, COLOR_WAIT_FG, font_px=PILL_PX))
         self.pill_ble = self.pill_node_f
 
-        self.pill_node_d = QLabel("● Door: Wait", self)
+        self.pill_node_d = SmoothLabel("● Door: Wait", self)
         self.pill_node_d.setStyleSheet(pill_style(COLOR_WAIT_BG, COLOR_WAIT_FG, font_px=PILL_PX))
 
         self.btn_settings = _create_header_button(t("idle.settings"), self, self._on_open_settings)
@@ -388,7 +386,7 @@ class IdleScreen(QWidget):
         return header
 
     def _build_camera_card(self) -> QFrame:
-        cam_card = QFrame(self)
+        cam_card = SmoothFrame(self)
         cam_card.setObjectName("CamCard")
         cam_card.setStyleSheet(
             card_style("CamCard", bg=COLOR_SURFACE, border=COLOR_RULE, radius=16)
@@ -396,18 +394,18 @@ class IdleScreen(QWidget):
         cam_card_layout = QVBoxLayout(cam_card)
         cam_card_layout.setContentsMargins(10, 10, 10, 10)
 
-        self.camera_frame = QFrame(cam_card)
+        self.camera_frame = SmoothFrame(cam_card)
         self.camera_frame.setObjectName("CameraFrame")
         self.camera_frame.setMinimumSize(300, 215)
         self.camera_frame.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
         self.camera_frame.setStyleSheet(
-            f"#CameraFrame {{ background-color: {COLOR_DARK}; "
-            f"border: 1.5px solid {COLOR_RULE}; border-radius: 12px; }}"
+            f"#CameraFrame {{ {smooth_css(COLOR_DARK, radius=15, border=COLOR_RULE)} }}"
         )
         cam_inner = QVBoxLayout(self.camera_frame)
         cam_inner.setContentsMargins(4, 4, 4, 4)
 
-        self.camera_label = QLabel(t("idle.waiting_camera"), self.camera_frame)
+        self.camera_label = SmoothLabel(t("idle.waiting_camera"), self.camera_frame)
+        self.camera_label.image_radius = 11.0
         self.camera_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self.camera_label.setStyleSheet(
             f"color: {COLOR_ON_DARK_2}; font-size: 18px; font-weight: bold;"
@@ -417,7 +415,7 @@ class IdleScreen(QWidget):
         return cam_card
 
     def _build_status_card(self) -> QFrame:
-        diag_card = QFrame(self)
+        diag_card = SmoothFrame(self)
         diag_card.setObjectName("DiagCard")
         diag_card.setStyleSheet(
             card_style("DiagCard", bg=COLOR_SURFACE, border=COLOR_RULE, radius=16)
