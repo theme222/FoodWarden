@@ -95,3 +95,7 @@ All features must be measurable and verifiable. Keep testing hooks in code for:
 4. **Power Profile:** Documented sleep vs. active current measurements for Node `'F'`.
 5. **AI Inference Metrics:** Latency and confidence thresholds for edge YOLO and cloud Gemini 3.5 Flash Lite calls.
 6. **System Uptime:** Continuous error-free operation over a >24-hour test period.
+
+## 5. Dashboard UI SDK
+
+Before using ui-sdk in `server/`, follow the `ui-sdk` skill if installed and read [the React package's agent guide](server/node_modules/@ui-sdk/react/docs/llms.txt). When building a new ui-sdk component, also search [core.md](server/node_modules/@ui-sdk/react/docs/core.md) by heading and read [rendering.md](server/node_modules/@ui-sdk/react/docs/rendering.md).
