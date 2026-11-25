@@ -6,7 +6,7 @@ Account: Newisnooby. No unrelated databases or buckets were changed.
 
 - D1: `foodwarden-db`, APAC, ID `5331bc4a-8ed9-4017-a7ae-f493e05434e6`.
 - R2: `foodwarden-photos`, Standard, private (no public access configured).
-- Migrations: [0001_init.sql](migrations/0001_init.sql), [0002_security_and_delivery.sql](migrations/0002_security_and_delivery.sql), [0003_line_pairing_and_prefs.sql](migrations/0003_line_pairing_and_prefs.sql), and [0004_operation_receipts.sql](migrations/0004_operation_receipts.sql) are applied remotely on `foodwarden-db`.
+- Migrations: [0001_init.sql](migrations/0001_init.sql) through [0008_alert_jobs.sql](migrations/0008_alert_jobs.sql) (including [0005_inventory_activity.sql](migrations/0005_inventory_activity.sql), [0006_status_history.sql](migrations/0006_status_history.sql), [0007_camera_packs.sql](migrations/0007_camera_packs.sql), and [0008_alert_jobs.sql](migrations/0008_alert_jobs.sql)) are applied remotely on `foodwarden-db`.
 - Live Worker origin: `https://foodwarden.newisnooby.workers.dev` (deployed with `/api/health` returning `{"ok":true,"database":"ok"}`).
 - [wrangler.jsonc](wrangler.jsonc) uses production defaults and this canonical Better Auth URL. Local `.dev.vars` overrides remain development-only.
 
