@@ -184,12 +184,12 @@ lineRoutes.delete("/me/line", async (c) => {
 lineRoutes.post("/me/line/test", async (c) => {
   if (!lineReady(c.env))
     throw new LinePairingError("LINE is not configured.", 503);
-  await enqueuePersonalTest(
+  const status = await enqueuePersonalTest(
     c.env,
     c.get("user").id,
     Math.floor(Date.now() / 1000),
   );
-  return c.json({ queued: true }, 202);
+  return c.json({ queued: status === "queued", status }, 202);
 });
 lineRoutes.get("/fridges/:fridgeId/line", async (c) => {
   const id = c.req.param("fridgeId");
@@ -247,8 +247,12 @@ lineRoutes.post("/fridges/:fridgeId/line/test", async (c) => {
     return c.json({ error: "FORBIDDEN" }, 403);
   if (!lineReady(c.env))
     throw new LinePairingError("LINE is not configured.", 503);
-  await enqueueFridgeLineTest(c.env, id, Math.floor(Date.now() / 1000));
-  return c.json({ queued: true }, 202);
+  const status = await enqueueFridgeLineTest(
+    c.env,
+    id,
+    Math.floor(Date.now() / 1000),
+  );
+  return c.json({ queued: status === "queued", status }, 202);
 });
 lineRoutes.get("/fridges/:fridgeId/favorites", async (c) => {
   const id = c.req.param("fridgeId");

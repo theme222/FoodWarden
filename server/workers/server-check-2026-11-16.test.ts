@@ -103,7 +103,9 @@ describe("Audit 2026-11-16 regressions", () => {
 
     const pushes: unknown[] = [];
     vi.spyOn(globalThis, "fetch").mockImplementation(async (_input, init) => {
-      pushes.push(JSON.parse(typeof init?.body === "string" ? init.body : "{}"));
+      pushes.push(
+        JSON.parse(typeof init?.body === "string" ? init.body : "{}"),
+      );
       return new Response("{}", { status: 200 });
     });
 
@@ -143,6 +145,13 @@ describe("Audit 2026-11-16 regressions", () => {
       }
     };
 
+    await testEnv.DB.batch(
+      [900, 600, 300].map((ago) =>
+        testEnv.DB.prepare(
+          "INSERT INTO telemetry_samples(fridge_id,node_id,timestamp_s,temp_celsius,voc_index,light_ldr) VALUES (?,'F0',?,12.0,100,0)",
+        ).bind(fridge.id, nowS - ago),
+      ),
+    );
     const initial = await postTelemetry("", nowS, "production");
     expect(initial.status).toBe(200);
     expect(pushes).toHaveLength(1);
@@ -232,7 +241,9 @@ describe("Audit 2026-11-16 regressions", () => {
 
     const pushes: unknown[] = [];
     vi.spyOn(globalThis, "fetch").mockImplementation(async (_input, init) => {
-      pushes.push(JSON.parse(typeof init?.body === "string" ? init.body : "{}"));
+      pushes.push(
+        JSON.parse(typeof init?.body === "string" ? init.body : "{}"),
+      );
       return new Response("{}", { status: 200 });
     });
 
@@ -383,7 +394,7 @@ describe("Audit 2026-11-16 regressions", () => {
     expect(doorOutbox?.failed).toBe(0);
     expect(doorOutbox?.delivered_s).not.toBeNull();
     expect(sentLengths[0]!).toBeLessThanOrEqual(LINE_MAX_TEXT_LENGTH);
-    expect(sentTexts[0]).toContain("โหนด");
+    expect(sentTexts[0]).toContain("พบสิ่งกีดขวางที่ประตู");
     expect(hasLoneSurrogate(sentTexts[0]!)).toBe(false);
 
     // Also verify enqueuePersonalTest with many long fridge names stays within 5000 code units

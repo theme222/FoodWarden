@@ -430,11 +430,18 @@ describe("Better Auth, fridge RBAC, and inventory CRUD", () => {
     });
     expect(resB.status).toBe(201);
 
-    const fridgeList = await exports.default.fetch("http://localhost/api/fridges", {
-      headers: { Cookie: ownerCookie },
-    });
-    const summaries = (await fridgeList.json()) as { fridges: { id: string }[] };
-    expect(summaries.fridges.find((fridge) => fridge.id === fridgeId)).toMatchObject({
+    const fridgeList = await exports.default.fetch(
+      "http://localhost/api/fridges",
+      {
+        headers: { Cookie: ownerCookie },
+      },
+    );
+    const summaries = (await fridgeList.json()) as {
+      fridges: { id: string }[];
+    };
+    expect(
+      summaries.fridges.find((fridge) => fridge.id === fridgeId),
+    ).toMatchObject({
       inventory_count: 2,
       expiring_soon_count: 1,
     });
@@ -466,7 +473,7 @@ describe("Better Auth, fridge RBAC, and inventory CRUD", () => {
       {
         method: "PATCH",
         headers: { Cookie: ownerCookie, "Content-Type": "application/json" },
-        body: JSON.stringify({ estimated_expiry_date: "2026-11-28" }),
+        body: JSON.stringify({ estimated_expiry_date: expiryAfter(5) }),
       },
     );
     expect(patchRes.status).toBe(200);
@@ -539,25 +546,43 @@ describe("Better Auth, fridge RBAC, and inventory CRUD", () => {
 
     const activityUrl = `http://localhost/api/fridges/${fridgeId}/activity`;
     const queryActivity = (query: string) =>
-      exports.default.fetch(activityUrl + query, { headers: { Cookie: ownerCookie } });
+      exports.default.fetch(activityUrl + query, {
+        headers: { Cookie: ownerCookie },
+      });
     const activity = await queryActivity("?kind=inventory");
     expect(activity.status).toBe(200);
-    expect((await activity.json() as { rows: { action: string }[] }).rows.map((row) => row.action))
-      .toEqual(["deleted", "updated", "created", "created"]);
+    expect(
+      ((await activity.json()) as { rows: { action: string }[] }).rows.map(
+        (row) => row.action,
+      ),
+    ).toEqual(["deleted", "updated", "created", "created"]);
     expect((await exports.default.fetch(activityUrl)).status).toBe(401);
     expect((await queryActivity("?date=2026-02-30")).status).toBe(400);
 
-    await testEnv.DB.batch(Array.from({ length: 16 }, (_, index) => testEnv.DB.prepare(
-      "INSERT INTO door_events (fridge_id, node_id, timestamp_s, status) VALUES (?, ?, ?, 'SUCCESS')",
-    ).bind(fridgeId, "D" + (index + 1), nowS - 5)));
-    const bangkokDay = new Date((nowS - 5 + 7 * 3600) * 1000).toISOString().slice(0, 10);
+    await testEnv.DB.batch(
+      Array.from({ length: 16 }, (_, index) =>
+        testEnv.DB.prepare(
+          "INSERT INTO door_events (fridge_id, node_id, timestamp_s, status) VALUES (?, ?, ?, 'SUCCESS')",
+        ).bind(fridgeId, "D" + (index + 1), nowS - 5),
+      ),
+    );
+    const bangkokDay = new Date((nowS - 5 + 7 * 3600) * 1000)
+      .toISOString()
+      .slice(0, 10);
     const filter = "?kind=door&date=" + bangkokDay;
-    const first = await (await queryActivity(filter)).json() as { rows: { id: number }[]; next: string };
-    const second = await (await queryActivity(filter + "&before=" + first.next)).json() as { rows: { id: number }[]; next: null };
+    const first = (await (await queryActivity(filter)).json()) as {
+      rows: { id: number }[];
+      next: string;
+    };
+    const second = (await (
+      await queryActivity(filter + "&before=" + first.next)
+    ).json()) as { rows: { id: number }[]; next: null };
     expect(first.rows).toHaveLength(15);
     expect(second.rows).toHaveLength(2);
     expect(second.next).toBeNull();
-    expect(new Set([...first.rows, ...second.rows].map((row) => row.id)).size).toBe(17);
+    expect(
+      new Set([...first.rows, ...second.rows].map((row) => row.id)).size,
+    ).toBe(17);
 
     const emptyStatusRes = await exports.default.fetch(
       `http://localhost/api/fridges/${fridgeId}/status`,

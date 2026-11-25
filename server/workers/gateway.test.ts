@@ -219,6 +219,15 @@ describe("CBS gateway ingestion and private R2 storage", () => {
     )
       .bind(fridgeId)
       .first<{ gateway_seen_s: number; nodes_json: string }>();
+    const history = await DB.prepare(
+      "SELECT gateway_seen_s FROM fridge_status_history WHERE fridge_id=? ORDER BY gateway_seen_s",
+    )
+      .bind(fridgeId)
+      .all<{ gateway_seen_s: number }>();
+    expect(history.results).toEqual([
+      { gateway_seen_s: nowS - 10 },
+      { gateway_seen_s: nowS },
+    ]);
     expect(row?.gateway_seen_s).toBe(nowS);
     expect(JSON.parse(row?.nodes_json ?? "[]")).toEqual([
       { node_id: "C0", last_seen_s: nowS, last_known_seen_s: nowS },

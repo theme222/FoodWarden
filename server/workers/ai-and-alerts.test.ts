@@ -24,7 +24,13 @@ import {
   classifyCheckInImage,
   GeminiUnavailableError,
 } from "./lib/gemini";
-import { runDailyCronTasks, tryAcquireAlertCooldown } from "./lib/line";
+import {
+  dispatchLineOutbox,
+  runDailyCronTasks,
+  tryAcquireAlertCooldown,
+} from "./lib/line";
+import { processAlertJobs } from "./lib/alert-jobs";
+import { doorLineMessage, doorNotices } from "./lib/line-messages";
 import type { AppBindings } from "./types";
 
 interface TestEnv extends AppBindings {
@@ -364,15 +370,29 @@ describe("Gemini AI check-in/out, LINE alerts, and daily Cron", () => {
       ).status,
     ).toBe(422);
 
-    // Valid recognition uploads crop to R2 and computes deterministic expiry date, zero D1 writes.
+    // Seed an existing product with a different label order from the model.
+    await DB.prepare(
+      "INSERT INTO inventory (id, fridge_id, name_th, name_en, category, estimated_expiry_date, check_in_timestamp_s, check_in_source) VALUES (?, ?, ?, ?, 'Dairy', '2099-01-01', ?, 'WEB_MANUAL')",
+    )
+      .bind(
+        crypto.randomUUID(),
+        fridgeId,
+        "นมสดพาสเจอร์ไรส์",
+        "Pasteurized Whole Milk",
+        Math.floor(Date.now() / 1000),
+      )
+      .run();
     let seenApiKey: string | null = null;
     mockGemini("gemini-3.5-flash-lite", (req) => {
       seenApiKey = req.headers.get("x-goog-api-key");
+      expect(req.bodyText).toContain("Pasteurized Whole Milk");
       return new Response(
         geminiJsonEnvelope({
           is_food: true,
           name_th: "นมสดพาสเจอร์ไรส์",
-          name_en: "Pasteurized Whole Milk",
+          name_en: "Whole Milk Pasteurized",
+          unit_count: 6,
+          existing_product_index: 0,
           category: "Dairy",
           estimated_shelf_life_days: 7,
           confidence: 0.94,
@@ -420,7 +440,8 @@ describe("Gemini AI check-in/out, LINE alerts, and daily Cron", () => {
     )
       .bind(fridgeId)
       .first<{ count: number }>();
-    expect(invBeforeCommit?.count).toBe(0);
+    expect(invBeforeCommit?.count).toBe(1);
+    expect(draftBody).not.toHaveProperty("unit_count");
 
     // Connect WebSocket client as owner to verify live inventory_changed broadcast on commit.
     const { cookieHeader } = await createSignedSessionForEmail(
@@ -468,6 +489,7 @@ describe("Gemini AI check-in/out, LINE alerts, and daily Cron", () => {
     );
     expect(badPathRes.status).toBe(400);
 
+    const packCommitKey = crypto.randomUUID();
     const commitRes = await exports.default.fetch(
       "http://localhost/api/inventory/checkin",
       {
@@ -475,7 +497,7 @@ describe("Gemini AI check-in/out, LINE alerts, and daily Cron", () => {
         headers: {
           "Content-Type": "application/json",
           Authorization: `Bearer ${token}`,
-          "Idempotency-Key": crypto.randomUUID(),
+          "Idempotency-Key": packCommitKey,
         },
         body: JSON.stringify(draftBody),
       },
@@ -488,6 +510,34 @@ describe("Gemini AI check-in/out, LINE alerts, and daily Cron", () => {
     };
     expect(commitBody.success).toBe(true);
     expect(commitBody.item_id).toMatch(/^item_[a-f0-9]{16}$/);
+    for (const [key, status] of [
+      [packCommitKey, 201],
+      [crypto.randomUUID(), 409],
+    ] as const) {
+      const replay = await exports.default.fetch(
+        "http://localhost/api/inventory/checkin",
+        {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${token}`,
+            "Idempotency-Key": key,
+          },
+          body: JSON.stringify(draftBody),
+        },
+      );
+      expect(replay.status).toBe(status);
+      if (status === 201)
+        expect(await replay.json()).toMatchObject({
+          item_id: commitBody.item_id,
+        });
+    }
+    const count = await DB.prepare(
+      "SELECT COUNT(*) AS n FROM inventory WHERE fridge_id=? AND image_storage_path=?",
+    )
+      .bind(fridgeId, draftBody.image_storage_path)
+      .first<{ n: number }>();
+    expect(count?.n).toBe(6);
 
     // Owner can read the uploaded crop JPEG via dashboard photo endpoint.
     const photoRes = await exports.default.fetch(
@@ -866,9 +916,9 @@ describe("Gemini AI check-in/out, LINE alerts, and daily Cron", () => {
     expect(door2.status).toBe(200);
     expect(pushedPayloads.length).toBe(1);
     expect(pushedPayloads[0]?.to).toBe("U_line_target_1");
-    expect(pushedPayloads[0]?.messages[0]?.text).toContain("obstruction");
+    expect(pushedPayloads[0]?.messages[0]?.text).toContain("พบสิ่งกีดขวางที่ประตู");
 
-    // Telemetry with high VOC (>= 250) and high temp (> 8.0°C) fires 2 alerts; second sample within cooldown fires 0.
+    // Wait for 15 minutes of readings over both thresholds before firing.
     mockLinePush((req) => {
       pushedPayloads.push(JSON.parse(req.bodyText));
       return new Response("{}", { status: 200 });
@@ -885,7 +935,7 @@ describe("Gemini AI check-in/out, LINE alerts, and daily Cron", () => {
         samples: [
           {
             node_id: "F0",
-            timestamp_s: t0,
+            timestamp_s: t0 - 900,
             temp_celsius: 10.2,
             voc_index: 310,
             light_ldr: 40,
@@ -894,6 +944,7 @@ describe("Gemini AI check-in/out, LINE alerts, and daily Cron", () => {
       }),
     });
     expect(tel1.status).toBe(200);
+    expect(pushedPayloads.length).toBe(1);
 
     const tel2 = await exports.default.fetch("http://localhost/api/telemetry", {
       method: "POST",
@@ -903,15 +954,13 @@ describe("Gemini AI check-in/out, LINE alerts, and daily Cron", () => {
         "Idempotency-Key": crypto.randomUUID(),
       },
       body: JSON.stringify({
-        samples: [
-          {
-            node_id: "F0",
-            timestamp_s: t0 + 60,
-            temp_celsius: 11.0,
-            voc_index: 340,
-            light_ldr: 40,
-          },
-        ],
+        samples: [600, 300, 0].map((ago) => ({
+          node_id: "F0",
+          timestamp_s: t0 - ago,
+          temp_celsius: 11.0,
+          voc_index: 340,
+          light_ldr: 40,
+        })),
       }),
     });
     expect(tel2.status).toBe(200);
@@ -1009,6 +1058,13 @@ describe("Gemini AI check-in/out, LINE alerts, and daily Cron", () => {
         }),
       });
 
+    await DB.batch(
+      [900, 600, 300].map((ago) =>
+        DB.prepare(
+          "INSERT INTO telemetry_samples(fridge_id,node_id,timestamp_s,temp_celsius,voc_index,light_ldr) VALUES (?,'F0',?,11.5,100,30)",
+        ).bind(fridgeId, t0 - ago),
+      ),
+    );
     const tel1 = await postTemp("http://localhost/api/telemetry", t0);
     expect(tel1.status).toBe(200);
     expect(pushedPayloads.length).toBe(3);
@@ -1024,6 +1080,96 @@ describe("Gemini AI check-in/out, LINE alerts, and daily Cron", () => {
     );
     expect(tel3.status).toBe(200);
     expect(pushedPayloads.length).toBe(4);
+  });
+
+  it("recovers a committed alert after a queue error and keeps dispatch independent of the digest", async () => {
+    const testEnv = getTestEnv();
+    const { DB } = testEnv;
+    const fridgeId = `recover-${crypto.randomUUID()}`;
+    const nowS = Math.floor(Date.now() / 1000);
+    await seedFridge(DB, {
+      fridgeId,
+      token: `token-${crypto.randomUUID()}`,
+      lineTargetId: "C_recovery",
+    });
+    await DB.prepare(
+      "INSERT INTO door_events(fridge_id,node_id,timestamp_s,status) VALUES(?,'D0',?,'OBSTRUCTION_ERROR')",
+    )
+      .bind(fridgeId, nowS)
+      .run();
+    await DB.prepare(
+      "INSERT OR IGNORE INTO door_events(fridge_id,node_id,timestamp_s,status) VALUES(?,'D0',?,'OBSTRUCTION_ERROR')",
+    )
+      .bind(fridgeId, nowS)
+      .run();
+    const faultingDb = (pattern: string) =>
+      new Proxy(DB, {
+        get(target, key) {
+          if (key === "prepare")
+            return (query: string) => {
+              if (query.includes(pattern))
+                throw new Error("Simulated D1 failure");
+              return target.prepare(query);
+            };
+          const value: unknown = Reflect.get(target, key, target);
+          return typeof value === "function" ? value.bind(target) : value;
+        },
+      });
+    await processAlertJobs(
+      { ...testEnv, DB: faultingDb("SELECT id, name, line_target_id") },
+      nowS,
+      fridgeId,
+    );
+    const pending = await DB.prepare(
+      "SELECT COUNT(*) AS n FROM alert_jobs WHERE fridge_id=?",
+    )
+      .bind(fridgeId)
+      .first<{ n: number }>();
+    expect(pending?.n).toBe(1);
+    await processAlertJobs(testEnv, nowS + 31, fridgeId);
+    let sent = 0;
+    mockLinePush(() => {
+      sent++;
+      return new Response("{}", { status: 200 });
+    });
+    const ctx = createExecutionContext();
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    worker.scheduled(
+      createScheduledController({
+        cron: "* * * * *",
+        scheduledTime: (nowS + 32) * 1000,
+      }),
+      { ...testEnv, DB: faultingDb("p.morning_enabled=1") },
+      ctx,
+    );
+    await waitOnExecutionContext(ctx);
+    expect(warn).toHaveBeenCalledWith("LINE scheduled tasks failed", {
+      failed: 1,
+    });
+    expect(sent).toBe(1);
+    await processAlertJobs(testEnv, nowS + 40, fridgeId);
+    expect(
+      await dispatchLineOutbox(testEnv, nowS + 40, undefined, fridgeId),
+    ).toBe(0);
+  });
+
+  it("keeps the LINE web link even when names are long, and uses the event's Bangkok date", () => {
+    const env = { ...getTestEnv(), BETTER_AUTH_URL: "https://example.test/" };
+    const message = doorLineMessage(
+      env,
+      "kitchen",
+      "🥬".repeat(300),
+      Date.parse("2026-11-25T18:00:00Z") / 1000,
+      doorNotices.OBSTRUCTION_ERROR,
+    );
+    expect(message).toContain("01:00");
+    expect(message).toContain(
+      "https://example.test/fridges/kitchen/monitoring/history?kind=door&date=2026-11-26",
+    );
+    expect(
+      message.split("\n").filter((line) => line.startsWith("https://")),
+    ).toHaveLength(1);
+    expect(message.length).toBeLessThan(500);
   });
 
   it("runs scheduled cron expiry digest (FEFO <= 2 days) and cleans up orphaned R2 crops", async () => {
@@ -1054,8 +1200,15 @@ describe("Gemini AI check-in/out, LINE alerts, and daily Cron", () => {
       .slice(0, 10);
     const plus1 = addDaysToIsoDate(today, 1);
     const plus10 = addDaysToIsoDate(today, 10);
+    const yesterdayBangkok = Date.parse(`${yesterday}T12:00:00+07:00`) / 1000;
 
     await DB.batch([
+      DB.prepare(
+        "INSERT INTO door_events(fridge_id,node_id,timestamp_s,status) VALUES (?,'D0',?,'OBSTRUCTION_ERROR')",
+      ).bind(fridgeId, yesterdayBangkok),
+      DB.prepare(
+        "INSERT INTO line_alert_events(fridge_id,alert_type,event_key) VALUES (?,'temp_high',?)",
+      ).bind(fridgeId, JSON.stringify(["F0", yesterdayBangkok])),
       DB.prepare(
         `INSERT INTO inventory (id, fridge_id, name_th, name_en, category, category_th, estimated_expiry_date, check_in_timestamp_s, image_storage_path, check_in_source)
          VALUES ('exp_past', ?, 'โยเกิร์ต', 'Yogurt', 'Dairy', 'นมและผลิตภัณฑ์นม', ?, ?, ?, 'CAMERA')`,
@@ -1088,13 +1241,15 @@ describe("Gemini AI check-in/out, LINE alerts, and daily Cron", () => {
     const digestText = digests[0]?.messages[0]?.text ?? "";
     expect(digestText).toContain("โยเกิร์ต");
     expect(digestText).toContain("ผักสลัด");
+    expect(digestText).toContain("เหตุประตู 1");
+    expect(digestText).toContain("ค่าที่เข้าคิวเตือน 1");
     expect(digestText).not.toContain("Strawberry Jam");
 
     // Second cron run within 20h window via Worker scheduled handler respects cooldown.
     const ctx = createExecutionContext();
     worker.scheduled(
       createScheduledController({
-        cron: "0 1 * * *",
+        cron: "0 23 * * *",
         scheduledTime: futureNowS * 1000,
       }),
       testEnv,

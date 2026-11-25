@@ -21,12 +21,20 @@ export async function commitInventoryOperation(
   key: string,
   fingerprint: string,
   item: InventoryItemRow,
+  pack?: { count: number; photoPath: string },
 ): Promise<{ itemId: string; created: boolean }> {
   const nonce = crypto.randomUUID();
+  const ids = [
+    item.id,
+    ...Array.from(
+      { length: (pack?.count ?? 1) - 1 },
+      () => `item_${crypto.randomUUID().replace(/-/g, "").slice(0, 16)}`,
+    ),
+  ];
   const results = await db.batch([
     db
       .prepare(
-        "INSERT INTO inventory_operations(fridge_id,kind,operation_id,request_hash,item_id,claim_token,created_s) VALUES(?,?,?,?,?,?,?) ON CONFLICT DO NOTHING",
+        "INSERT INTO inventory_operations(fridge_id,kind,operation_id,request_hash,item_id,claim_token,created_s,pack_photo_path) VALUES(?,?,?,?,?,?,?,?) ON CONFLICT DO NOTHING",
       )
       .bind(
         fridgeId,
@@ -36,14 +44,14 @@ export async function commitInventoryOperation(
         item.id,
         nonce,
         item.check_in_timestamp_s,
+        pack?.photoPath ?? null,
       ),
     db
       .prepare(
         `INSERT INTO inventory(id,fridge_id,name_th,name_en,category,category_th,estimated_expiry_date,storage_recommendation_th,storage_recommendation_en,check_in_timestamp_s,image_storage_path,confidence,check_in_source,manual_request_hash)
-      SELECT ?,?,?,?,?,?,?,?,?,?,?,?,?,? WHERE EXISTS(SELECT 1 FROM inventory_operations WHERE fridge_id=? AND kind=? AND operation_id=? AND claim_token=?)`,
+      SELECT value,?,?,?,?,?,?,?,?,?,?,?,?,? FROM json_each(?) WHERE EXISTS(SELECT 1 FROM inventory_operations WHERE fridge_id=? AND kind=? AND operation_id=? AND claim_token=?)`,
       )
       .bind(
-        item.id,
         fridgeId,
         item.name_th,
         item.name_en,
@@ -57,6 +65,7 @@ export async function commitInventoryOperation(
         item.confidence,
         item.check_in_source,
         kind === "manual" ? fingerprint : null,
+        JSON.stringify(ids),
         fridgeId,
         kind,
         key,

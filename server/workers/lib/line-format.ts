@@ -1,7 +1,7 @@
 export const LINE_MAX_TEXT_LENGTH = 5000;
 export const LINE_MAX_MESSAGES_PER_REQUEST = 5;
 
-export function safeSliceText(text: string, maxUnits: number): string {
+function safeSliceText(text: string, maxUnits: number): string {
   if (maxUnits <= 0) return "";
   if (text.length <= maxUnits) return text;
   let end = maxUnits;

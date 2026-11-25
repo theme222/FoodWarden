@@ -39,7 +39,7 @@
     },
   ],
   "triggers": {
-    "crons": ["0 1 * * *", "* * * * *"],
+    "crons": ["0 23 * * *", "* * * * *"],
   },
   "vars": {
     "APP_ENV": "production",

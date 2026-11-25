@@ -2,6 +2,7 @@ import type { AppBindings } from "../types";
 import type { AuthenticatedUser } from "./auth";
 import { sha256Hex } from "./gateway";
 import { LINE_MAX_TEXT_LENGTH, capLineText } from "./line-format";
+import { fridgePath, lineMessage, shortLineLabel } from "./line-messages";
 import { notifyFridgeRoom } from "./room";
 
 export class LinePairingError extends Error {
@@ -275,10 +276,9 @@ export async function processLineWebhook(
       continue;
     }
     const paired = await env.DB.prepare(
-      `SELECT c.scope, c.fridge_id, f.name AS fridge_name, u.name AS user_name, u.email AS user_email
+      `SELECT c.scope, c.fridge_id, f.name AS fridge_name
        FROM line_pairing_codes c
        LEFT JOIN fridges f ON f.id = c.fridge_id
-       LEFT JOIN user u ON u.id = c.user_id
        WHERE c.code_hash=? AND c.consumed_nonce=?`,
     )
       .bind(hash, nonce)
@@ -286,25 +286,27 @@ export async function processLineWebhook(
         scope: "fridge" | "user";
         fridge_id: string | null;
         fridge_name: string | null;
-        user_name: string | null;
-        user_email: string | null;
       }>();
     if (paired?.fridge_id)
       await notifyFridgeRoom(env, paired.fridge_id, {
         type: "line_settings_changed",
       });
     const replyText =
-      paired?.scope === "fridge"
-        ? `🏠 [LINE ของตู้เย็น · ${
-            paired.fridge_name
-              ? `${paired.fridge_name} (รหัสตู้: ${paired.fridge_id})`
-              : (paired.fridge_id ?? "ตู้เย็น")
-          }]\nเชื่อมต่อ FoodWarden สำเร็จแล้ว ✅ การแจ้งเตือนส่วนกลางของตู้เย็นนี้จะส่งมาที่แชทนี้ กลับไปที่หน้าเว็บเพื่อดูสถานะและส่งข้อความทดสอบได้เลย`
-        : `👤 [LINE ส่วนตัว · บัญชี ${
-            paired?.user_name
-              ? `${paired.user_name} (${paired.user_email})`
-              : (paired?.user_email ?? "บัญชีของคุณ")
-          }]\nเชื่อมต่อ FoodWarden สำเร็จแล้ว ✅ การแจ้งเตือนส่วนตัวจากทุกตู้เย็นในบัญชีของคุณจะส่งมาที่แชทนี้ กลับไปที่หน้าเว็บเพื่อดูสถานะและส่งข้อความทดสอบได้เลย`;
+      paired?.scope === "fridge" && paired.fridge_id
+        ? lineMessage(
+            env,
+            "เชื่อม LINE ของตู้เย็นแล้ว",
+            [shortLineLabel(paired.fridge_name ?? "ตู้เย็น")],
+            "ดูการตั้งค่า LINE",
+            `${fridgePath(paired.fridge_id)}/settings#line-connection`,
+          )
+        : lineMessage(
+            env,
+            "เชื่อม LINE ส่วนตัวแล้ว",
+            [],
+            "ดูการตั้งค่า LINE",
+            "/me#line-connection",
+          );
     await reply(env, event, replyText);
   }
 }

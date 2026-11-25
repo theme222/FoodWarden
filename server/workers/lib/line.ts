@@ -1,6 +1,20 @@
 import { LinePairingError } from "./line-pairing";
 import { retireUnreferencedPhoto } from "./storage";
 import type { AppBindings } from "../types";
+import {
+  doorLineMessage,
+  doorNotices,
+  fridgePath,
+  lineFoodLabel,
+  lineMessage,
+  sensorLineMessage,
+  shortLineLabel,
+  type LineTestState,
+} from "./line-messages";
+import {
+  previousDayDoorFaults,
+  previousDaySensorAlerts,
+} from "./telemetry-alerts";
 import type { DoorEvent, DoorEventStatus } from "./door-events";
 import { addDaysToIsoDate, bangkokIsoDate } from "./gemini";
 import {
@@ -30,31 +44,24 @@ interface FridgeAlertConfig {
 const DOOR_ALERT_META: Partial<
   Record<
     DoorEventStatus,
-    {
-      alertType: string;
-      message: (fridgeName: string, fridgeId: string, nodeId: string) => string;
-    }
+    { alertType: string; notice: readonly [string, string] }
   >
 > = {
   OBSTRUCTION_ERROR: {
     alertType: "door_obstruction",
-    message: (fridgeName, fridgeId, nodeId) =>
-      `⚠️ 🏠 [${fridgeName} · รหัสตู้: ${fridgeId}] Door obstruction detected (${nodeId}). Motor stopped and retracted safely.\nตรวจพบสิ่งกีดขวางขณะปิดประตูตู้เย็น (${nodeId}) ระบบหยุดและถอยแขนกลเพื่อความปลอดภัยแล้ว`,
+    notice: doorNotices.OBSTRUCTION_ERROR,
   },
   TIMEOUT_ERROR: {
     alertType: "door_timeout",
-    message: (fridgeName, fridgeId, nodeId) =>
-      `⏱️ 🏠 [${fridgeName} · รหัสตู้: ${fridgeId}] Door closer timed out (${nodeId}). Please check that the door can shut cleanly.\nแขนกลปิดประตูใช้เวลาเกินกำหนด (${nodeId}) กรุณาตรวจสอบว่าประตูไม่มีสิ่งกีดขวาง`,
+    notice: doorNotices.TIMEOUT_ERROR,
   },
   FAULT_LOCKOUT: {
     alertType: "door_fault_lockout",
-    message: (fridgeName, fridgeId, nodeId) =>
-      `🛑 🏠 [${fridgeName} · รหัสตู้: ${fridgeId}] Door actuator entered safety fault lockout (${nodeId}). Manual inspection required.\nระบบปิดประตูเข้าสู่โหมดนิรภัย (${nodeId}) กรุณาตรวจสอบอุปกรณ์`,
+    notice: doorNotices.FAULT_LOCKOUT,
   },
   CONTRADICTION_ERROR: {
     alertType: "door_contradiction",
-    message: (fridgeName, fridgeId, nodeId) =>
-      `💡 🏠 [${fridgeName} · รหัสตู้: ${fridgeId}] Door closed sensor disagrees with interior light sensor (${nodeId}). Seal may still be ajar.\nเซนเซอร์ประตูปิดขัดแย้งกับไฟภายในตู้ (${nodeId}) กรุณาตรวจสอบว่าประตูปิดสนิท`,
+    notice: doorNotices.CONTRADICTION_ERROR,
   },
 };
 
@@ -143,6 +150,7 @@ export async function maybeSendDoorSafetyAlerts(
   fridgeId: string,
   events: DoorEvent[],
   nowS: number,
+  dispatch = true,
 ): Promise<number> {
   if (!env.LINE_CHANNEL_ACCESS_TOKEN?.trim()) return 0;
   const criticalEvents = events.filter((ev) => DOOR_ALERT_META[ev.status]);
@@ -169,7 +177,13 @@ export async function maybeSendDoorSafetyAlerts(
       [
         {
           type: "text",
-          text: meta.message(config.name, config.id, event.node_id),
+          text: doorLineMessage(
+            env,
+            fridgeId,
+            config.name,
+            event.timestamp_s,
+            meta.notice,
+          ),
         },
       ],
       nowS,
@@ -177,6 +191,7 @@ export async function maybeSendDoorSafetyAlerts(
       criticalEvents
         .filter((e) => e.status === event.status)
         .map((e) => JSON.stringify([e.node_id, e.timestamp_s, e.status])),
+      dispatch,
     );
     if (sent) sentCount += 1;
   }
@@ -189,6 +204,7 @@ export async function maybeSendTelemetryAlerts(
   fridgeId: string,
   samples: TelemetrySample[],
   nowS: number,
+  dispatch = true,
 ): Promise<number> {
   if (!env.LINE_CHANNEL_ACCESS_TOKEN?.trim() || samples.length === 0) return 0;
 
@@ -229,10 +245,21 @@ export async function maybeSendTelemetryAlerts(
 
   let sentCount = 0;
   for (const alert of pending) {
-    const text =
-      alert.alertType === "voc_high"
-        ? `🚨 🏠 [${config.name} · รหัสตู้: ${config.id}] High VOC spoilage index detected (${maxVoc}). Please inspect fridge contents.\nตรวจพบค่าก๊าซ VOC สูงผิดปกติ (${maxVoc}) อาจมีอาหารเริ่มเน่าเสีย กรุณาตรวจสอบภายในตู้เย็น`
-        : `🌡️ 🏠 [${config.name} · รหัสตู้: ${config.id}] High fridge temperature detected (${maxTemp!.toFixed(1)}°C > 8.0°C). Check door seal & cooling.\nอุณหภูมิในตู้เย็นสูงเกินเกณฑ์ปลอดภัย (${maxTemp!.toFixed(1)}°C) กรุณาตรวจสอบการปิดประตูและระบบทำความเย็น`;
+    const warm = alert.alertType === "temp_high";
+    const value = warm ? maxTemp : maxVoc;
+    const reading = samples.find((sample) =>
+      warm ? sample.temp_celsius === value : sample.voc_index === value,
+    );
+    if (!reading || value === null) continue;
+    const text = sensorLineMessage(
+      env,
+      fridgeId,
+      config.name,
+      reading.timestamp_s,
+      warm ? "temperature" : "voc",
+      value,
+      reading.node_id,
+    );
 
     const sent = await queueLineAlert(
       env,
@@ -249,6 +276,7 @@ export async function maybeSendTelemetryAlerts(
             : sample.temp_celsius !== null && sample.temp_celsius > 8,
         )
         .map((sample) => JSON.stringify([sample.node_id, sample.timestamp_s])),
+      dispatch,
     );
     if (sent) sentCount += 1;
   }
@@ -323,45 +351,40 @@ async function dispatchDailyExpiryDigests(
 
   for (const fridge of fridges) {
     const { results: items } = await env.DB.prepare(
-      `SELECT name_th, name_en, estimated_expiry_date
+      `SELECT name_th, name_en, estimated_expiry_date, COUNT(*) OVER () AS total
        FROM inventory
        WHERE fridge_id = ? AND estimated_expiry_date <= ?
-       ORDER BY estimated_expiry_date ASC, check_in_timestamp_s ASC`,
+       ORDER BY estimated_expiry_date ASC, check_in_timestamp_s ASC, id ASC LIMIT 3`,
     )
       .bind(fridge.id, cutoff)
       .all<{
         name_th: string;
         name_en: string;
         estimated_expiry_date: string;
+        total: number;
       }>();
 
-    if (items.length === 0) continue;
+    const [faults, sensorAlerts] = await Promise.all([
+      previousDayDoorFaults(env.DB, fridge.id, nowS),
+      previousDaySensorAlerts(env.DB, fridge.id, nowS),
+    ]);
+    if (items.length === 0 && faults === 0 && sensorAlerts === 0) continue;
 
-    const lines = items.slice(0, 10).map((item) => {
-      const status =
-        item.estimated_expiry_date < today
-          ? "หมดอายุแล้ว / Expired"
-          : item.estimated_expiry_date === today
-            ? "หมดอายุวันนี้ / Today"
-            : `หมดอายุ ${item.estimated_expiry_date}`;
-      const label =
-        item.name_th === item.name_en
-          ? item.name_en
-          : `${item.name_th} (${item.name_en})`;
-      return `• ${label} — ${status}`;
-    });
-
-    if (items.length > 10) {
-      lines.push(
-        `...และอีก ${items.length - 10} รายการ / +${items.length - 10} more`,
-      );
-    }
-
-    const message = [
-      `🥬 🏠 [${fridge.name} · รหัสตู้: ${fridge.id}] Daily FEFO Expiry Digest (${today})`,
-      `สรุปรายการอาหารใกล้หมดอายุ / หมดอายุแล้ว (${items.length} รายการ):`,
-      ...lines,
-    ].join("\n");
+    const total = items[0]?.total ?? 0;
+    const message = lineMessage(
+      env,
+      "สรุปตู้เย็นเช้านี้",
+      [
+        `${shortLineLabel(fridge.name)} · อาหารที่ควรตรวจ ${total} รายการ`,
+        ...items.map((item) => lineFoodLabel(item, today)),
+        total > 3 ? `และอีก ${total - 3} รายการ` : "",
+        faults || sensorAlerts
+          ? `เมื่อวาน: เหตุประตู ${faults} · ค่าที่เข้าคิวเตือน ${sensorAlerts}`
+          : "",
+      ],
+      "เปิดตู้เย็น",
+      fridgePath(fridge.id),
+    );
 
     const sent = await queueLineAlert(
       env,
@@ -403,6 +426,7 @@ async function queueLineAlert(
   nowS: number,
   cooldownS: number,
   eventKeys: string[],
+  dispatch = true,
 ): Promise<boolean> {
   const boundedMessages = messages
     .slice(0, LINE_MAX_MESSAGES_PER_REQUEST)
@@ -446,19 +470,27 @@ async function queueLineAlert(
     ).bind(fridgeId, alertType, JSON.stringify(eventKeys)),
   ]);
   if (!insert?.meta.changes) return false;
-  return (await dispatchLineOutbox(env, nowS, id)) > 0;
+  return !dispatch || (await dispatchLineOutbox(env, nowS, id)) > 0;
 }
 
 export async function dispatchLineOutbox(
   env: AppBindings,
   nowS: number,
   onlyId?: string,
+  fridgeId?: string,
 ): Promise<number> {
   if (!env.LINE_CHANNEL_ACCESS_TOKEN?.trim()) return 0;
   const { results: pending } = await env.DB.prepare(
-    "SELECT id FROM line_outbox WHERE failed = 0 AND next_attempt_s <= ? AND lease_until_s <= ? AND (? IS NULL OR id = ?) ORDER BY next_attempt_s LIMIT 50",
+    "SELECT id FROM line_outbox WHERE failed = 0 AND next_attempt_s <= ? AND lease_until_s <= ? AND (? IS NULL OR id = ?) AND (? IS NULL OR fridge_id = ?) ORDER BY next_attempt_s LIMIT 50",
   )
-    .bind(nowS, nowS, onlyId ?? null, onlyId ?? null)
+    .bind(
+      nowS,
+      nowS,
+      onlyId ?? null,
+      onlyId ?? null,
+      fridgeId ?? null,
+      fridgeId ?? null,
+    )
     .all<{ id: string }>();
   let sent = 0;
   for (const { id } of pending) {
@@ -531,7 +563,7 @@ export async function enqueueFridgeLineTest(
   env: AppBindings,
   fridgeId: string,
   nowS: number,
-): Promise<void> {
+): Promise<LineTestState> {
   const config = await getFridgeAlertConfig(env.DB, fridgeId);
   if (!config)
     throw new LinePairingError("Connect this fridge to LINE first.", 409);
@@ -548,7 +580,7 @@ export async function enqueueFridgeLineTest(
       "Please wait one minute before another test.",
       429,
     );
-  await queueLineAlert(
+  const accepted = await queueLineAlert(
     env,
     fridgeId,
     "line_test",
@@ -556,13 +588,24 @@ export async function enqueueFridgeLineTest(
     [
       {
         type: "text",
-        text:
-          `🏠 [LINE ของตู้เย็น · ${config.name} (รหัสตู้: ${config.id})]\n` +
-          `เชื่อมต่อ FoodWarden แล้ว ✅ การแจ้งเตือนส่วนกลางของตู้เย็น "${config.name}" จะส่งมาที่แชทนี้`,
+        text: lineMessage(
+          env,
+          "ทดสอบ LINE ของตู้เย็นสำเร็จ",
+          [shortLineLabel(config.name)],
+          "ดูการตั้งค่า LINE",
+          `${fridgePath(config.id)}/settings#line-connection`,
+        ),
       },
     ],
     nowS,
     0,
     [crypto.randomUUID()],
   );
+  if (accepted) return "accepted";
+  const latest = await env.DB.prepare(
+    "SELECT failed FROM line_outbox WHERE fridge_id=? AND alert_type='line_test' ORDER BY created_s DESC LIMIT 1",
+  )
+    .bind(fridgeId)
+    .first<{ failed: number }>();
+  return latest?.failed ? "failed" : "queued";
 }

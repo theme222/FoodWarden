@@ -3,6 +3,7 @@ import { commitInventoryOperation } from "./operations";
 import { isValidFridgeId } from "./fridges";
 import type {
   CheckOutMatchType,
+  ExistingProduct,
   GeminiCheckOutResponse,
   InventoryCandidate,
 } from "./gemini";
@@ -193,6 +194,23 @@ export function parseCheckInCommit(
   };
 }
 
+export async function listExistingProducts(
+  db: D1Database,
+  fridgeId: string,
+): Promise<ExistingProduct[]> {
+  const { results } = await db
+    .prepare(
+      `SELECT name_th, name_en, category FROM inventory
+     WHERE fridge_id=?
+     GROUP BY name_th, name_en, category
+     ORDER BY MAX(check_in_timestamp_s) DESC, name_th, name_en, category
+     LIMIT 40`,
+    )
+    .bind(fridgeId)
+    .all<ExistingProduct>();
+  return results;
+}
+
 export async function commitCameraCheckIn(
   db: D1Database,
   fridgeId: string,
@@ -200,6 +218,12 @@ export async function commitCameraCheckIn(
   nowS: number,
   operationId: string,
 ): Promise<string> {
+  const pack = await db
+    .prepare(
+      "SELECT unit_count FROM camera_checkin_packs WHERE fridge_id=? AND photo_path=?",
+    )
+    .bind(fridgeId, payload.image_storage_path)
+    .first<{ unit_count: number }>();
   const outcome = await commitInventoryOperation(
     db,
     fridgeId,
@@ -212,6 +236,9 @@ export async function commitCameraCheckIn(
       check_in_timestamp_s: nowS,
       check_in_source: "CAMERA",
     },
+    pack
+      ? { count: pack.unit_count, photoPath: payload.image_storage_path }
+      : undefined,
   );
   return outcome.itemId;
 }

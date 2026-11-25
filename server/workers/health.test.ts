@@ -9,6 +9,7 @@ interface TestEnv {
 
 const EXPECTED_TABLES = [
   "inventory_operations",
+  "camera_checkin_packs",
   "draft_operations",
   "line_pairing_codes",
   "line_webhook_attempts",
@@ -22,6 +23,7 @@ const EXPECTED_TABLES = [
   "account",
   "ai_reservations",
   "alert_cooldowns",
+  "alert_jobs",
   "door_events",
   "fridge_members",
   "fridge_secrets",
@@ -33,6 +35,7 @@ const EXPECTED_TABLES = [
   "photo_gc_claims",
   "session",
   "system_status",
+  "fridge_status_history",
   "telemetry_samples",
   "user",
   "verification",

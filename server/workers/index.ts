@@ -1,4 +1,5 @@
 import { listActivity } from "./lib/activity";
+import { processAlertJobs } from "./lib/alert-jobs";
 import {
   requireOperationId,
   runDraftOperation,
@@ -22,6 +23,7 @@ import { Hono, type Context } from "hono";
 import {
   commitCameraCheckIn,
   listCheckOutCandidateRows,
+  listExistingProducts,
   parseCheckInCommit,
   parseCheckOutCommit,
   parseMultipartJpeg,
@@ -84,8 +86,10 @@ import {
 } from "./lib/line";
 import { notifyFridgeRoom } from "./lib/room";
 import { ingestStatus, parseStatus } from "./lib/status";
+import { queryUptime } from "./lib/uptime";
 import { putImmutablePhoto, toStoragePath } from "./lib/storage";
 import { ingestTelemetry, parseTelemetry } from "./lib/telemetry";
+
 import type { ApiErrorEnvelope, AppBindings } from "./types";
 
 export { FridgeRoom } from "./durable-objects/fridge-room";
@@ -832,12 +836,35 @@ app.get("/api/fridges/:fridgeId/status", async (c) => {
   return c.json({ status });
 });
 
+app.get("/api/fridges/:fridgeId/uptime", async (c) => {
+  const auth = await requireFridgeRole(c, "any");
+  if (auth instanceof Response) return auth;
+  const range = c.req.query("range") ?? "24h";
+  if (range !== "24h" && range !== "72h")
+    return c.json(
+      { error: "INVALID_RANGE", message: "Choose 24h or 72h." },
+      400,
+    );
+  c.header("Cache-Control", "private, no-store");
+  return c.json(
+    await queryUptime(
+      c.env.DB,
+      auth.fridgeId,
+      range,
+      Math.floor(Date.now() / 1000),
+    ),
+  );
+});
+
 app.get("/api/fridges/:fridgeId/activity", async (c) => {
   const auth = await requireFridgeRole(c, "any");
   if (auth instanceof Response) return auth;
   const page = await listActivity(
-    c.env.DB, auth.fridgeId, c.req.query("kind") ?? "inventory",
-    c.req.query("date"), c.req.query("before"),
+    c.env.DB,
+    auth.fridgeId,
+    c.req.query("kind") ?? "inventory",
+    c.req.query("date"),
+    c.req.query("before"),
   );
   if (!page) {
     return c.json<ApiErrorEnvelope>(
@@ -907,8 +934,16 @@ app.all("/api/inventory/checkin/draft", async (c) => {
       const nowS = Math.floor(Date.now() / 1000);
       let result;
       try {
+        const products = await listExistingProducts(c.env.DB, auth);
         result = await withInferenceQuota(c.env, auth, () =>
-          classifyCheckInImage(c.env, apiKey, parsed.bytes, nowS),
+          classifyCheckInImage(
+            c.env,
+            apiKey,
+            parsed.bytes,
+            nowS,
+            undefined,
+            products,
+          ),
         );
       } catch (error) {
         if (error instanceof InferenceQuotaError) {
@@ -937,6 +972,13 @@ app.all("/api/inventory/checkin/draft", async (c) => {
 
       const cropKey = `food_crops/${auth}/crop_${crypto.randomUUID()}.jpg`;
       await putImmutablePhoto(c.env.PHOTOS, cropKey, parsed.bytes);
+      if (result.unit_count > 1) {
+        await c.env.DB.prepare(
+          "INSERT INTO camera_checkin_packs(fridge_id, photo_path, unit_count) VALUES(?,?,?)",
+        )
+          .bind(auth, toStoragePath(cropKey), result.unit_count)
+          .run();
+      }
 
       const estimatedExpiryDate = addDaysToIsoDate(
         bangkokIsoDate(nowS),
@@ -1204,6 +1246,21 @@ async function clearScopedAlertCooldowns(
   ]);
 }
 
+async function flushFridgeAlerts(
+  env: AppBindings,
+  fridgeId: string,
+  nowS: number,
+) {
+  try {
+    await processAlertJobs(env, nowS, fridgeId);
+  } finally {
+    await Promise.allSettled([
+      dispatchLineOutbox(env, nowS, undefined, fridgeId),
+      dispatchPersonalOutbox(env, nowS, undefined, fridgeId),
+    ]);
+  }
+}
+
 app.all("/api/telemetry", async (c) => {
   const auth = await requireGatewayFridge(c);
   if (auth instanceof Response) return auth;
@@ -1239,15 +1296,21 @@ app.all("/api/telemetry", async (c) => {
         "telemetry",
       );
     }
-    await Promise.all([
+    const followUp = Promise.allSettled([
       notifyFridgeRoom(c.env, auth, {
         type: "telemetry",
         samples: acceptedSamples,
         last_seen_s: nowS,
       }),
-      maybeSendTelemetryAlerts(c.env, auth, acceptedSamples, nowS),
-      personalTelemetryAlerts(c.env, auth, acceptedSamples, nowS),
+      bypassAuth
+        ? Promise.all([
+            maybeSendTelemetryAlerts(c.env, auth, acceptedSamples, nowS),
+            personalTelemetryAlerts(c.env, auth, acceptedSamples, nowS),
+          ])
+        : flushFridgeAlerts(c.env, auth, nowS),
     ]);
+    if (c.env.APP_ENV === "development") await followUp;
+    else c.executionCtx.waitUntil(followUp);
   }
   return c.json({ success: true, ingested_count: ingestedCount });
 });
@@ -1319,14 +1382,20 @@ app.all("/api/door_events", async (c) => {
         "door",
       );
     }
-    await Promise.all([
+    const followUp = Promise.allSettled([
       notifyFridgeRoom(c.env, auth, {
         type: "door_events",
         events: acceptedEvents,
       }),
-      maybeSendDoorSafetyAlerts(c.env, auth, acceptedEvents, nowS),
-      personalDoorAlerts(c.env, auth, acceptedEvents, nowS),
+      bypassAuth
+        ? Promise.all([
+            maybeSendDoorSafetyAlerts(c.env, auth, acceptedEvents, nowS),
+            personalDoorAlerts(c.env, auth, acceptedEvents, nowS),
+          ])
+        : flushFridgeAlerts(c.env, auth, nowS),
     ]);
+    if (c.env.APP_ENV === "development") await followUp;
+    else c.executionCtx.waitUntil(followUp);
   }
   return c.json({ success: true, ingested_count: ingestedCount });
 });
@@ -1375,11 +1444,16 @@ export default {
       controller.cron === "* * * * *"
         ? (async () => {
             const nowS = Math.floor(controller.scheduledTime / 1000);
-            await queueMorningDigests(env, nowS);
-            await Promise.all([
+            const results = await Promise.allSettled([
+              queueMorningDigests(env, nowS),
+              processAlertJobs(env, nowS),
               dispatchLineOutbox(env, nowS),
               dispatchPersonalOutbox(env, nowS),
             ]);
+            const failed = results.filter(
+              (result) => result.status === "rejected",
+            ).length;
+            if (failed) console.warn("LINE scheduled tasks failed", { failed });
           })()
         : runDailyCronTasks(env, Math.floor(controller.scheduledTime / 1000)),
     );

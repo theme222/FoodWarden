@@ -103,7 +103,12 @@ const schemas: Record<string, Schema> = {
     last_seen_s: timestamp,
     last_telemetry: { anyOf: [ref("TelemetrySample"), { type: "null" }] },
     inventory_count: { type: "integer", minimum: 0 },
-    expiring_soon_count: { type: "integer", minimum: 0, description: "Items expiring today through three calendar days ahead in Asia/Bangkok." },
+    expiring_soon_count: {
+      type: "integer",
+      minimum: 0,
+      description:
+        "Items expiring today through three calendar days ahead in Asia/Bangkok.",
+    },
   }),
   Settings: object({
     id: text,
@@ -532,36 +537,109 @@ route(
   },
 );
 route(
+  "/api/fridges/{fridgeId}/uptime",
+  get,
+  "Read measured uptime per node",
+  "Monitoring",
+  {
+    parameters: [
+      {
+        in: "query",
+        name: "range",
+        schema: { type: "string", enum: ["24h", "72h"], default: "24h" },
+      },
+    ],
+    responses: {
+      "200": response(
+        "24 buckets per node. Durations are seconds.",
+        object({
+          startS: timestamp,
+          endS: timestamp,
+          bucketS: { type: "integer" },
+          nodes: array(
+            object({
+              id: text,
+              buckets: array(
+                object({
+                  online: timestamp,
+                  offline: timestamp,
+                  unknown: timestamp,
+                }),
+              ),
+            }),
+          ),
+        }),
+      ),
+    },
+  },
+);
+route(
   "/api/fridges/{fridgeId}/activity",
   get,
   "Read paginated fridge activity",
   "Monitoring",
   {
     parameters: [
-      { in: "query", name: "kind", schema: { type: "string", enum: ["inventory", "door", "sensor"], default: "inventory" } },
-      { in: "query", name: "date", schema: { type: "string", format: "date" }, description: "Calendar date in Asia/Bangkok. Omit to browse all dates." },
-      { in: "query", name: "before", schema: { type: "string" }, description: "Opaque next cursor from the previous page." },
+      {
+        in: "query",
+        name: "kind",
+        schema: {
+          type: "string",
+          enum: ["inventory", "door", "sensor"],
+          default: "inventory",
+        },
+      },
+      {
+        in: "query",
+        name: "date",
+        schema: { type: "string", format: "date" },
+        description: "Calendar date in Asia/Bangkok. Omit to browse all dates.",
+      },
+      {
+        in: "query",
+        name: "before",
+        schema: { type: "string" },
+        description: "Opaque next cursor from the previous page.",
+      },
     ],
     responses: {
-      "200": response("Up to 15 activities in newest-first order", object({
-        rows: {
-          type: "array",
-          maxItems: 15,
-          items: { anyOf: [
-            { allOf: [ref("DoorEvent"), object({ id: { type: "integer" } })] },
-            { allOf: [ref("TelemetrySample"), object({ id: { type: "integer" } })] },
-            object({
-              id: { type: "integer" },
-              timestamp_s: timestamp,
-              action: { type: "string", enum: ["created", "updated", "deleted"] },
-              name_th: text,
-              name_en: text,
-              source: { enum: ["CAMERA", "WEB_MANUAL", null] },
-            }),
-          ] },
-        },
-        next: { type: ["string", "null"] },
-      })),
+      "200": response(
+        "Up to 15 activities in newest-first order",
+        object({
+          rows: {
+            type: "array",
+            maxItems: 15,
+            items: {
+              anyOf: [
+                {
+                  allOf: [
+                    ref("DoorEvent"),
+                    object({ id: { type: "integer" } }),
+                  ],
+                },
+                {
+                  allOf: [
+                    ref("TelemetrySample"),
+                    object({ id: { type: "integer" } }),
+                  ],
+                },
+                object({
+                  id: { type: "integer" },
+                  timestamp_s: timestamp,
+                  action: {
+                    type: "string",
+                    enum: ["created", "updated", "deleted"],
+                  },
+                  name_th: text,
+                  name_en: text,
+                  source: { enum: ["CAMERA", "WEB_MANUAL", null] },
+                }),
+              ],
+            },
+          },
+          next: { type: ["string", "null"] },
+        }),
+      ),
       "400": response("Invalid activity filter", ref("Error")),
     },
   },
@@ -860,7 +938,13 @@ for (const prefix of ["/api/me/line", "/api/fridges/{fridgeId}/line"]) {
     description:
       owner + "One test per minute; delivery acceptance is not guaranteed.",
     responses: {
-      "202": response("Queued", object({ queued: { const: true } })),
+      "202": response(
+        "Test request processed",
+        object({
+          queued: { type: "boolean" },
+          status: { type: "string", enum: ["queued", "accepted", "failed"] },
+        }),
+      ),
       "409": response("Connect LINE first", ref("Error")),
       "429": response("Wait before another test", ref("Error")),
     },

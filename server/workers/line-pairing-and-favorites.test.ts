@@ -565,7 +565,7 @@ describe("LINE pairing, personal preferences and favorite isolation", () => {
     ).toBeNull();
   });
 
-  it("includes account and fridge identity in LINE pairing replies and test messages", async () => {
+  it("identifies LINE scope without exposing email or internal IDs in message copy", async () => {
     const sentBodies: Array<{ url: string; body: string }> = [];
     vi.spyOn(globalThis, "fetch").mockImplementation(async (input, init) => {
       sentBodies.push({
@@ -607,11 +607,19 @@ describe("LINE pairing, personal preferences and favorite isolation", () => {
       ).status,
     ).toBe(200);
 
-    expect((await api("/me/line/test", owner.cookie, "POST")).status).toBe(202);
-    expect(
-      (await api(`/fridges/${fridgeId}/line/test`, owner.cookie, "POST"))
-        .status,
-    ).toBe(202);
+    const personalTest = await api("/me/line/test", owner.cookie, "POST");
+    const fridgeTest = await api(
+      `/fridges/${fridgeId}/line/test`,
+      owner.cookie,
+      "POST",
+    );
+    for (const response of [personalTest, fridgeTest]) {
+      expect(response.status).toBe(202);
+      expect(await response.json()).toEqual({
+        queued: false,
+        status: "accepted",
+      });
+    }
 
     const replies = sentBodies.filter((entry) => entry.url.endsWith("/reply"));
     const pushes = sentBodies.filter((entry) => entry.url.endsWith("/push"));
@@ -619,17 +627,17 @@ describe("LINE pairing, personal preferences and favorite isolation", () => {
     expect(pushes).toHaveLength(2);
 
     expect(replies[0]!.body).toContain("LINE ส่วนตัว");
-    expect(replies[0]!.body).toContain(owner.email);
+    expect(replies[0]!.body).not.toContain(owner.email);
     expect(replies[1]!.body).toContain("LINE ของตู้เย็น");
     expect(replies[1]!.body).toContain("Family kitchen");
-    expect(replies[1]!.body).toContain(fridgeId);
+    expect(replies[1]!.body).not.toContain(fridgeId);
 
     expect(pushes[0]!.body).toContain("LINE ส่วนตัว");
-    expect(pushes[0]!.body).toContain(owner.email);
-    expect(pushes[0]!.body).toContain(`Family kitchen (${fridgeId})`);
+    expect(pushes[0]!.body).not.toContain(owner.email);
+    expect(pushes[0]!.body).not.toContain(fridgeId);
 
     expect(pushes[1]!.body).toContain("LINE ของตู้เย็น");
     expect(pushes[1]!.body).toContain("Family kitchen");
-    expect(pushes[1]!.body).toContain(fridgeId);
+    expect(pushes[1]!.body).not.toContain(fridgeId);
   });
 });
