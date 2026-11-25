@@ -1,4 +1,10 @@
-import type { DoorEvent, Food, Fridge, FridgeRoomEvent, Sample } from "../../src/model";
+import type {
+  DoorEvent,
+  Food,
+  Fridge,
+  FridgeRoomEvent,
+  Sample,
+} from "../../src/model";
 import {
   deriveRecoveryActions,
   initialDashboardState,
@@ -132,18 +138,28 @@ export class SimulatedFullStackSystem {
       role: "member",
     };
     this.clients = {
-      "owner@example.com": reduceDashboardEvent(initialDashboardState(startTimeS), {
-        type: "SIGN_IN",
-        fridges: [ownerFridge],
-      }),
-      "member@example.com": reduceDashboardEvent(initialDashboardState(startTimeS), {
-        type: "SIGN_IN",
-        fridges: [memberFridge],
-      }),
+      "owner@example.com": reduceDashboardEvent(
+        initialDashboardState(startTimeS),
+        {
+          type: "SIGN_IN",
+          fridges: [ownerFridge],
+        },
+      ),
+      "member@example.com": reduceDashboardEvent(
+        initialDashboardState(startTimeS),
+        {
+          type: "SIGN_IN",
+          fridges: [memberFridge],
+        },
+      ),
     };
   }
 
-  private enqueueWs(event: FridgeRoomEvent, minDelayS = 0, maxDelayS = 45): void {
+  private enqueueWs(
+    event: FridgeRoomEvent,
+    minDelayS = 0,
+    maxDelayS = 45,
+  ): void {
     const delay = this.rng.int(minDelayS, maxDelayS);
     this.networkQueue.push({
       deliverAtS: this.nowS + delay,
@@ -190,10 +206,23 @@ export class SimulatedFullStackSystem {
 
     const offsetDays = this.rng.int(-4, 21);
     const todayIso = simBangkokIsoDate(this.nowS);
-    const targetMs = Date.parse(`${todayIso}T00:00:00Z`) + offsetDays * 86_400_000;
+    const targetMs =
+      Date.parse(`${todayIso}T00:00:00Z`) + offsetDays * 86_400_000;
     const expiry = new Date(targetMs).toISOString().slice(0, 10);
-    const name = this.rng.pick(["Fresh Milk", "Spinach", "Eggs", "Yogurt", "Salmon"]);
-    const category = this.rng.pick(["Dairy", "Produce", "Meat", "Seafood", "Other"]);
+    const name = this.rng.pick([
+      "Fresh Milk",
+      "Spinach",
+      "Eggs",
+      "Yogurt",
+      "Salmon",
+    ]);
+    const category = this.rng.pick([
+      "Dairy",
+      "Produce",
+      "Meat",
+      "Seafood",
+      "Other",
+    ]);
     if (!isCalendarIso(expiry) || !name.trim()) {
       return { ok: false, status: 400 };
     }
@@ -239,7 +268,10 @@ export class SimulatedFullStackSystem {
     return { ok: true, status: 201 };
   }
 
-  private removeFood(actorEmail: string, itemId: string): { ok: boolean; status: number } {
+  private removeFood(
+    actorEmail: string,
+    itemId: string,
+  ): { ok: boolean; status: number } {
     if (!this.members.has(actorEmail) || this.fridgeDeleted) {
       this.metrics.revokedAccessBlocked++;
       return { ok: false, status: this.fridgeDeleted ? 404 : 403 };
@@ -270,8 +302,12 @@ export class SimulatedFullStackSystem {
     const temp = this.rng.chance(0.22)
       ? 9.2 + this.rng.next() * 3
       : 3.0 + this.rng.next() * 3.5;
-    const voc = this.rng.chance(0.2) ? 280 + this.rng.int(0, 80) : this.rng.int(40, 150);
-    const light = this.rng.chance(0.15) ? this.rng.int(240, 900) : this.rng.int(5, 45);
+    const voc = this.rng.chance(0.2)
+      ? 280 + this.rng.int(0, 80)
+      : this.rng.int(40, 150);
+    const light = this.rng.chance(0.15)
+      ? this.rng.int(240, 900)
+      : this.rng.int(5, 45);
     const skew = this.rng.chance(0.1) ? 900 : -this.rng.int(0, 120);
     const ts = Math.max(0, this.nowS + skew);
 
@@ -347,9 +383,19 @@ export class SimulatedFullStackSystem {
           gatewaySeenS: this.gatewaySeenS,
           receivedS: this.nowS,
           nodes: [
-            { id: "C0", reported: true, reportedS: this.gatewaySeenS, lastKnownS: this.gatewaySeenS },
+            {
+              id: "C0",
+              reported: true,
+              reportedS: this.gatewaySeenS,
+              lastKnownS: this.gatewaySeenS,
+            },
             { id: "F0", reported: true, reportedS: f0Seen, lastKnownS: f0Seen },
-            { id: "D0", reported: true, reportedS: this.gatewaySeenS, lastKnownS: this.gatewaySeenS },
+            {
+              id: "D0",
+              reported: true,
+              reportedS: this.gatewaySeenS,
+              lastKnownS: this.gatewaySeenS,
+            },
           ],
         },
       },
@@ -365,7 +411,14 @@ export class SimulatedFullStackSystem {
           status: {
             gatewaySeenS: olderSeen,
             receivedS: this.nowS,
-            nodes: [{ id: "C0", reported: true, reportedS: olderSeen, lastKnownS: olderSeen }],
+            nodes: [
+              {
+                id: "C0",
+                reported: true,
+                reportedS: olderSeen,
+                lastKnownS: olderSeen,
+              },
+            ],
           },
         },
         10,
@@ -399,8 +452,13 @@ export class SimulatedFullStackSystem {
   }
 
   private flushDueNetwork(): void {
-    this.networkQueue.sort((a, b) => a.deliverAtS - b.deliverAtS || a.seq - b.seq);
-    while (this.networkQueue.length > 0 && this.networkQueue[0]!.deliverAtS <= this.nowS) {
+    this.networkQueue.sort(
+      (a, b) => a.deliverAtS - b.deliverAtS || a.seq - b.seq,
+    );
+    while (
+      this.networkQueue.length > 0 &&
+      this.networkQueue[0]!.deliverAtS <= this.nowS
+    ) {
       const msg = this.networkQueue.shift()!;
       if (msg.kind === "ws_event" && msg.event) {
         if (
@@ -411,7 +469,8 @@ export class SimulatedFullStackSystem {
           continue;
         }
         for (const [email, client] of Object.entries(this.clients)) {
-          if (!client.signedIn || client.room.connectionState === "closed") continue;
+          if (!client.signedIn || client.room.connectionState === "closed")
+            continue;
           const prevSeen = this.clientLastGatewaySeen[email] ?? 0;
           const next = reduceDashboardEvent(client, {
             type: "WS_EVENT",
@@ -419,7 +478,10 @@ export class SimulatedFullStackSystem {
           });
           if (msg.event.type === "status") {
             const nextSeen = next.room.heartbeat?.gatewaySeenS ?? 0;
-            if (msg.event.status.gatewaySeenS < prevSeen && nextSeen === prevSeen) {
+            if (
+              msg.event.status.gatewaySeenS < prevSeen &&
+              nextSeen === prevSeen
+            ) {
               this.metrics.staleStatusIgnored++;
             }
             this.clientLastGatewaySeen[email] = nextSeen;
@@ -432,7 +494,10 @@ export class SimulatedFullStackSystem {
 
   step(): string {
     this.metrics.stepsExecuted++;
-    const actor = this.rng.pick(["owner@example.com", "member@example.com"] as const);
+    const actor = this.rng.pick([
+      "owner@example.com",
+      "member@example.com",
+    ] as const);
     const op = this.rng.weightedPick<
       | "tick"
       | "add_food"
@@ -540,7 +605,9 @@ export class SimulatedFullStackSystem {
 
   assertInvariants(context: string): void {
     if (!this.fridgeDeleted) {
-      const owners = [...this.members.values()].filter((r) => r === "owner").length;
+      const owners = [...this.members.values()].filter(
+        (r) => r === "owner",
+      ).length;
       if (owners < 1) {
         throw new Error(`Owner count dropped to 0 [${context}]`);
       }
@@ -553,7 +620,9 @@ export class SimulatedFullStackSystem {
       if (food.photoKey) {
         const photo = this.photos.get(food.photoKey);
         if (!photo || photo.refCount < 1) {
-          throw new Error(`Missing photo ref for live food ${food.id} [${context}]`);
+          throw new Error(
+            `Missing photo ref for live food ${food.id} [${context}]`,
+          );
         }
       }
     }
@@ -581,19 +650,25 @@ export class SimulatedFullStackSystem {
       if (!client.signedIn) continue;
       if (!this.members.has(email) && client.activeFridgeId === this.fridgeId) {
         if (client.room.connectionState !== "closed") {
-          throw new Error(`Revoked member ${email} kept active room [${context}]`);
+          throw new Error(
+            `Revoked member ${email} kept active room [${context}]`,
+          );
         }
       }
       if (
         (client.room.loadError || client.room.inventory.length === 0) &&
         deriveRecoveryActions(client).length === 0
       ) {
-        throw new Error(`No recovery action available for ${email} [${context}]`);
+        throw new Error(
+          `No recovery action available for ${email} [${context}]`,
+        );
       }
     }
 
     if (this.telemetry.length > 2000) {
-      throw new Error(`Telemetry unbounded (${this.telemetry.length}) [${context}]`);
+      throw new Error(
+        `Telemetry unbounded (${this.telemetry.length}) [${context}]`,
+      );
     }
   }
 }

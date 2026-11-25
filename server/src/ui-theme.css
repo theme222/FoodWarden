@@ -1,5 +1,6 @@
 @theme inline {
-  --font-sans: "Lexend", "K2D", system-ui, -apple-system, "Segoe UI", sans-serif;
+  --font-sans:
+    "Lexend", "K2D", system-ui, -apple-system, "Segoe UI", sans-serif;
   --font-mono: ui-monospace, SFMono-Regular, Menlo, monospace;
 
   --color-background: var(--background);
@@ -48,11 +49,11 @@
   --color-chart-4: var(--lime);
   --color-chart-5: var(--dark);
 
-  --radius-sm: 14px;
-  --radius-md: 18px;
-  --radius-lg: 22px;
-  --radius-xl: 28px;
-  --radius-2xl: 32px;
+  --radius-sm: calc(var(--radius) * 0.6);
+  --radius-md: calc(var(--radius) * 0.8);
+  --radius-lg: var(--radius);
+  --radius-xl: calc(var(--radius) * 1.4);
+  --radius-2xl: calc(var(--radius) * 1.8);
 }
 
 :root {
@@ -150,7 +151,21 @@
   --border: var(--rule);
   --input: var(--surface-2);
   --ring: var(--leaf);
-  --radius: 22px;
+
+  --ui-background: var(--background);
+  --ui-foreground: var(--foreground);
+  --ui-muted: var(--muted);
+  --ui-muted-foreground: var(--muted-foreground);
+  --ui-border: var(--border);
+  --ui-input: var(--rule);
+  --ui-primary: var(--primary);
+  --ui-primary-foreground: var(--primary-foreground);
+  --ui-destructive: var(--destructive);
+  --ui-ring: var(--ring);
+  --ui-ring-border: var(--ring);
+  --ui-radius: var(--radius);
+  --ui-font-sans: var(--font-sans);
+  --radius: 0.625rem;
   --r: 22px;
   --r-sm: 14px;
 }

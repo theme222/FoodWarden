@@ -8,15 +8,19 @@ export function SignInPanel({
   signingIn,
   onGoogle,
   onDev,
+  embedded = false,
 }: {
   config: AuthConfig | null;
   language: Language;
   signingIn: boolean;
   onGoogle: () => Promise<void>;
   onDev: () => Promise<void>;
+  embedded?: boolean;
 }) {
   const th = language === "th";
   const t = words[language];
+  const HeroHeading = embedded ? "h3" : "h1";
+  const SignInHeading = embedded ? "h3" : "h2";
   if (!config?.googleEnabled && !config?.devLoginEnabled) {
     return <p className="panel">{t.setup}</p>;
   }
@@ -42,7 +46,7 @@ export function SignInPanel({
   return (
     <div className="login">
       <section className="login-hero">
-        <h1>{heroTitle}</h1>
+        <HeroHeading className="login-title">{heroTitle}</HeroHeading>
         <p className="login-lead">{t.welcome}</p>
         <ul className="login-bullets">
           {bullets.map((line) => (
@@ -52,7 +56,9 @@ export function SignInPanel({
       </section>
 
       <section className="signin-card">
-        <h2>{th ? "เข้าสู่ระบบเพื่อเริ่มต้น" : "Sign in to your fridge"}</h2>
+        <SignInHeading className="signin-title">
+          {th ? "เข้าสู่ระบบเพื่อเริ่มต้น" : "Sign in to your fridge"}
+        </SignInHeading>
         {config?.googleEnabled && (
           <button
             className="gbtn"
@@ -73,11 +79,13 @@ export function SignInPanel({
             {signingIn ? t.loading : t.devSignIn}
           </button>
         )}
-        <p className="signin-note">
-          {th
-            ? "ใช้บัญชี Google ของคุณเพื่อเข้าถึงตู้เย็นที่แชร์ร่วมกันในบ้าน"
-            : "Use your Google account to view fridges shared with your household."}
-        </p>
+        {config.googleEnabled && (
+          <p className="signin-note">
+            {th
+              ? "ใช้บัญชี Google ของคุณเพื่อเข้าถึงตู้เย็นที่แชร์ร่วมกันในบ้าน"
+              : "Use your Google account to view fridges shared with your household."}
+          </p>
+        )}
       </section>
     </div>
   );

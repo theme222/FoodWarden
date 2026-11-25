@@ -78,11 +78,16 @@ function bangkokDateIso(timeS: number): string {
 function daysLeft(expiry: string, nowS: number): number {
   if (!/^\d{4}-\d{2}-\d{2}$/.test(expiry)) return Number.NaN;
   const target = new Date(`${expiry}T00:00:00Z`);
-  if (!Number.isFinite(target.getTime()) || target.toISOString().slice(0, 10) !== expiry) {
+  if (
+    !Number.isFinite(target.getTime()) ||
+    target.toISOString().slice(0, 10) !== expiry
+  ) {
     return Number.NaN;
   }
   const today = bangkokDateIso(nowS);
-  return Math.round((target.getTime() - Date.parse(`${today}T00:00:00Z`)) / 86_400_000);
+  return Math.round(
+    (target.getTime() - Date.parse(`${today}T00:00:00Z`)) / 86_400_000,
+  );
 }
 
 export function foodStatus(
@@ -106,7 +111,9 @@ export function relativeExpiryText(
   const days = daysLeft(food.expiry, nowS);
   if (!Number.isFinite(days)) return th ? "ไม่ทราบวันหมดอายุ" : "Expiry unknown";
   if (days < -1) {
-    return th ? `หมดอายุ ${Math.abs(days)} วัน` : `Expired ${Math.abs(days)}d ago`;
+    return th
+      ? `หมดอายุ ${Math.abs(days)} วัน`
+      : `Expired ${Math.abs(days)}d ago`;
   }
   if (days === -1) return th ? "หมดอายุเมื่อวาน" : "Expired yesterday";
   if (days === 0) return th ? "หมดอายุวันนี้" : "Expires today";
@@ -427,7 +434,11 @@ export function deriveKpiSummary(
     },
     {
       id: "door",
-      tone: doorProblem ? "bad" : latestDoor || light !== null ? "mint" : "idle",
+      tone: doorProblem
+        ? "bad"
+        : latestDoor || light !== null
+          ? "mint"
+          : "idle",
       reading: doorProblem
         ? th
           ? "ติดขัด"
@@ -472,10 +483,16 @@ export function piecewiseNormalizedY(
   bottom: number,
 ): number {
   const safeTop = Number.isFinite(top) ? top : 0;
-  const safeBottom = Number.isFinite(bottom) && bottom > safeTop ? bottom : safeTop + 100;
+  const safeBottom =
+    Number.isFinite(bottom) && bottom > safeTop ? bottom : safeTop + 100;
   const ih = safeBottom - safeTop;
   const yl = safeBottom - 0.7 * ih;
-  if (!Number.isFinite(value) || value <= 0 || !Number.isFinite(limit) || limit <= 0) {
+  if (
+    !Number.isFinite(value) ||
+    value <= 0 ||
+    !Number.isFinite(limit) ||
+    limit <= 0
+  ) {
     return safeBottom;
   }
   if (value <= limit) {
@@ -704,13 +721,7 @@ export function computeSetupProgress(input: {
 }
 
 export type AppRoute =
-  | "login"
-  | "hub"
-  | "food"
-  | "charts"
-  | "devices"
-  | "me"
-  | "settings";
+  "login" | "hub" | "food" | "charts" | "devices" | "me" | "settings";
 
 export interface DashboardMachineState {
   nowS: number;
@@ -780,7 +791,11 @@ export type DashboardEvent =
   | { type: "TOGGLE_SELECTING"; enabled?: boolean }
   | { type: "TOGGLE_SELECT_GROUP"; itemIds: string[] }
   | { type: "SELECT_ALL_VISIBLE"; itemIds: string[] }
-  | { type: "BULK_MUTATION_RESULT"; succeededIds: string[]; failedIds: string[] }
+  | {
+      type: "BULK_MUTATION_RESULT";
+      succeededIds: string[];
+      failedIds: string[];
+    }
   | { type: "ADD_FOOD_ITEM"; item: Food }
   | { type: "TAKE_OUT_ITEM"; itemId: string }
   | { type: "UNDO_TAKE_OUT" }
@@ -964,7 +979,9 @@ export function reduceDashboardEvent(
       if (ev.type === "status") {
         const prev = state.room.heartbeat;
         const nextHeartbeat =
-          prev && prev.gatewaySeenS >= ev.status.gatewaySeenS ? prev : ev.status;
+          prev && prev.gatewaySeenS >= ev.status.gatewaySeenS
+            ? prev
+            : ev.status;
         return {
           ...state,
           room: { ...state.room, heartbeat: nextHeartbeat },
@@ -1034,8 +1051,7 @@ export function reduceDashboardEvent(
         },
       };
     case "TOGGLE_SELECTING": {
-      const nextSelecting =
-        event.enabled ?? !state.inventoryUi.selecting;
+      const nextSelecting = event.enabled ?? !state.inventoryUi.selecting;
       return {
         ...state,
         inventoryUi: {
@@ -1148,7 +1164,11 @@ export function reduceDashboardEvent(
       const undoExpired =
         state.inventoryUi.undoExpiresAtS !== null &&
         nextNow > state.inventoryUi.undoExpiresAtS;
-      const prunedHistory = mergeTelemetrySamples(state.room.history, [], nextNow);
+      const prunedHistory = mergeTelemetrySamples(
+        state.room.history,
+        [],
+        nextNow,
+      );
       const nextState: DashboardMachineState = {
         ...state,
         nowS: nextNow,
@@ -1162,7 +1182,10 @@ export function reduceDashboardEvent(
         ...nextState,
         chartsUi: {
           ...nextState.chartsUi,
-          scrubberIndex: clampScrubberIndex(nextState.chartsUi.scrubberIndex, len),
+          scrubberIndex: clampScrubberIndex(
+            nextState.chartsUi.scrubberIndex,
+            len,
+          ),
         },
       };
     }

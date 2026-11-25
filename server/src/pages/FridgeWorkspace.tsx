@@ -5,13 +5,14 @@ import {
   Settings2,
   RotateCcw,
   ArrowLeft,
-  History,
 } from "lucide-react";
-import { lazy, Suspense, useCallback } from "react";
+import { lazy, Suspense, useCallback, useRef, useState } from "react";
+import type { PointerEvent } from "react";
 import {
   Link,
   Navigate,
   NavLink,
+  Outlet,
   Route,
   Routes,
   useLocation,
@@ -19,6 +20,7 @@ import {
   useParams,
 } from "react-router-dom";
 import { StatusAlert } from "../components/status-alert";
+import { buttonVariants } from "../components/ui/button-variants";
 import { useFridgeRoom } from "../data";
 import type { FridgeRoomState, SocketConnectionState } from "../data";
 import { Devices } from "../Devices";
@@ -81,18 +83,11 @@ function buildNavItems(
       fullLabel: t.food,
     },
     {
-      to: base + "/charts",
+      to: base + "/monitoring",
       end: false,
       icon: ChartNoAxesCombined,
-      label: th ? "กราฟ" : "Charts",
-      fullLabel: th ? "กราฟ" : "Charts",
-    },
-    {
-      to: base + "/history",
-      end: false,
-      icon: History,
-      label: th ? "ประวัติ" : "History",
-      fullLabel: th ? "ประวัติ" : "History",
+      label: th ? "ติดตาม" : "Monitor",
+      fullLabel: th ? "ติดตาม" : "Monitor",
     },
     {
       to: base + "/devices",
@@ -144,7 +139,9 @@ function FridgeNavBar({
             aria-label={t.fridgeName}
             value={fridge.id}
             onChange={(event) =>
-              void navigate(`/fridges/${encodeURIComponent(event.target.value)}`)
+              void navigate(
+                `/fridges/${encodeURIComponent(event.target.value)}`,
+              )
             }
           >
             {fridges.map((entry) => (
@@ -181,21 +178,164 @@ function FridgeBottomNav({
   fridgeName: string;
   navItems: WorkspaceNavItem[];
 }) {
+  const navigate = useNavigate();
+  const gesture = useRef<{
+    pointerId: number;
+    x: number;
+    y: number;
+    dragging: boolean;
+  } | null>(null);
+  const [preview, setPreview] = useState<string | null>(null);
+
+  function targetAt(event: PointerEvent<HTMLElement>) {
+    const link = document
+      .elementFromPoint(event.clientX, event.clientY)
+      ?.closest<HTMLAnchorElement>("a[data-nav-target]");
+    return link && event.currentTarget.contains(link)
+      ? link.dataset.navTarget
+      : undefined;
+  }
+
+  function startGesture(event: PointerEvent<HTMLElement>) {
+    if (
+      !event.isPrimary ||
+      event.button !== 0 ||
+      event.ctrlKey ||
+      event.metaKey ||
+      event.shiftKey ||
+      event.altKey
+    )
+      return;
+    gesture.current = {
+      pointerId: event.pointerId,
+      x: event.clientX,
+      y: event.clientY,
+      dragging: false,
+    };
+  }
+
+  function moveGesture(event: PointerEvent<HTMLElement>) {
+    const current = gesture.current;
+    if (!current || current.pointerId !== event.pointerId) return;
+    if (!current.dragging) {
+      const horizontal = Math.abs(event.clientX - current.x);
+      const vertical = Math.abs(event.clientY - current.y);
+      if (vertical > 8 && vertical >= horizontal) {
+        gesture.current = null;
+        return;
+      }
+      if (horizontal <= 8) return;
+      current.dragging = true;
+      event.currentTarget.setPointerCapture(event.pointerId);
+    }
+    setPreview(targetAt(event) ?? null);
+  }
+
+  function clearGesture(event: PointerEvent<HTMLElement>) {
+    if (gesture.current?.pointerId !== event.pointerId) return;
+    gesture.current = null;
+    setPreview(null);
+  }
+
+  function finishGesture(event: PointerEvent<HTMLElement>) {
+    if (gesture.current?.pointerId !== event.pointerId) return;
+    const destination = gesture.current.dragging ? targetAt(event) : undefined;
+    clearGesture(event);
+    if (destination) void navigate(destination);
+  }
+
   return (
-    <nav className="bnav" aria-label={fridgeName}>
+    <nav
+      className="bnav"
+      aria-label={fridgeName}
+      data-previewing={preview !== null ? "" : undefined}
+      onPointerDown={startGesture}
+      onPointerMove={moveGesture}
+      onPointerUp={finishGesture}
+      onPointerCancel={clearGesture}
+      onLostPointerCapture={(event) => {
+        if (event.target === event.currentTarget) clearGesture(event);
+      }}
+      onPointerLeave={(event) => {
+        if (!gesture.current?.dragging) clearGesture(event);
+      }}
+    >
       {navItems.map((item) => {
         const Icon = item.icon;
         return (
-          <NavLink key={item.to} to={item.to} end={item.end}>
+          <NavLink
+            key={item.to}
+            to={item.to}
+            end={item.end}
+            aria-label={item.label}
+            data-nav-target={item.to}
+            data-preview={preview === item.to ? "" : undefined}
+            draggable={false}
+          >
             <span className="bnav-ic">
               <Icon size={20} aria-hidden="true" />
             </span>
-            <span>{item.label}</span>
+            <span className="bnav-label" aria-hidden="true">
+              {item.label}
+            </span>
           </NavLink>
         );
       })}
     </nav>
   );
+}
+
+function MonitoringLayout({
+  base,
+  language,
+}: {
+  base: string;
+  language: Language;
+}) {
+  const th = language === "th";
+  const monitoring = base + "/monitoring";
+  const { search } = useLocation();
+  return (
+    <>
+      <nav
+        className="flex w-fit max-w-full flex-wrap gap-1 rounded-lg border border-border bg-card p-1"
+        aria-label={th ? "หน้าติดตามตู้เย็น" : "Monitoring views"}
+      >
+        <NavLink
+          to={{ pathname: monitoring, search }}
+          end
+          className={({ isActive }) =>
+            buttonVariants({
+              variant: isActive ? "secondary" : "ghost",
+              className: "min-w-20 no-underline pointer-coarse:min-h-11",
+            })
+          }
+        >
+          {th ? "กราฟ" : "Charts"}
+        </NavLink>
+        <NavLink
+          to={{ pathname: monitoring + "/history", search }}
+          end
+          className={({ isActive }) =>
+            buttonVariants({
+              variant: isActive ? "secondary" : "ghost",
+              className: "min-w-20 no-underline pointer-coarse:min-h-11",
+            })
+          }
+        >
+          {th ? "ประวัติ" : "History"}
+        </NavLink>
+      </nav>
+      <Suspense fallback={<output>{words[language].loading}</output>}>
+        <Outlet />
+      </Suspense>
+    </>
+  );
+}
+
+function MonitoringRedirect({ to }: { to: string }) {
+  const { search, hash } = useLocation();
+  return <Navigate to={{ pathname: to, search, hash }} replace />;
 }
 
 function FridgeWorkspaceRoutes({
@@ -221,24 +361,31 @@ function FridgeWorkspaceRoutes({
         element={<Dashboard fridge={fridge} room={room} language={language} />}
       />
       <Route
-        path="charts"
-        element={
-          <Suspense fallback={<output>{t.loading}</output>}>
+        path="monitoring"
+        element={<MonitoringLayout base={base} language={language} />}
+      >
+        <Route
+          index
+          element={
             <Charts
               language={language}
               fridgeId={fridge.id}
               latest={room.latest}
             />
-          </Suspense>
-        }
+          }
+        />
+        <Route
+          path="history"
+          element={<Activity fridgeId={fridge.id} language={language} />}
+        />
+      </Route>
+      <Route
+        path="charts"
+        element={<MonitoringRedirect to={base + "/monitoring"} />}
       />
       <Route
         path="history"
-        element={
-          <Suspense fallback={<output>{t.loading}</output>}>
-            <Activity fridgeId={fridge.id} language={language} />
-          </Suspense>
-        }
+        element={<MonitoringRedirect to={base + "/monitoring/history"} />}
       />
       <Route
         path="devices"
@@ -247,7 +394,10 @@ function FridgeWorkspaceRoutes({
             fridgeId={fridge.id}
             heartbeat={room.heartbeat}
             doorEvents={room.doorEvents}
-            error={room.error}
+            error={room.errors.status}
+            onRetryStatus={room.reloadStatus}
+            doorError={room.errors.doors}
+            onRetryDoors={room.reloadDoors}
             language={language}
           />
         }
@@ -337,7 +487,8 @@ function FridgeWorkspace({
 
   const navItems = buildNavItems(fridge, base, language);
   const needsReconnect =
-    room.connectionState === "reconnecting" || room.connectionState === "closed";
+    room.connectionState === "reconnecting" ||
+    room.connectionState === "closed";
 
   return (
     <>

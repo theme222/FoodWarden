@@ -49,7 +49,7 @@ function AlertDialogContent({
         data-slot="alert-dialog-content"
         data-size={size}
         className={cn(
-          "app-sheet group/alert-dialog-content fixed top-1/2 left-1/2 z-50 grid w-[calc(100%-2rem)] max-w-[460px] gap-[18px] rounded-[28px] border-0 bg-card p-6 text-base text-card-foreground shadow-none ring-0 duration-150 outline-none data-closed:animate-out data-closed:fade-out-0 data-open:animate-in data-open:fade-in-0",
+          "app-sheet group/alert-dialog-content fixed top-1/2 left-1/2 z-50 grid w-[calc(100%-2rem)] max-w-[460px] gap-[18px] rounded-lg border-0 bg-card p-6 text-base text-card-foreground shadow-none ring-0 duration-150 outline-none data-closed:animate-out data-closed:fade-out-0 data-open:animate-in data-open:fade-in-0",
           className,
         )}
         {...props}
@@ -113,7 +113,10 @@ function AlertDialogTitle({
   return (
     <AlertDialogPrimitive.Title
       data-slot="alert-dialog-title"
-      className={cn("text-[1.35rem] leading-[1.2] font-bold text-foreground", className)}
+      className={cn(
+        "text-[1.35rem] leading-[1.2] font-bold text-foreground",
+        className,
+      )}
       {...props}
     />
   );

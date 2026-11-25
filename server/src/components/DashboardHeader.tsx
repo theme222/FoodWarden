@@ -7,12 +7,22 @@ import { FridgeLogo } from "../icons";
 import type { Language } from "../model";
 import { words } from "../words";
 
-function ToolbarHint({ label, control }: { label: string; control: ReactElement }) {
+function ToolbarHint({
+  label,
+  control,
+}: {
+  label: string;
+  control: ReactElement;
+}) {
   return (
     <Tooltip.Root>
       <Tooltip.Trigger render={control} aria-label={label} />
       <Tooltip.Portal>
-        <Tooltip.Positioner side="bottom" sideOffset={5} className="toolbar-hint-position">
+        <Tooltip.Positioner
+          side="bottom"
+          sideOffset={5}
+          className="toolbar-hint-position"
+        >
           <Tooltip.Popup className="toolbar-hint">{label}</Tooltip.Popup>
         </Tooltip.Positioner>
       </Tooltip.Portal>
@@ -51,7 +61,11 @@ export function DashboardHeader({
             <ToolbarHint
               label={th ? "เปลี่ยนเป็นภาษาอังกฤษ" : "Switch to Thai"}
               control={
-                <button className="toolbar-icon" type="button" onClick={onLanguageChange}>
+                <button
+                  className="toolbar-icon"
+                  type="button"
+                  onClick={onLanguageChange}
+                >
                   <Languages size={21} aria-hidden="true" />
                 </button>
               }
@@ -59,17 +73,27 @@ export function DashboardHeader({
             {user && (
               <>
                 <ToolbarHint
-                  label={th ? "บัญชีและการแจ้งเตือนของฉัน" : "My account and notifications"}
+                  label={
+                    th
+                      ? "บัญชีและการแจ้งเตือนของฉัน"
+                      : "My account and notifications"
+                  }
                   control={
                     <Link className="toolbar-icon toolbar-account" to="/me">
-                      <span className="user-avatar" aria-hidden="true">{initial}</span>
+                      <span className="user-avatar" aria-hidden="true">
+                        {initial}
+                      </span>
                     </Link>
                   }
                 />
                 <ToolbarHint
                   label={t.signOut}
                   control={
-                    <button className="toolbar-icon" type="button" onClick={() => void onSignOut()}>
+                    <button
+                      className="toolbar-icon"
+                      type="button"
+                      onClick={() => void onSignOut()}
+                    >
                       <LogOut size={21} aria-hidden="true" />
                     </button>
                   }

@@ -3,7 +3,7 @@ import { cva, type VariantProps } from "class-variance-authority";
 import { cn } from "@/lib/utils";
 
 const alertVariants = cva(
-  "relative flex w-full flex-wrap items-center justify-between gap-3 rounded-[22px] border px-[18px] py-3.5 text-base shadow-none [&_svg]:size-5 [&_svg]:shrink-0",
+  "relative flex w-full flex-wrap items-center justify-between gap-3 rounded-lg border px-[18px] py-3.5 text-base shadow-none [&_svg]:size-5 [&_svg]:shrink-0",
   {
     variants: {
       variant: {
@@ -13,7 +13,7 @@ const alertVariants = cva(
         warning:
           "border-[var(--soon-border)] bg-[var(--soon-surface)] text-[var(--soon-ink)] [&_svg]:text-[var(--soon)]",
         success:
-          "border-[var(--fresh-border)] bg-[var(--fresh-surface)] text-[var(--fresh-ink)] font-semibold [&_svg]:text-[var(--fresh)]",
+          "border-[var(--fresh-border)] bg-[var(--fresh-surface)] font-semibold text-[var(--fresh-ink)] [&_svg]:text-[var(--fresh)]",
         soft: "border-[var(--rule)] bg-[var(--lime-soft)] text-[var(--lime-ink)]",
       },
     },
@@ -56,7 +56,10 @@ function AlertDescription({
   return (
     <div
       data-slot="alert-description"
-      className={cn("min-w-0 flex-1 text-[0.96rem] leading-snug font-medium", className)}
+      className={cn(
+        "min-w-0 flex-1 text-[0.96rem] leading-snug font-medium",
+        className,
+      )}
       {...props}
     />
   );

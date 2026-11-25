@@ -317,9 +317,7 @@ function ChartFilterControls({
       </fieldset>
       <div className="chart-period">
         <div className="chart-period-label">
-          <label htmlFor="chart-period">
-            {th ? "ช่วงเวลา" : "Time range"}
-          </label>
+          <label htmlFor="chart-period">{th ? "ช่วงเวลา" : "Time range"}</label>
           <strong>{th ? period[1] : period[2]}</strong>
         </div>
         <input
@@ -341,13 +339,14 @@ function ChartFilterControls({
           ))}
         </div>
       </div>
-      {nodes.length > 1 && (
+      {nodes.length > 0 && (
         <label>
           {th ? "เซนเซอร์" : "Sensor"}
           <select
-            value={activeNode}
+            value={activeNode ?? ""}
             onChange={(event) => onChangeNode(event.target.value)}
           >
+            <option value="">{th ? "อัตโนมัติ" : "Automatic"}</option>
             {nodes.map((id) => (
               <option key={id} value={id}>
                 {id}
@@ -463,9 +462,7 @@ function ChartResultsView({
     if (hasError || isLoading) return null;
     return (
       <p className="empty-state">
-        {th
-          ? "ยังไม่มีค่าจากเซนเซอร์ในช่วงนี้"
-          : "No sensor readings in this period."}
+        {th ? "ยังไม่มีค่าจากเซนเซอร์ในช่วงนี้" : "No sensor readings in this period."}
       </p>
     );
   }
@@ -500,8 +497,26 @@ function ChartContents({
   const now = useNow();
   const [metrics, setMetrics] = useState<SeriesKey[]>([initialMetric]);
   const series = CHART_SERIES.filter(({ key }) => metrics.includes(key));
-  const [range, setRange] = useState<ChartRange>("24h");
-  const [node, setNode] = useState("");
+  const [params, setParams] = useSearchParams();
+  const range: ChartRange =
+    periods.find(([key]) => key === params.get("range"))?.[0] ?? "24h";
+  const requestedNode = params.get("node") ?? "";
+  const node =
+    requestedNode.length <= 128 && !/[\p{Cc}]/u.test(requestedNode)
+      ? requestedNode
+      : "";
+  function setChartFilter(key: "range" | "node", value: string) {
+    setParams(
+      (previous) => {
+        const next = new URLSearchParams(previous);
+        if (value) next.set(key, value);
+        else next.delete(key);
+        return next;
+      },
+      { replace: true },
+    );
+    setSelectedTime(null);
+  }
   const [selectedTime, setSelectedTime] = useState<number | null>(null);
   const base = "/api/fridges/" + encodeURIComponent(fridgeId);
   const state = useSWR(
@@ -513,10 +528,15 @@ function ChartContents({
     },
   );
   const allPoints = useMemo(
-    () => mergeTelemetryWithLatest(state.data ?? [], latest, now - ranges[range]),
+    () =>
+      mergeTelemetryWithLatest(state.data ?? [], latest, now - ranges[range]),
     [state.data, latest, range, now],
   );
-  const nodes = [...new Set(allPoints.map((point) => point.nodeId))].sort();
+  const nodes = [
+    ...new Set(
+      allPoints.map((point) => point.nodeId).concat(node ? [node] : []),
+    ),
+  ].sort();
   const activeNode =
     [node, latest?.nodeId].find(
       (id): id is string => id !== undefined && nodes.includes(id),
@@ -533,7 +553,16 @@ function ChartContents({
         <h1>{th ? "กราฟเซนเซอร์" : "Sensor charts"}</h1>
         <Link
           className="btn sm"
-          to={"/fridges/" + encodeURIComponent(fridgeId) + "/history?kind=door"}
+          to={{
+            pathname:
+              "/fridges/" +
+              encodeURIComponent(fridgeId) +
+              "/monitoring/history",
+            search: new URLSearchParams({
+              ...Object.fromEntries(params),
+              kind: "door",
+            }).toString(),
+          }}
         >
           {th ? "ประวัติประตู" : "Door history"}
         </Link>
@@ -546,14 +575,12 @@ function ChartContents({
         }
         range={range}
         onChangeRange={(nextRange) => {
-          setRange(nextRange);
-          setSelectedTime(null);
+          setChartFilter("range", nextRange);
         }}
         nodes={nodes}
         activeNode={activeNode}
         onChangeNode={(nextNode) => {
-          setNode(nextNode);
-          setSelectedTime(null);
+          setChartFilter("node", nextNode);
         }}
       />
       {state.error && (

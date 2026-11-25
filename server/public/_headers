@@ -1,0 +1,18 @@
+/*
+  Content-Security-Policy: default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; connect-src 'self' ws://localhost:* ws://127.0.0.1:*; object-src 'none'; base-uri 'none'; frame-ancestors 'none'; form-action 'self'
+  Strict-Transport-Security: max-age=31536000
+  X-Content-Type-Options: nosniff
+  X-Frame-Options: DENY
+  Referrer-Policy: strict-origin-when-cross-origin
+
+/fridges
+  X-Robots-Tag: noindex
+
+/fridges/*
+  X-Robots-Tag: noindex
+
+/me
+  X-Robots-Tag: noindex
+
+/components
+  X-Robots-Tag: noindex

@@ -1,15 +1,11 @@
+import { Collapsible } from "@base-ui/react/collapsible";
 import { Link } from "react-router-dom";
-import {
-  AlertTriangle,
-  Check,
-  ChevronDown,
-  ChevronRight,
-  HelpCircle,
-  X,
-} from "lucide-react";
+import { AlertTriangle, Check, ChevronDown, HelpCircle, X } from "lucide-react";
 import { useState } from "react";
 import { ReadingTime } from "./components/reading-time";
+import { DeviceUptime } from "./components/device-uptime";
 import { StatusAlert } from "./components/status-alert";
+import { Badge } from "./components/ui/badge";
 import { useNow } from "./data";
 import { localTimestamp } from "./model";
 import type { DoorEvent, Heartbeat, Language } from "./model";
@@ -17,7 +13,10 @@ import {
   deviceHelpTip,
   summarizeDeviceHealth,
 } from "./state/dashboard-machine";
-import type { DeviceHealthSummary, DeviceHealthTier } from "./state/dashboard-machine";
+import type {
+  DeviceHealthSummary,
+  DeviceHealthTier,
+} from "./state/dashboard-machine";
 import { words } from "./words";
 
 function tierColor(tier: DeviceHealthTier): string {
@@ -102,7 +101,14 @@ function FridgeSchematic({
 
         {/* C0 Camera Gateway on top */}
         <g aria-hidden="true">
-          <rect x="142" y="22" width="46" height="24" rx="8" fill="var(--dark)" />
+          <rect
+            x="142"
+            y="22"
+            width="46"
+            height="24"
+            rx="8"
+            fill="var(--dark)"
+          />
           <circle
             cx="165"
             cy="34"
@@ -173,7 +179,14 @@ function FridgeSchematic({
 
         {/* D0 Door closer arm on right */}
         <g aria-hidden="true">
-          <rect x="240" y="96" width="22" height="32" rx="7" fill="var(--dark)" />
+          <rect
+            x="240"
+            y="96"
+            width="22"
+            height="32"
+            rx="7"
+            fill="var(--dark)"
+          />
           <circle
             cx="251"
             cy="112"
@@ -189,7 +202,13 @@ function FridgeSchematic({
             strokeDasharray="3 4"
             strokeWidth="2"
           />
-          <text x="284" y="108" fontSize="12" fontWeight="700" fill="var(--ink)">
+          <text
+            x="284"
+            y="108"
+            fontSize="12"
+            fontWeight="700"
+            fill="var(--ink)"
+          >
             D0
           </text>
           <text
@@ -222,17 +241,20 @@ function FridgeSchematic({
   );
 }
 
+const deviceBadgeVariants = {
+  ok: "fresh",
+  late: "soon",
+  off: "expired",
+  unknown: "neutral",
+} as const;
+
 function DeviceRow({
   entry,
-  heartbeat,
-  now,
   language,
   expanded,
   onToggle,
 }: {
   entry: DeviceHealthSummary["nodes"][number];
-  heartbeat: Heartbeat | null;
-  now: number;
   language: Language;
   expanded: boolean;
   onToggle: () => void;
@@ -243,17 +265,16 @@ function DeviceRow({
   const title = nodeTitle(node.id, language);
 
   return (
-    <article
+    <Collapsible.Root
       id={`dev-${node.id}`}
-      className={`dev${tier === "late" ? " st-late" : tier === "off" ? " st-off" : ""}`}
+      open={expanded}
+      onOpenChange={onToggle}
     >
-      <button
-        type="button"
-        className="dev-row"
-        aria-expanded={expanded}
-        onClick={onToggle}
-      >
-        <span className={`dev-mk ${tier}`} aria-hidden="true">
+      <Collapsible.Trigger className="group/device grid min-h-14 w-full cursor-pointer grid-cols-[auto_minmax(0,1fr)_auto] items-center gap-x-2 gap-y-1 rounded-md px-3 py-2 text-start text-foreground outline-none focus-visible:outline-2 focus-visible:-outline-offset-3 focus-visible:outline-ring aria-[expanded=false]:hover:bg-secondary sm:gap-x-3 @sm:grid-cols-[auto_minmax(0,1fr)_auto_auto]">
+        <span
+          className="row-span-2 grid size-8 shrink-0 place-items-center rounded-md bg-secondary text-muted-foreground @sm:row-span-1"
+          aria-hidden="true"
+        >
           {tier === "ok" ? (
             <Check size={18} />
           ) : tier === "late" ? (
@@ -264,27 +285,36 @@ function DeviceRow({
             <HelpCircle size={18} />
           )}
         </span>
-        <div className="min-w-0 flex-1">
-          <div className="flex flex-wrap items-center gap-2">
-            <strong>{title}</strong>
-            <span className="tn-id">{node.id}</span>
-          </div>
-          <p className="small">{t[state]}</p>
-        </div>
-        <span className={`pill ${tier}`}>{tierBadge(tier, language)}</span>
-        {expanded ? (
-          <ChevronDown size={18} aria-hidden="true" />
-        ) : (
-          <ChevronRight size={18} aria-hidden="true" />
-        )}
-      </button>
+        <span className="min-w-0">
+          <span className="block wrap-anywhere">
+            <strong className="font-semibold">{title}</strong>{" "}
+            <span className="text-sm text-muted-foreground tabular-nums">
+              {node.id}
+            </span>
+          </span>
+          <span className="block text-sm text-muted-foreground">
+            {t[state]}
+          </span>
+        </span>
+        <Badge
+          variant={deviceBadgeVariants[tier]}
+          className="col-start-2 row-start-2 px-2 @sm:col-start-3 @sm:row-start-1"
+        >
+          {tierBadge(tier, language)}
+        </Badge>
+        <ChevronDown
+          size={16}
+          aria-hidden="true"
+          className="col-start-3 row-span-2 row-start-1 text-muted-foreground group-aria-expanded/device:rotate-180 @sm:col-start-4 @sm:row-span-1"
+        />
+      </Collapsible.Trigger>
 
-      {expanded && (
-        <div className="dev-body">
-          {helpTip && <div className="help">{helpTip}</div>}
-          <dl className="kv">
-            <dt className="small">{t.lastActive}</dt>
-            <dd className="num">
+      <Collapsible.Panel className="px-3 pb-3">
+        <div className="grid gap-2 border-t border-border px-1 pt-3 text-sm">
+          {helpTip && <p>{helpTip}</p>}
+          <dl className="grid grid-cols-[minmax(0,1fr)_minmax(0,2fr)] items-baseline gap-x-3 gap-y-1 tabular-nums sm:grid-cols-[auto_1fr]">
+            <dt className="text-muted-foreground">{t.lastActive}</dt>
+            <dd className="m-0 wrap-anywhere">
               {node.lastKnownS === null ? (
                 t.unknown
               ) : (
@@ -295,26 +325,20 @@ function DeviceRow({
             </dd>
             {node.reportedS !== null && node.reportedS !== node.lastKnownS && (
               <>
-                <dt className="small">{t.reportedTime}</dt>
-                <dd className="num">
-                  <time dateTime={new Date(node.reportedS * 1000).toISOString()}>
+                <dt className="text-muted-foreground">{t.reportedTime}</dt>
+                <dd className="m-0 wrap-anywhere">
+                  <time
+                    dateTime={new Date(node.reportedS * 1000).toISOString()}
+                  >
                     {localTimestamp(node.reportedS, language)}
                   </time>
                 </dd>
               </>
             )}
-            {heartbeat && (
-              <>
-                <dt className="small">{t.lastReport}</dt>
-                <dd className="num">
-                  <ReadingTime timeS={heartbeat.receivedS} now={now} language={language} />
-                </dd>
-              </>
-            )}
           </dl>
         </div>
-      )}
-    </article>
+      </Collapsible.Panel>
+    </Collapsible.Root>
   );
 }
 
@@ -360,30 +384,54 @@ function DoorEventsSection({
   fridgeId,
   doorEvents,
   language,
+  headingLevel,
+  error,
+  onRetry,
 }: {
   fridgeId?: string;
+  error?: boolean;
+  onRetry?: () => void;
   doorEvents: DoorEvent[] | null;
   language: Language;
+  headingLevel: 2 | 4;
 }) {
   const th = language === "th";
   const t = words[language];
+  const Heading = headingLevel === 4 ? "h4" : "h2";
   return (
     <section className="panel flex flex-col gap-3" aria-labelledby="door-title">
       <div className="page-head">
-        <h2 id="door-title">{t.doorEvents}</h2>
+        <Heading id="door-title">{t.doorEvents}</Heading>
         {fridgeId && (
           <Link
             className="btn sm"
             to={
-              "/fridges/" + encodeURIComponent(fridgeId) + "/history?kind=door"
+              "/fridges/" +
+              encodeURIComponent(fridgeId) +
+              "/monitoring/history?kind=door"
             }
           >
             {th ? "ดูประวัติ" : "View history"}
           </Link>
         )}
       </div>
+      {error && (
+        <StatusAlert
+          action={
+            onRetry && (
+              <button type="button" className="btn sm" onClick={onRetry}>
+                {th ? "ลองใหม่" : "Retry"}
+              </button>
+            )
+          }
+        >
+          {th ? "อัปเดตประวัติประตูไม่ได้" : "Could not refresh door history"}
+        </StatusAlert>
+      )}
       {!doorEvents ? (
-        <output className="sub">{t.loading}</output>
+        error ? null : (
+          <output className="sub">{t.loading}</output>
+        )
       ) : doorEvents.length === 0 ? (
         <p className="sub">{t.emptyDoorEvents}</p>
       ) : (
@@ -420,33 +468,39 @@ export function Devices({
   heartbeat,
   doorEvents,
   error,
+  onRetryStatus,
+  doorError,
+  onRetryDoors,
   language,
+  headingLevel = 1,
 }: {
   fridgeId?: string;
   heartbeat: Heartbeat | null | undefined;
   doorEvents: DoorEvent[] | null;
   error: boolean;
+  onRetryStatus?: () => void;
+  doorError?: boolean;
+  onRetryDoors?: () => void;
   language: Language;
+  headingLevel?: 1 | 3;
 }) {
   const now = useNow();
   const t = words[language];
   const resolvedHeartbeat = heartbeat ?? null;
   const summary = summarizeDeviceHealth(resolvedHeartbeat, now);
-  const [expandedId, setExpandedId] = useState<string | null>(
-    () => summary.firstDegradedId,
-  );
-
-  if (error) return <StatusAlert>{t.failed}</StatusAlert>;
-  if (heartbeat === undefined) return <output className="sub">{t.loading}</output>;
+  const [expandedId, setExpandedId] = useState<string | null>();
+  const Heading = headingLevel === 3 ? "h3" : "h1";
 
   const activeExpanded =
-    expandedId ?? summary.firstDegradedId ?? summary.nodes[0]?.node.id ?? null;
+    expandedId === undefined
+      ? (summary.firstDegradedId ?? summary.nodes[0]?.node.id ?? null)
+      : expandedId;
 
   return (
     <section className="flex flex-col gap-4" aria-labelledby="device-title">
       <div className="page-head">
         <div className="page-head-copy">
-          <h1 id="device-title">{t.devices}</h1>
+          <Heading id="device-title">{t.devices}</Heading>
           <p className="sub">{t.deviceIntro}</p>
         </div>
         {resolvedHeartbeat && (
@@ -461,37 +515,70 @@ export function Devices({
         )}
       </div>
 
-      <DevicesStatusBanner summary={summary} language={language} />
+      {error && (
+        <StatusAlert
+          action={
+            onRetryStatus && (
+              <button type="button" className="btn sm" onClick={onRetryStatus}>
+                {language === "th" ? "ลองใหม่" : "Retry"}
+              </button>
+            )
+          }
+        >
+          {language === "th"
+            ? "อัปเดตสถานะอุปกรณ์ไม่ได้"
+            : "Could not refresh device status"}
+        </StatusAlert>
+      )}
+      {heartbeat === undefined && !error && (
+        <output className="sub">{t.loading}</output>
+      )}
+      {heartbeat !== undefined && (!error || heartbeat !== null) && (
+        <>
+          <DevicesStatusBanner summary={summary} language={language} />
 
-      <FridgeSchematic
-        summary={summary}
-        selectedId={activeExpanded}
-        onSelect={(id) => setExpandedId((prev) => (prev === id ? null : id))}
-        language={language}
-      />
+          <div className="@container divide-y divide-border overflow-hidden rounded-lg border border-border bg-card">
+            {summary.nodes.map((entry) => (
+              <DeviceRow
+                key={entry.node.id}
+                entry={entry}
+                language={language}
+                expanded={activeExpanded === entry.node.id}
+                onToggle={() =>
+                  setExpandedId(
+                    activeExpanded === entry.node.id ? null : entry.node.id,
+                  )
+                }
+              />
+            ))}
+          </div>
+          <details className="rounded-lg border border-border bg-card p-3">
+            <summary className="w-fit cursor-pointer">
+              {language === "th" ? "ดูผังตำแหน่งอุปกรณ์" : "View device placement"}
+            </summary>
+            <FridgeSchematic
+              summary={summary}
+              selectedId={activeExpanded}
+              onSelect={(id) =>
+                setExpandedId((prev) => (prev === id ? null : id))
+              }
+              language={language}
+            />
+          </details>
+        </>
+      )}
 
-      <div className="devs">
-        {summary.nodes.map((entry) => (
-          <DeviceRow
-            key={entry.node.id}
-            entry={entry}
-            heartbeat={resolvedHeartbeat}
-            now={now}
-            language={language}
-            expanded={activeExpanded === entry.node.id}
-            onToggle={() =>
-              setExpandedId((prev) =>
-                prev === entry.node.id ? null : entry.node.id,
-              )
-            }
-          />
-        ))}
-      </div>
+      {fridgeId && fridgeId !== "demo" && (
+        <DeviceUptime fridgeId={fridgeId} language={language} />
+      )}
 
       <DoorEventsSection
         fridgeId={fridgeId}
         doorEvents={doorEvents}
+        error={doorError}
+        onRetry={onRetryDoors}
         language={language}
+        headingLevel={headingLevel === 3 ? 4 : 2}
       />
     </section>
   );

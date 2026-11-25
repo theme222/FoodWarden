@@ -1,7 +1,12 @@
 node_modules/
 dist/
+coverage/
+.agents/
+skills-lock.json
 .wrangler/
 .reports/
+.local-db/
+.local-docs/
 workers/runtime.d.ts
 diagram/Fridge.html
 diagram/Fridge.drawio

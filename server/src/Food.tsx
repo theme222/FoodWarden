@@ -1,4 +1,10 @@
-import { ArrowLeft, Camera, Image as ImageIcon, Pencil, Trash2 } from "lucide-react";
+import {
+  ArrowLeft,
+  Camera,
+  Image as ImageIcon,
+  Pencil,
+  Trash2,
+} from "lucide-react";
 import { useRef, useState } from "react";
 import type { FormEvent } from "react";
 import { Link, useNavigate } from "react-router-dom";
@@ -120,7 +126,9 @@ function FoodMatchingCopies({
             <li key={item.id}>
               <div className="flex flex-wrap items-center gap-2">
                 <Link
-                  className={item.id === currentFoodId ? "primary sm" : "btn sm"}
+                  className={
+                    item.id === currentFoodId ? "primary sm" : "btn sm"
+                  }
                   to={route(fridgeId, item.id)}
                   aria-current={item.id === currentFoodId ? "page" : undefined}
                 >
@@ -735,7 +743,6 @@ export function AddFood({
       toast.success(t.saved);
       void navigate("/fridges/" + encodeURIComponent(fridgeId), {
         replace: true,
-        state: { added: true },
       });
     } catch {
       setError("save");
@@ -750,7 +757,6 @@ export function AddFood({
     [30, th ? "อีก 30 วัน" : "In 30 days"],
   ] as const;
 
-
   return (
     <section className="food-detail panel">
       <div className="page-head">
@@ -758,8 +764,8 @@ export function AddFood({
           <h1>{t.addFood}</h1>
           <p className="sub">
             {th
-              ? "ตั้งวันหมดอายุเริ่มต้นให้แล้ว สามารถปรับได้ตามฉลาก"
-              : "Pre-filled with a 1-week default so check-in takes seconds."}
+              ? "วันหมดอายุเริ่มต้นเป็นค่าประมาณ ปรับตามฉลากได้"
+              : "The default expiry is an estimate. Check the label and adjust it if needed."}
           </p>
         </div>
       </div>
@@ -790,7 +796,10 @@ export function AddFood({
               aria-describedby="expiry-help"
             />
           </label>
-          <fieldset className="quick"><legend className="small">{th ? "วันหมดอายุนับจากวันนี้" : "Expiry from today"}</legend>
+          <fieldset className="quick">
+            <legend className="small">
+              {th ? "วันหมดอายุนับจากวันนี้" : "Expiry from today"}
+            </legend>
             {presets.map(([days, label]) => (
               <button
                 key={days}

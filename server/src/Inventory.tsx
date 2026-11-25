@@ -1,6 +1,6 @@
-import { useState } from "react";
+import { useId, useState } from "react";
 import type { FormEvent } from "react";
-import { Link } from "react-router-dom";
+import { Link, useSearchParams } from "react-router-dom";
 import {
   Search,
   SlidersHorizontal,
@@ -19,7 +19,11 @@ import { categories, categoryLabel, foodName } from "./words";
 import { FavoriteToggle } from "./FavoriteToggle";
 import { useFavorites, lineAction } from "./line-data";
 import { useConfirm } from "./components/confirmation";
+import { InventoryRow } from "./components/inventory-row";
+import { Badge } from "./components/ui/badge";
 import { Button } from "./components/ui/button";
+import { Checkbox } from "./components/ui/checkbox";
+import { Input } from "./components/ui/input";
 import { Sheet } from "./Sheet";
 import {
   buildFavoriteShelves,
@@ -29,10 +33,7 @@ import {
   relativeExpiryText,
   summarizeInventory,
 } from "./state/dashboard-machine";
-import type {
-  InventoryFilter,
-  InventorySort,
-} from "./state/dashboard-machine";
+import type { InventoryFilter, InventorySort } from "./state/dashboard-machine";
 
 const THUMB_EMOJI: Record<string, string> = {
   Dairy: "🥛",
@@ -73,7 +74,25 @@ function useInventory({
   const now = useNow();
   const [search, setSearch] = useState("");
   const [category, setCategory] = useState("");
-  const [filter, setFilter] = useState<InventoryFilter>("all");
+  const [searchParams, setSearchParams] = useSearchParams();
+  const requestedFilter = searchParams.get("food");
+  const filter: InventoryFilter =
+    requestedFilter === "expired" ||
+    requestedFilter === "soon" ||
+    requestedFilter === "fresh"
+      ? requestedFilter
+      : "all";
+  function setFilter(next: InventoryFilter) {
+    setSearchParams(
+      (params) => {
+        const updated = new URLSearchParams(params);
+        if (next === "all") updated.delete("food");
+        else updated.set("food", next);
+        return updated;
+      },
+      { replace: true },
+    );
+  }
   const [sort, setSort] = useState<InventorySort>("expiry");
   const [favoritesOnly, setFavoritesOnly] = useState(false);
   const favorites = useFavorites(fridgeId);
@@ -205,39 +224,7 @@ function useInventory({
       );
       onChanged();
       void favorites.mutate().catch(() => {});
-      toast.success(th ? `นำ "${label}" ออกแล้ว` : `Took out "${label}"`, {
-        duration: 6000,
-        action: {
-          label: th ? "เลิกทำ" : "Undo",
-          onClick: () => {
-            void fetch(
-              `/api/fridges/${encodeURIComponent(fridgeId)}/inventory`,
-              {
-                method: "POST",
-                credentials: "same-origin",
-                headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({
-                  item_id: crypto.randomUUID(),
-                  name: food.nameEn || food.nameTh || label,
-                  estimated_expiry_date: food.expiry,
-                  category: Object.hasOwn(categories, food.category)
-                    ? food.category
-                    : "Other",
-                  jpeg_base64: null,
-                }),
-              },
-            )
-              .then((res) => {
-                if (!res.ok) throw new Error("Undo failed");
-                onChanged();
-                toast.success(th ? `คืน "${label}" กลับแล้ว` : `Restored "${label}"`);
-              })
-              .catch(() => {
-                toast.error(th ? "เลิกทำไม่สำเร็จ" : "Could not undo");
-              });
-          },
-        },
-      });
+      toast.success(th ? `นำ "${label}" ออกแล้ว` : `Took out "${label}"`);
     } catch {
       toast.error(th ? "นำออกไม่สำเร็จ ลองอีกครั้ง" : "Could not take out item");
     } finally {
@@ -336,7 +323,6 @@ function InventorySummary({ view }: { view: InventoryView }) {
         >
           <span>{label}</span>
           <strong className="num">{count}</strong>
-
         </button>
       ))}
     </div>
@@ -349,7 +335,7 @@ function InventoryToolbar({ view }: { view: InventoryView }) {
     <>
       <div className="page-head">
         <div className="page-head-copy">
-          <h2 id="food-title" className="inv-title">
+          <h2 id="food-title" tabIndex={-1} className="inv-title">
             {th ? "อาหารในตู้เย็น" : "Food in the fridge"}
           </h2>
         </div>
@@ -404,8 +390,9 @@ function InventoryFilters({ view }: { view: InventoryView }) {
       <label className="search-pill">
         <Search size={19} aria-hidden="true" />
         <span className="sr-only">{th ? "ค้นหาอาหาร" : "Search food"}</span>
-        <input
+        <Input
           type="search"
+          className="min-h-0 border-0 bg-transparent px-0 py-0 shadow-none focus-visible:outline-none"
           value={search}
           onChange={(e) => setSearch(e.target.value)}
           placeholder={th ? "ค้นหาอาหาร…" : "Search food…"}
@@ -414,7 +401,10 @@ function InventoryFilters({ view }: { view: InventoryView }) {
       <div className="filters">
         <label>
           <span className="sr-only">{th ? "หมวดอาหาร" : "Food type"}</span>
-          <select value={category} onChange={(e) => setCategory(e.target.value)}>
+          <select
+            value={category}
+            onChange={(e) => setCategory(e.target.value)}
+          >
             <option value="">{th ? "ทุกหมวด" : "All types"}</option>
             {Object.keys(categories).map((value) => (
               <option key={value} value={value}>
@@ -488,7 +478,7 @@ function FavoritesShelves({ view }: { view: InventoryView }) {
                 <Link
                   key={entry.key}
                   to={targetUrl}
-                  className={`tile${entry.inStock ? "" : " gone"}`}
+                  className={`tile${entry.inStock ? "" : "gone"}`}
                 >
                   <div className="tile-img">
                     <span aria-hidden="true">
@@ -509,15 +499,21 @@ function FavoritesShelves({ view }: { view: InventoryView }) {
                     )}
                   </div>
                   <span className="tile-n">{title}</span>
-                  <span
-                    className={`pill ${entry.inStock ? entry.status : "neutral"}`}
+                  <Badge
+                    variant={
+                      entry.inStock
+                        ? entry.status === "unknown"
+                          ? "neutral"
+                          : entry.status
+                        : "neutral"
+                    }
                   >
                     {entry.food
                       ? relativeExpiryText(entry.food, now, language)
                       : th
                         ? "หมดสต็อก"
                         : "Out"}
-                  </span>
+                  </Badge>
                 </Link>
               );
             })}
@@ -560,7 +556,7 @@ function InventoryContents({ view }: { view: InventoryView }) {
       ) : !groups.length ? (
         <EmptyInventory view={view} />
       ) : (
-        <ul className="inv-list">
+        <ul className="@container divide-y divide-border overflow-hidden rounded-lg border border-border bg-card">
           {groups.map((group) => (
             <FoodGroupRow key={group[0]!.id} group={group} view={view} />
           ))}
@@ -584,78 +580,70 @@ function FoodGroupRow({ group, view }: { group: Food[]; view: InventoryView }) {
   } = view;
   const food = group[0]!;
   const state = foodStatus(food, now);
+  const selectionId = useId();
   const isSelected = group.every((item) => selected.has(item.id));
   const detailUrl = `/fridges/${encodeURIComponent(fridgeId)}/food/${encodeURIComponent(food.id)}`;
   const relText = relativeExpiryText(food, now, language);
+  const name = foodName(food, language);
+  const quantity = group.length;
 
   return (
-    <li className={`item${selecting && isSelected ? " is-sel" : ""}`}>
-      {selecting && (
-        <label className="food-check">
-          <input
-            type="checkbox"
-            checked={isSelected}
-            onChange={() => toggleGroup(group)}
-            aria-label={(th ? "เลือก " : "Select ") + foodName(food, language)}
-          />
-        </label>
-      )}
-      {!selecting && (
-        <FavoriteToggle food={food} fridgeId={fridgeId} language={language} />
-      )}
-      <Link className="item-open" to={detailUrl}>
-        <div className="thumb">
-          <span aria-hidden="true">{THUMB_EMOJI[food.category] ?? "📦"}</span>
-          {food.hasPhoto && (
-            <img
-              src={`/api/fridges/${encodeURIComponent(fridgeId)}/inventory/${encodeURIComponent(food.id)}/photo`}
-              loading="lazy"
-              alt=""
-              onError={(event) => {
-                event.currentTarget.hidden = true;
-              }}
+    <InventoryRow
+      name={name}
+      category={categoryLabel(food.category, language)}
+      emoji={THUMB_EMOJI[food.category] ?? "📦"}
+      quantity={quantity}
+      status={state === "unknown" ? "neutral" : state}
+      statusLabel={statusPillLabel(state, language)}
+      expiry={
+        food.expiry
+          ? `${relText} · ${expiryLabel(food.expiry, language)}`
+          : relText
+      }
+      href={detailUrl}
+      photoUrl={
+        food.hasPhoto
+          ? `/api/fridges/${encodeURIComponent(fridgeId)}/inventory/${encodeURIComponent(food.id)}/photo`
+          : undefined
+      }
+      selected={selecting && isSelected}
+      selection={
+        selecting && (
+          <label
+            htmlFor={selectionId}
+            className="grid size-11 shrink-0 cursor-pointer place-items-center"
+          >
+            <Checkbox
+              id={selectionId}
+              checked={isSelected}
+              onCheckedChange={() => toggleGroup(group)}
+              aria-label={(th ? "เลือก " : "Select ") + name}
             />
-          )}
-          {group.length > 1 && <span className="qty-badge">×{group.length}</span>}
-        </div>
-        <div className="item-txt">
-          <span className="item-name">
-            <span className="nm-t">{foodName(food, language)}</span>
-            {group.length > 1 && <span className="x">×{group.length}</span>}
-          </span>
-          <span className="item-cat">{categoryLabel(food.category, language)}</span>
-          <span className={`pill ${state} item-st-inline`}>{relText}</span>
-        </div>
-        <div className="item-exp">
-          <span className={`pill ${state}`}>{statusPillLabel(state, language)}</span>
-          <span className="rel">
-            {relText} · {expiryLabel(food.expiry, language)}
-          </span>
-        </div>
-      </Link>
-      {!selecting && (
-        <div className="item-btns">
-          <Link
-            to={detailUrl}
-            className="ibtn edit"
-            aria-label={(th ? "แก้ไข " : "Edit ") + foodName(food, language)}
-            title={th ? "รายละเอียด / แก้ไข" : "Details / Edit"}
-          >
-            <Pencil size={18} aria-hidden="true" />
-          </Link>
-          <button
-            type="button"
-            className="ibtn take"
-            disabled={busy}
-            aria-label={(th ? "นำออก: " : "Take out: ") + foodName(food, language)}
-            title={th ? "นำออกจากตู้" : "Take out"}
-            onClick={() => void takeOutSingle(food)}
-          >
-            <Trash2 size={18} aria-hidden="true" />
-          </button>
-        </div>
-      )}
-    </li>
+          </label>
+        )
+      }
+      actions={
+        !selecting && (
+          <>
+            <FavoriteToggle
+              food={food}
+              fridgeId={fridgeId}
+              language={language}
+            />
+            <Button
+              variant="ghost"
+              size="icon"
+              className="pointer-coarse:size-11"
+              disabled={busy}
+              aria-label={(th ? "นำออก: " : "Take out: ") + name}
+              onClick={() => void takeOutSingle(food)}
+            >
+              <Trash2 aria-hidden="true" />
+            </Button>
+          </>
+        )
+      }
+    />
   );
 }
 
@@ -745,7 +733,9 @@ function BulkEditSheet({ view }: { view: InventoryView }) {
                   type={key === "estimated_expiry_date" ? "date" : "text"}
                   value={patch[key]}
                   maxLength={120}
-                  onChange={(e) => setPatch({ ...patch, [key]: e.target.value })}
+                  onChange={(e) =>
+                    setPatch({ ...patch, [key]: e.target.value })
+                  }
                 />
               </label>
             ),
@@ -776,7 +766,11 @@ function BulkEditSheet({ view }: { view: InventoryView }) {
 export function Inventory(props: Parameters<typeof useInventory>[0]) {
   const view = useInventory(props);
   return (
-    <section className="inv" aria-labelledby="food-title">
+    <section
+      id="inventory"
+      className="inv scroll-mt-20"
+      aria-labelledby="food-title"
+    >
       <InventoryToolbar view={view} />
       <InventoryContents view={view} />
       <InventorySelection view={view} />

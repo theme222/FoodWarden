@@ -424,33 +424,8 @@ export function foodGroups(items: Food[]): Food[][] {
   );
 }
 
-export type ContactState =
-  | "recent"
-  | "stale"
-  | "unreported"
-  | "notIncluded"
-  | "waiting"
-  | "gatewayMissing";
-
-export const FRIDGE_SENSOR_STALE_S = 600;
-
-export function contactState(
-  node: StatusNode,
-  heartbeat: Heartbeat | null,
-  nowS: number,
-): ContactState {
-  if (!heartbeat) return "waiting";
-  const gatewayStale =
-    nowS - heartbeat.receivedS > 180 || nowS - heartbeat.gatewaySeenS > 180;
-  if (node.id !== "C0" && gatewayStale) return "gatewayMissing";
-  if (!node.reported) return "notIncluded";
-  if (node.reportedS === null) return "unreported";
-  // A sleeping fridge sensor can normally go five minutes between reports.
-  const maxAge = node.id.startsWith("F") ? FRIDGE_SENSOR_STALE_S : 180;
-  return nowS - node.reportedS <= maxAge && (node.id !== "C0" || !gatewayStale)
-    ? "recent"
-    : "stale";
-}
+export { contactState, FRIDGE_SENSOR_STALE_S } from "./lib/node-contact";
+export type { ContactState } from "./lib/node-contact";
 
 export function statusTree(heartbeat: Heartbeat | null): StatusNode[] {
   const nodes = new Map<string, StatusNode>(

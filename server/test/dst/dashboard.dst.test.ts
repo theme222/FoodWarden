@@ -47,7 +47,10 @@ test("DST: multi-seed chaotic simulation preserves all dashboard invariants", ()
           nowS: next.nowS,
           language: next.language,
         });
-        const groupedCount = filtered.groups.reduce((acc, g) => acc + g.length, 0);
+        const groupedCount = filtered.groups.reduce(
+          (acc, g) => acc + g.length,
+          0,
+        );
         expect(groupedCount).toBe(filtered.visible.length);
 
         if (next.inventoryUi.sort === "expiry") {
@@ -77,7 +80,9 @@ test("DST: multi-seed chaotic simulation preserves all dashboard invariants", ()
 
         // 3. Charts Safety Invariant
         expect(next.chartsUi.enabledSeries.length).toBeGreaterThanOrEqual(1);
-        const nodes = [...new Set(next.room.history.map((s) => s.nodeId))].sort();
+        const nodes = [
+          ...new Set(next.room.history.map((s) => s.nodeId)),
+        ].sort();
         const activeNode = nodes.includes(next.chartsUi.activeNode)
           ? next.chartsUi.activeNode
           : (nodes[0] ?? next.chartsUi.activeNode);
@@ -102,7 +107,11 @@ test("DST: multi-seed chaotic simulation preserves all dashboard invariants", ()
           expect(stats.aboveLimitCount).toBeLessThanOrEqual(stats.count);
         }
 
-        const buckets = computeDailyDoorCounts(next.room.doorEvents, next.nowS, 7);
+        const buckets = computeDailyDoorCounts(
+          next.room.doorEvents,
+          next.nowS,
+          7,
+        );
         expect(buckets).toHaveLength(7);
         const bucketIsoSet = new Set(buckets.map((b) => b.dateIso));
         const expectedWindowTotal = next.room.doorEvents.filter((e) =>

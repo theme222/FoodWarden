@@ -37,5 +37,7 @@ test("StatusAlert exposes accessible alert vs status semantic roles cleanly", ()
     </div>,
   );
   expect(screen.getByRole("alert").textContent).toContain("High temp");
-  expect(screen.getByRole("status").textContent).toContain("All devices online");
+  expect(screen.getByRole("status").textContent).toContain(
+    "All devices online",
+  );
 });

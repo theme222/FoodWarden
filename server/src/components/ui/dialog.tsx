@@ -50,7 +50,7 @@ function DialogContent({
       <DialogPrimitive.Popup
         data-slot="dialog-content"
         className={cn(
-          "app-sheet fixed top-1/2 left-1/2 z-50 grid w-[calc(100%-2rem)] max-w-[540px] gap-[18px] rounded-[28px] border-0 bg-card p-6 text-base text-card-foreground shadow-none ring-0 duration-150 outline-none data-closed:animate-out data-closed:fade-out-0 data-open:animate-in data-open:fade-in-0",
+          "app-sheet fixed top-1/2 left-1/2 z-50 grid w-[calc(100%-2rem)] max-w-[540px] gap-[18px] rounded-lg border-0 bg-card p-6 text-base text-card-foreground shadow-none ring-0 duration-150 outline-none data-closed:animate-out data-closed:fade-out-0 data-open:animate-in data-open:fade-in-0",
           className,
         )}
         {...props}
@@ -117,7 +117,10 @@ function DialogTitle({ className, ...props }: DialogPrimitive.Title.Props) {
   return (
     <DialogPrimitive.Title
       data-slot="dialog-title"
-      className={cn("text-[1.45rem] leading-[1.2] font-bold text-foreground", className)}
+      className={cn(
+        "text-[1.45rem] leading-[1.2] font-bold text-foreground",
+        className,
+      )}
       {...props}
     />
   );

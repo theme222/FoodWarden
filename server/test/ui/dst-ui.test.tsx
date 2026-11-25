@@ -184,4 +184,10 @@ test("DST UI: Devices renders schematic, auto-expands degraded node, and offers 
     "1 device(s) need attention",
   );
   expect(screen.getByText(/Fridge sensor F0 sleeps/)).toBeTruthy();
+  const sensor = screen.getByRole("button", { name: /F0/, expanded: true });
+  fireEvent.click(sensor);
+  expect(sensor.getAttribute("aria-expanded")).toBe("false");
+  expect(screen.queryByText(/Fridge sensor F0 sleeps/)).toBeNull();
+  fireEvent.click(sensor);
+  expect(sensor.getAttribute("aria-expanded")).toBe("true");
 });

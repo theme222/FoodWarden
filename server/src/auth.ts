@@ -29,7 +29,8 @@ export async function fetchAuthState(): Promise<AuthState> {
   const config = (await configRes.json()) as AuthConfig;
 
   if (!sessionRes.ok) {
-    return { user: null, config };
+    if (sessionRes.status === 401) return { user: null, config };
+    throw new Error("Session check unavailable");
   }
 
   const sessionData: unknown = await sessionRes.json();
@@ -64,6 +65,20 @@ export async function fetchAuthState(): Promise<AuthState> {
     },
     config,
   };
+}
+
+export function signInDestination(location: {
+  pathname: string;
+  search: string;
+  hash: string;
+}): string {
+  const { pathname, search, hash } = location;
+  if (
+    pathname === "/me" ||
+    /^\/fridges(?:\/[a-z0-9_-]+(?:\/[a-z0-9_-]+)*)?\/?$/i.test(pathname)
+  )
+    return pathname + search + hash;
+  return "/fridges";
 }
 
 export async function signInWithGoogle(

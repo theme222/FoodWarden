@@ -65,7 +65,9 @@ test("DST Soak: 365-day simulated execution across standard year preserves all i
 });
 
 test("DST Soak: 365-day simulation spanning 2028 leap day handles all Bangkok dates cleanly", () => {
-  const feb28 = simBangkokIsoDate(Math.floor(Date.parse("2028-02-28T10:00:00Z") / 1000));
+  const feb28 = simBangkokIsoDate(
+    Math.floor(Date.parse("2028-02-28T10:00:00Z") / 1000),
+  );
   expect(feb28).toBe("2028-02-28");
   expect(simAddDaysIso(feb28, 1)).toBe("2028-02-29");
   expect(simAddDaysIso(feb28, 2)).toBe("2028-03-01");

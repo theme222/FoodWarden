@@ -144,7 +144,11 @@ export class SimulatedEnvironment {
       };
     }
 
-    if (!state.activeFridgeId && state.fridges.length > 0 && this.rng.chance(0.7)) {
+    if (
+      !state.activeFridgeId &&
+      state.fridges.length > 0 &&
+      this.rng.chance(0.7)
+    ) {
       return {
         type: "NAVIGATE",
         route: "food",
@@ -201,7 +205,9 @@ export class SimulatedEnvironment {
               {
                 id: "F0",
                 reported: true,
-                reportedS: this.rng.chance(0.2) ? gatewaySeen - 900 : gatewaySeen,
+                reportedS: this.rng.chance(0.2)
+                  ? gatewaySeen - 900
+                  : gatewaySeen,
                 lastKnownS: gatewaySeen - 60,
               },
               {
@@ -318,11 +324,16 @@ export class SimulatedEnvironment {
         fridgeId: state.fridges[0]?.id,
       };
     }
-    if (ui === 2) return { type: "SET_THEME", colorTheme: this.rng.pick(THEMES) };
+    if (ui === 2)
+      return { type: "SET_THEME", colorTheme: this.rng.pick(THEMES) };
     if (ui === 3) {
-      return { type: "SET_LANGUAGE", language: this.rng.bool(0.5) ? "th" : "en" };
+      return {
+        type: "SET_LANGUAGE",
+        language: this.rng.bool(0.5) ? "th" : "en",
+      };
     }
-    if (ui === 4) return { type: "SET_CHART_RANGE", range: this.rng.pick(RANGES) };
+    if (ui === 4)
+      return { type: "SET_CHART_RANGE", range: this.rng.pick(RANGES) };
     if (ui === 5) {
       return { type: "TOGGLE_CHART_SERIES", series: this.rng.pick(SERIES) };
     }

@@ -1,4 +1,6 @@
+@layer ui-sdk;
 @import "tailwindcss";
+@import "@ui-sdk/core/web.css" layer(components);
 @import "tw-animate-css";
 @import "./ui-theme.css";
 
@@ -76,6 +78,53 @@
   overflow: hidden;
   clip: rect(0, 0, 0, 0);
   white-space: nowrap;
+}
+
+.narrow-screen-message {
+  display: none;
+}
+
+.skip-to-content {
+  position: fixed;
+  z-index: 100;
+  inset-block-start: 8px;
+  inset-inline-start: 8px;
+  padding: 10px 14px;
+  background: var(--surface);
+  border-radius: var(--radius);
+  transform: translateY(calc(-100% - 12px));
+}
+
+.skip-to-content:focus {
+  transform: none;
+}
+
+@media (pointer: coarse) {
+  button[type="submit"]:is([data-slot="button"], .primary, .secondary) {
+    min-height: 44px;
+  }
+}
+
+@media (width < 280px) {
+  :root,
+  body {
+    background: #fff;
+  }
+
+  body {
+    min-width: 0;
+  }
+
+  #root > :not(.narrow-screen-message) {
+    display: none;
+  }
+
+  .narrow-screen-message {
+    display: grid;
+    gap: 8px;
+    padding: 16px;
+    overflow-wrap: anywhere;
+  }
 }
 
 /* Light-only application theme; dark utilities require an explicit .dark ancestor. */

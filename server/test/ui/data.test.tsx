@@ -1,4 +1,4 @@
-import { afterEach, test, expect } from "bun:test";
+import { afterEach, test, expect, spyOn } from "bun:test";
 import {
   cleanup,
   render,
@@ -6,9 +6,14 @@ import {
   screen,
   waitFor,
   act,
+  fireEvent,
+  within,
 } from "@testing-library/react";
 import { useFridges, useFridgeRoom } from "@/data";
 import { SessionCache } from "@/components/session-cache";
+import { signInDestination } from "@/auth";
+import { FridgePage } from "@/pages/FridgeWorkspace";
+import { MemoryRouter, Route, Routes, useLocation } from "react-router-dom";
 import type { ReactNode } from "react";
 import { ApiRequestError, isAccessError, swrOptions } from "@/lib/api";
 const originalFetch = globalThis.fetch;
@@ -26,6 +31,24 @@ afterEach(() => {
 const wrapper = ({ children }: { children: ReactNode }) => (
   <SessionCache>{children}</SessionCache>
 );
+
+test("LINE links preserve the internal destination after sign-in", () => {
+  expect(
+    signInDestination({
+      pathname: "/fridges/demo_fridge/monitoring/history",
+      search: "?kind=door&date=2026-11-25",
+      hash: "#event",
+    }),
+  ).toBe(
+    "/fridges/demo_fridge/monitoring/history?kind=door&date=2026-11-25#event",
+  );
+  expect(
+    signInDestination({ pathname: "//other.example", search: "", hash: "" }),
+  ).toBe("/fridges");
+  expect(
+    signInDestination({ pathname: "/api/overview", search: "", hash: "" }),
+  ).toBe("/fridges");
+});
 
 function deferred<T>() {
   let resolve!: (value: T) => void;
@@ -123,6 +146,114 @@ class Socket extends EventTarget {
     this.dispatchEvent(event);
   }
 }
+
+test("the four-item fridge navigation groups charts and history while keeping old filter links", async () => {
+  globalThis.WebSocket = Socket as unknown as typeof WebSocket;
+  globalThis.fetch = Object.assign(
+    async () =>
+      json({ items: [], samples: [], status: null, events: [], rows: [] }),
+    { preconnect: originalFetch.preconnect },
+  );
+  function CurrentPage() {
+    const { pathname, search, hash } = useLocation();
+    return <output aria-label="Current URL">{pathname + search + hash}</output>;
+  }
+  const fridge = {
+    id: "test-fridge",
+    name: "Test fridge",
+    role: "owner",
+    lastSeenS: 0,
+    latest: null,
+  } as const;
+  render(
+    <SessionCache>
+      <MemoryRouter
+        initialEntries={["/fridges/test-fridge/history?kind=door#log"]}
+      >
+        <CurrentPage />
+        <Routes>
+          <Route
+            path="/fridges/:fridgeId/*"
+            element={
+              <FridgePage
+                fridges={[fridge]}
+                language="en"
+                onFridgesChanged={() => {}}
+              />
+            }
+          />
+        </Routes>
+      </MemoryRouter>
+    </SessionCache>,
+  );
+  await screen.findByRole("heading", { name: "Activity history" });
+  expect(screen.getByLabelText("Current URL").textContent).toBe(
+    "/fridges/test-fridge/monitoring/history?kind=door#log",
+  );
+  expect(
+    screen.getByRole<HTMLSelectElement>("combobox", { name: "Type" }).value,
+  ).toBe("door");
+  for (const nav of screen.getAllByRole("navigation", {
+    name: "Test fridge",
+  })) {
+    const links = [...nav.querySelectorAll("a")];
+    expect(links).toHaveLength(4);
+    expect(nav.querySelector('[aria-current="page"]')?.textContent).toBe(
+      "Monitor",
+    );
+  }
+  expect(
+    screen.getByRole("link", { name: "History" }).getAttribute("aria-current"),
+  ).toBe("page");
+  await import("@/Charts");
+  fireEvent.click(screen.getByRole("link", { name: "Charts" }));
+  await screen.findByRole(
+    "heading",
+    { name: "Sensor charts" },
+    { timeout: 2500 },
+  );
+  expect(
+    screen.getByRole("link", { name: "Charts" }).getAttribute("aria-current"),
+  ).toBe("page");
+
+  const bottomNav = screen
+    .getAllByRole("navigation", { name: "Test fridge" })
+    .find((nav) => nav.classList.contains("bnav"))!;
+  const monitor = within(bottomNav).getByRole("link", { name: "Monitor" });
+  const devices = within(bottomNav).getByRole("link", { name: "Devices" });
+  const hitTest = spyOn(document, "elementFromPoint").mockReturnValue(devices);
+  const capture = spyOn(bottomNav, "setPointerCapture").mockImplementation(
+    () => {},
+  );
+  try {
+    const start = {
+      pointerId: 1,
+      isPrimary: true,
+      pointerType: "touch",
+      clientX: 30,
+      clientY: 140,
+    };
+    const destination = { ...start, clientX: 190 };
+    fireEvent.pointerDown(monitor, start);
+    fireEvent.pointerMove(bottomNav, destination);
+    expect(devices.hasAttribute("data-preview")).toBe(true);
+    expect(monitor.getAttribute("aria-current")).toBe("page");
+    fireEvent.pointerCancel(bottomNav, destination);
+    expect(devices.hasAttribute("data-preview")).toBe(false);
+    expect(monitor.getAttribute("aria-current")).toBe("page");
+
+    fireEvent.pointerDown(monitor, start);
+    fireEvent.pointerMove(bottomNav, destination);
+    fireEvent.pointerUp(bottomNav, destination);
+    await waitFor(() =>
+      expect(devices.getAttribute("aria-current")).toBe("page"),
+    );
+    expect(devices.hasAttribute("data-preview")).toBe(false);
+  } finally {
+    capture.mockRestore();
+    hitTest.mockRestore();
+  }
+});
 
 test("WebSocket updates SWR telemetry, refreshes inventory and stops after revocation", async () => {
   Socket.sockets = [];

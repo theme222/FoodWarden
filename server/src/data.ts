@@ -20,7 +20,7 @@ export function useFridges(userId: string) {
     swrOptions,
   );
   return {
-    data: state.data ?? null,
+    data: isAccessError(state.error) ? null : (state.data ?? null),
     error: Boolean(state.error),
     reload: () => {
       void state.mutate().catch(() => {});
@@ -35,7 +35,15 @@ export interface FridgeRoomState {
   latest: Sample | null;
   heartbeat: Heartbeat | null | undefined;
   doorEvents: DoorEvent[] | null;
-  error: boolean;
+  errors: {
+    inventory: boolean;
+    readings: boolean;
+    status: boolean;
+    doors: boolean;
+  };
+  reloadReadings: () => void;
+  reloadStatus: () => void;
+  reloadDoors: () => void;
   connectionState: SocketConnectionState;
   reloadInventory: () => void;
   reloadAll: () => void;
@@ -241,9 +249,15 @@ export function useFridgeRoom(
     latest: terminalError ? null : latest,
     heartbeat: terminalError ? null : status.data,
     doorEvents: terminalError ? null : (doors.data ?? null),
-    error: Boolean(
-      inventory.error || history.error || status.error || doors.error,
-    ),
+    errors: {
+      inventory: Boolean(inventory.error),
+      readings: Boolean(history.error),
+      status: Boolean(status.error),
+      doors: Boolean(doors.error),
+    },
+    reloadReadings: () => void mutateHistory().catch(() => {}),
+    reloadStatus: () => void mutateStatus().catch(() => {}),
+    reloadDoors: () => void mutateDoors().catch(() => {}),
     connectionState,
     reloadInventory,
     reloadAll,

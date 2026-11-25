@@ -2,7 +2,7 @@ export class SeededRng {
   private state: number;
 
   constructor(seed: number) {
-    this.state = (seed >>> 0) || 1;
+    this.state = seed >>> 0 || 1;
   }
 
   /** Mulberry32 deterministic PRNG in [0, 1). */

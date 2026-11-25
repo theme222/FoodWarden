@@ -21,7 +21,9 @@ function channelLum(channel8: number): number {
 
 function relativeLuminance(hex: string): number {
   const [r, g, b] = parseHexRgb(hex);
-  return 0.2126 * channelLum(r) + 0.7152 * channelLum(g) + 0.0722 * channelLum(b);
+  return (
+    0.2126 * channelLum(r) + 0.7152 * channelLum(g) + 0.0722 * channelLum(b)
+  );
 }
 
 function contrastRatio(fg: string, bg: string): number {
@@ -51,7 +53,9 @@ function extractCssVars(css: string, blockHeader: string): VarMap {
   if (close < 0) throw new Error(`Unclosed CSS block: ${blockHeader}`);
   const body = css.slice(open + 1, close);
   const vars: VarMap = {};
-  for (const match of body.matchAll(/(--[a-z0-9-]+)\s*:\s*(#[0-9a-f]{6})\s*;/gi)) {
+  for (const match of body.matchAll(
+    /(--[a-z0-9-]+)\s*:\s*(#[0-9a-f]{6})\s*;/gi,
+  )) {
     vars[match[1]!] = match[2]!;
   }
   return vars;
@@ -63,7 +67,7 @@ function getVar(vars: VarMap, name: string): string {
   return val;
 }
 
-test("Design Tokens: all palettes (green, blue, pink) meet WCAG AA (>=4.5:1) contrast", () => {
+test("Design Tokens: AA text contrast and 7:1 body text across all palettes", () => {
   const uiThemeCss = readFileSync(
     resolve(import.meta.dirname, "../../src/ui-theme.css"),
     "utf8",
@@ -88,15 +92,15 @@ test("Design Tokens: all palettes (green, blue, pink) meet WCAG AA (>=4.5:1) con
     const bg = getVar(vars, "--bg");
 
     const pairs: Array<[string, string, string, number]> = [
-      ["--ink", "--bg", "body on canvas", 4.5],
-      ["--ink", "--surface", "body on card", 4.5],
-      ["--ink", "--surface-2", "body on inset", 4.5],
+      ["--ink", "--bg", "body on canvas", 7],
+      ["--ink", "--surface", "body on card", 7],
+      ["--ink", "--surface-2", "body on inset", 7],
       ["--muted-ink", "--bg", "muted on canvas", 4.5],
       ["--muted-ink", "--surface", "muted on card", 4.5],
       ["--muted-ink", "--surface-2", "muted on inset", 4.5],
       ["--leaf", "--bg", "accent link on canvas", 4.5],
       ["--leaf", "--surface", "accent link on card", 4.5],
-      ["--on-dark", "--dark", "text on primary dark", 4.5],
+      ["--on-dark", "--dark", "body on primary dark", 7],
       ["--on-dark-2", "--dark", "accent on dark", 4.5],
       ["--lime-ink", "--lime", "ink on lime pill", 4.5],
       ["--lime-ink", "--lime-soft", "ink on soft lime", 4.5],
@@ -121,7 +125,9 @@ test("Design Tokens: all palettes (green, blue, pink) meet WCAG AA (>=4.5:1) con
     }
 
     const whiteOnTake = contrastRatio("#ffffff", getVar(vars, "--take"));
-    expect(whiteOnTake, `${themeName} white on --take`).toBeGreaterThanOrEqual(4.5);
+    expect(whiteOnTake, `${themeName} white on --take`).toBeGreaterThanOrEqual(
+      4.5,
+    );
 
     for (const series of CHART_SERIES) {
       const ratioOnInset = contrastRatio(series.textColor, surface2);
@@ -138,12 +144,12 @@ test("Design Tokens: all palettes (green, blue, pink) meet WCAG AA (>=4.5:1) con
 
     // Color-restraint guardrail: calm alert & warning containers must stay bright/soft pastel (L >= 0.80)
     // so full-width warnings never produce harsh red/amber eye-strain walls.
-    expect(relativeLuminance(getVar(vars, "--bad-surface"))).toBeGreaterThanOrEqual(
-      0.8,
-    );
-    expect(relativeLuminance(getVar(vars, "--soon-surface"))).toBeGreaterThanOrEqual(
-      0.8,
-    );
+    expect(
+      relativeLuminance(getVar(vars, "--bad-surface")),
+    ).toBeGreaterThanOrEqual(0.8);
+    expect(
+      relativeLuminance(getVar(vars, "--soon-surface")),
+    ).toBeGreaterThanOrEqual(0.8);
     expect(relativeLuminance(bg)).toBeGreaterThanOrEqual(0.8);
   }
 });

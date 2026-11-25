@@ -14,7 +14,7 @@ function Tabs({
       data-orientation={orientation}
       orientation={orientation}
       className={cn(
-        "group/tabs flex gap-2 data-horizontal:flex-col",
+        "group/tabs flex gap-2 data-[orientation=horizontal]:flex-col",
         className,
       )}
       {...props}
@@ -42,7 +42,7 @@ function TabsTrigger({ className, ...props }: TabsPrimitive.Tab.Props) {
     <TabsPrimitive.Tab
       data-slot="tabs-trigger"
       className={cn(
-        "relative inline-flex min-h-[42px] flex-1 items-center justify-center gap-1.5 rounded-full border-0 px-4 py-2 text-base font-semibold whitespace-nowrap text-muted-foreground transition-colors hover:text-foreground focus-visible:outline-[3px] focus-visible:outline-ring focus-visible:outline-offset-2 disabled:pointer-events-none disabled:opacity-50 aria-disabled:pointer-events-none aria-disabled:opacity-50 data-active:bg-primary data-active:text-primary-foreground data-active:shadow-none [&_svg]:pointer-events-none [&_svg]:shrink-0 [&_svg:not([class*='size-'])]:size-5",
+        "relative inline-flex min-h-9 flex-1 items-center justify-center gap-1.5 rounded-md border-0 px-3 py-1.5 text-sm font-semibold whitespace-nowrap text-muted-foreground transition-colors hover:text-foreground focus-visible:outline-[3px] focus-visible:outline-offset-2 focus-visible:outline-ring disabled:pointer-events-none disabled:opacity-50 aria-disabled:pointer-events-none aria-disabled:opacity-50 data-active:bg-primary data-active:text-primary-foreground data-active:shadow-none [&_svg]:pointer-events-none [&_svg]:shrink-0 [&_svg:not([class*='size-'])]:size-5",
         className,
       )}
       {...props}

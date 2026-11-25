@@ -63,7 +63,9 @@ test("LINE pairing shows direct-chat instructions, updates connection status and
     return render(
       <SWRConfig value={{ provider: () => new Map(), dedupingInterval: 0 }}>
         <ConfirmationProvider language="en">
-          <Probe />
+          <MemoryRouter>
+            <Probe />
+          </MemoryRouter>
         </ConfirmationProvider>
       </SWRConfig>,
     );
@@ -174,7 +176,11 @@ test("inventory search, private favorites and bulk removal use real scoped endpo
     ).toBe(false),
   );
   await user.click(screen.getByRole("button", { name: "Favorite: Milk" }));
-  await screen.findByRole("button", { name: "Remove favorite: Milk" });
+  await waitFor(() => {
+    expect(
+      screen.getByRole("button", { name: "Favorite: Milk", pressed: true }),
+    ).toBeTruthy();
+  });
   fireEvent.change(screen.getByRole("searchbox", { name: "Search food" }), {
     target: { value: "Milk" },
   });
@@ -339,7 +345,9 @@ test("private account preferences save selected values and favorite changes stay
   render(
     <SWRConfig value={{ provider: () => new Map(), dedupingInterval: 0 }}>
       <ConfirmationProvider language="en">
-        <MyAccount language="en" />
+        <MemoryRouter>
+          <MyAccount language="en" />
+        </MemoryRouter>
         <FridgeFavorites fridgeId="kitchen" language="en" />
       </ConfirmationProvider>
     </SWRConfig>,
@@ -434,13 +442,11 @@ test("bulk editing patches only supplied fields and preserves failed items for r
     ),
   ).toBe(true);
   expect(
-    (screen.getByRole("checkbox", { name: "Select Apple" }) as HTMLInputElement)
-      .checked,
-  ).toBe(true);
+    screen.getByRole("checkbox", { name: "Select Apple", checked: true }),
+  ).toBeTruthy();
   expect(
-    (screen.getByRole("checkbox", { name: "Select Milk" }) as HTMLInputElement)
-      .checked,
-  ).toBe(false);
+    screen.getByRole("checkbox", { name: "Select Milk", checked: false }),
+  ).toBeTruthy();
 });
 
 test("GatewaySimulator flag toggles panel and posts telemetry, door events, and device status with gateway Bearer token", async () => {

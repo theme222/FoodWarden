@@ -3,6 +3,16 @@ import { DoorClosed, Package, Thermometer } from "lucide-react";
 import { Link, useSearchParams } from "react-router-dom";
 import useSWR from "swr";
 import { StatusAlert } from "./components/status-alert";
+import { Button } from "./components/ui/button";
+import { Input } from "./components/ui/input";
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from "./components/ui/table";
 import { getJson, swrOptions } from "./lib/api";
 import { localTimestamp, readDoorEventList, readSample } from "./model";
 import type { DoorEvent, Language, Sample } from "./model";
@@ -119,9 +129,7 @@ function ActivityDetail({
     );
   }
   const name =
-    language === "th"
-      ? row.nameTh || row.nameEn
-      : row.nameEn || row.nameTh;
+    language === "th" ? row.nameTh || row.nameEn : row.nameEn || row.nameTh;
   const source = row.source ? INVENTORY_SOURCES[language][row.source] : null;
   return (
     <>
@@ -150,25 +158,15 @@ function ActivityPagination({
   if (!hasPrev && !hasNext) return null;
   return (
     <div className="history-pagination">
-      <button
-        type="button"
-        className="btn sm"
-        disabled={!hasPrev}
-        onClick={onPrev}
-      >
+      <Button type="button" size="sm" disabled={!hasPrev} onClick={onPrev}>
         {th ? "ใหม่กว่า" : "Newer"}
-      </button>
+      </Button>
       <output>
         {th ? "หน้า" : "Page"} {pageNumber}
       </output>
-      <button
-        type="button"
-        className="btn sm"
-        disabled={!hasNext}
-        onClick={onNext}
-      >
+      <Button type="button" size="sm" disabled={!hasNext} onClick={onNext}>
         {th ? "เก่ากว่า" : "Older"}
-      </button>
+      </Button>
     </div>
   );
 }
@@ -192,31 +190,36 @@ function ActivityTable({
   }
   const Icon = icons[kind];
   return (
-    <table className="history-table activity-table">
-      <thead>
-        <tr>
-          <th scope="col">{th ? "เหตุการณ์" : "Activity"}</th>
-          <th scope="col">{th ? "เวลา (ไทย)" : "Time (Bangkok)"}</th>
-        </tr>
-      </thead>
-      <tbody>
+    <Table
+      className="history-table activity-table"
+      scrollLabel={th ? "ตารางประวัติ" : "Activity table"}
+    >
+      <TableHeader>
+        <TableRow>
+          <TableHead scope="col">{th ? "เหตุการณ์" : "Activity"}</TableHead>
+          <TableHead scope="col">
+            {th ? "เวลา (ไทย)" : "Time (Bangkok)"}
+          </TableHead>
+        </TableRow>
+      </TableHeader>
+      <TableBody>
         {rows.map((row) => (
-          <tr key={row.id}>
-            <td>
+          <TableRow key={row.id}>
+            <TableCell>
               <Icon aria-hidden="true" size={17} />
               <span>
                 <ActivityDetail row={row} language={language} />
               </span>
-            </td>
-            <td>
+            </TableCell>
+            <TableCell>
               <time dateTime={new Date(row.time * 1000).toISOString()}>
                 {localTimestamp(row.time, language)}
               </time>
-            </td>
-          </tr>
+            </TableCell>
+          </TableRow>
         ))}
-      </tbody>
-    </table>
+      </TableBody>
+    </Table>
   );
 }
 
@@ -252,13 +255,9 @@ function ActivityResults({
       {state.error && (
         <StatusAlert
           action={
-            <button
-              className="btn sm"
-              type="button"
-              onClick={() => void state.mutate()}
-            >
+            <Button size="sm" type="button" onClick={() => void state.mutate()}>
               {th ? "ลองใหม่" : "Retry"}
-            </button>
+            </Button>
           }
         >
           {th ? "โหลดประวัติไม่ได้" : "Could not load activity"}
@@ -276,11 +275,7 @@ function ActivityResults({
         }}
       />
       {state.data && (
-        <ActivityTable
-          rows={state.data.rows}
-          kind={kind}
-          language={language}
-        />
+        <ActivityTable rows={state.data.rows} kind={kind} language={language} />
       )}
     </>
   );
@@ -295,7 +290,25 @@ export function Activity({
 }) {
   const th = language === "th";
   const [params, setParams] = useSearchParams();
-  const [date, setDate] = useState("");
+  const rawDate = params.get("date") ?? "";
+  const parsedDate = Date.parse(rawDate);
+  const date =
+    /^\d{4}-\d{2}-\d{2}$/.test(rawDate) &&
+    Number.isFinite(parsedDate) &&
+    new Date(parsedDate).toISOString().slice(0, 10) === rawDate
+      ? rawDate
+      : "";
+  function updateFilter(key: "kind" | "date", value: string) {
+    setParams(
+      (previous) => {
+        const next = new URLSearchParams(previous);
+        if (value) next.set(key, value);
+        else next.delete(key);
+        return next;
+      },
+      { replace: true },
+    );
+  }
   const kind =
     kinds.find((value) => value === params.get("kind")) ?? "inventory";
   const labels = th
@@ -309,7 +322,11 @@ export function Activity({
         {kind === "sensor" && (
           <Link
             className="btn sm"
-            to={"/fridges/" + encodeURIComponent(fridgeId) + "/charts"}
+            to={{
+              pathname:
+                "/fridges/" + encodeURIComponent(fridgeId) + "/monitoring",
+              search: params.toString(),
+            }}
           >
             {th ? "ดูกราฟ" : "View charts"}
           </Link>
@@ -320,7 +337,7 @@ export function Activity({
           {th ? "ประเภท" : "Type"}
           <select
             value={kind}
-            onChange={(event) => setParams({ kind: event.target.value })}
+            onChange={(event) => updateFilter("kind", event.target.value)}
           >
             {kinds.map((value) => (
               <option key={value} value={value}>
@@ -331,10 +348,10 @@ export function Activity({
         </label>
         <label>
           {th ? "วันที่ (ไม่ระบุ = ทุกวัน)" : "Date (blank for all days)"}
-          <input
+          <Input
             type="date"
             value={date}
-            onChange={(event) => setDate(event.target.value)}
+            onChange={(event) => updateFilter("date", event.target.value)}
           />
         </label>
       </div>

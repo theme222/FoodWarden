@@ -26,6 +26,8 @@ test("DST Full-Stack: exact seed replay produces bit-for-bit identical trace and
   expect(runA.trace).toEqual(runB.trace);
   expect(runA.sim.metrics).toEqual(runB.sim.metrics);
   expect(runA.sim.outbox).toEqual(runB.sim.outbox);
-  expect([...runA.sim.inventory.keys()]).toEqual([...runB.sim.inventory.keys()]);
+  expect([...runA.sim.inventory.keys()]).toEqual([
+    ...runB.sim.inventory.keys(),
+  ]);
   expect(runA.sim.clients).toEqual(runB.sim.clients);
 });

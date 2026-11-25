@@ -12,10 +12,7 @@ export function StatusAlert({
   action?: ReactNode;
 }) {
   return (
-    <Alert
-      variant={variant}
-      role={variant === "success" ? "status" : "alert"}
-    >
+    <Alert variant={variant} role={variant === "success" ? "status" : "alert"}>
       <div className="flex min-w-0 flex-1 items-start gap-3">
         {variant === "success" ? (
           <CheckCircle2 aria-hidden="true" />

@@ -1,7 +1,15 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
+import { useLocation } from "react-router-dom";
 import { QRCodeSVG } from "qrcode.react";
 import { toast } from "sonner";
-import { MessageCircle, Check, Copy, Unplug, Send, RotateCcw } from "lucide-react";
+import {
+  MessageCircle,
+  Check,
+  Copy,
+  Unplug,
+  Send,
+  RotateCcw,
+} from "lucide-react";
 import { ApiRequestError } from "./lib/api";
 import { useConfirm } from "./components/confirmation";
 import { StatusAlert } from "./components/status-alert";
@@ -86,11 +94,28 @@ function useLineConnection({
         setCode(null);
         toast.success(th ? "ตัดการเชื่อมต่อแล้ว" : "LINE disconnected");
       } else {
-        toast.success(
-          th
-            ? "รับคำขอทดสอบแล้ว โปรดตรวจแชท LINE"
-            : "Test queued. Check your LINE chat.",
-        );
+        const result =
+          response && typeof response === "object" && "status" in response
+            ? response.status
+            : "queued";
+        if (result === "failed") {
+          setError(
+            th
+              ? "ส่งทดสอบไม่สำเร็จ ตรวจการเชื่อมต่อ LINE แล้วลองใหม่"
+              : "Test failed. Check your LINE connection and try again.",
+          );
+        } else {
+          toast.success(
+            result === "accepted"
+              ? th
+                ? "LINE รับคำขอแล้ว โปรดตรวจแชท"
+                : "LINE accepted the request. Check your chat."
+              : th
+                ? "เข้าคิวส่งข้อความทดสอบแล้ว"
+                : "Test message queued.",
+          );
+        }
+        return;
       }
       await status.mutate();
     } catch (err) {
@@ -224,9 +249,7 @@ function AddLineFriend({ view }: { view: LineView }) {
   if (!data) return null;
   return (
     <div>
-      <h3>
-        {th ? "1. เพิ่ม FoodWarden ใน LINE" : "1. Add FoodWarden in LINE"}
-      </h3>
+      <h3>{th ? "1. เพิ่ม FoodWarden ใน LINE" : "1. Add FoodWarden in LINE"}</h3>
       <p className="sub">
         {th
           ? fridgeId
@@ -250,9 +273,7 @@ function AddLineFriend({ view }: { view: LineView }) {
             value={data.friend_url}
             size={128}
             marginSize={4}
-            title={
-              th ? "สแกนเพื่อเพิ่มเพื่อน FoodWarden" : "Scan to add FoodWarden"
-            }
+            title={th ? "สแกนเพื่อเพิ่มเพื่อน FoodWarden" : "Scan to add FoodWarden"}
           />
         </div>
       ) : (
@@ -353,7 +374,8 @@ function LinePairingSteps({ view }: { view: LineView }) {
 
 function LineConnectionBody({ view }: { view: LineView }) {
   const { th, data, manage } = view;
-  if (!data) return <output className="sub">{th ? "กำลังโหลด…" : "Loading…"}</output>;
+  if (!data)
+    return <output className="sub">{th ? "กำลังโหลด…" : "Loading…"}</output>;
   if (!data.ready) {
     return (
       <div className="subblock">
@@ -373,9 +395,19 @@ function LineConnectionBody({ view }: { view: LineView }) {
 function LineConnectionSection(props: Parameters<typeof useLineConnection>[0]) {
   const view = useLineConnection(props);
   const { th, fridgeId, fridgeName, error, status } = view;
+  const section = useRef<HTMLElement>(null);
+  const { hash } = useLocation();
+  useEffect(() => {
+    if (hash !== "#line-connection") return;
+    section.current?.scrollIntoView();
+    section.current?.focus({ preventScroll: true });
+  }, [hash]);
   return (
     <section
-      className="panel flex flex-col gap-3"
+      ref={section}
+      id="line-connection"
+      tabIndex={-1}
+      className="panel flex scroll-mt-20 flex-col gap-3"
       aria-label={lineConnectionText(th, fridgeId, fridgeName).label}
     >
       <LineConnectionHeading view={view} />

@@ -4,8 +4,12 @@ import type { FormEvent } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { ReadingTime } from "../components/reading-time";
 import { StatusAlert } from "../components/status-alert";
+import { Badge } from "../components/ui/badge";
+import { Button } from "../components/ui/button";
+import { Input } from "../components/ui/input";
+import { Label } from "../components/ui/label";
 import { useNow } from "../data";
-import type { Fridge, Language } from "../model";
+import { FRIDGE_SENSOR_STALE_S, type Fridge, type Language } from "../model";
 import { Sheet } from "../Sheet";
 import { TEMP_DANGER_C, VOC_DANGER } from "../state/dashboard-machine";
 import { words } from "../words";
@@ -58,9 +62,9 @@ export function FridgeHub({
     <div className="flex flex-col gap-4">
       <div className="hub-heading">
         <h1>{t.home}</h1>
-        <button
+        <Button
           type="button"
-          className="primary"
+          variant="primary"
           onClick={() => {
             setError(false);
             setOpenCreate(true);
@@ -68,7 +72,7 @@ export function FridgeHub({
         >
           <Plus size={19} aria-hidden="true" />
           {t.createFridge}
-        </button>
+        </Button>
       </div>
 
       {fridges.length === 0 ? (
@@ -83,8 +87,8 @@ export function FridgeHub({
             const statusText =
               fridge.lastSeenS > 0
                 ? th
-                  ? "พร้อมใช้งาน"
-                  : "Connected"
+                  ? "เคยได้รับข้อมูล"
+                  : "Previously reported"
                 : th
                   ? "รอเชื่อมต่ออุปกรณ์"
                   : "Waiting for devices";
@@ -99,41 +103,59 @@ export function FridgeHub({
                     <h2>{fridge.name}</h2>
                     <p className="small">
                       {fridge.latest ? (
-                        <ReadingTime timeS={fridge.latest.timeS} now={now} language={language} />
+                        <>
+                          {now - fridge.latest.timeS > FRIDGE_SENSOR_STALE_S &&
+                            (th ? "ข้อมูลเก่า · " : "Stale · ")}
+                          <ReadingTime
+                            timeS={fridge.latest.timeS}
+                            now={now}
+                            language={language}
+                          />
+                        </>
                       ) : (
                         statusText
                       )}
                     </p>
                   </div>
-                  <span className="fcard-role small">
+                  <Badge variant="neutral" className="fcard-role small">
                     {fridge.role === "owner" ? t.ownerBadge : t.memberBadge}
-                  </span>
+                  </Badge>
                 </div>
                 <div className="fcard-stats">
                   <div className="stat">
                     <span className="k">{t.temperature}</span>
-                    <span className={`v${warm ? " bad" : ""}`}>
+                    <span className={`v${warm ? "bad" : ""}`}>
                       {temp === null ? "—" : `${temp.toFixed(1)}°C`}
                     </span>
                   </div>
                   <div className="stat">
                     <span className="k">VOC</span>
-                    <span className={`v${spoil ? " warn" : ""}`}>
+                    <span className={`v${spoil ? "warn" : ""}`}>
                       {voc === null ? "—" : Math.round(voc)}
                     </span>
                   </div>
                   <div className="stat">
-                    <span className="k">{th ? "อาหารทั้งหมด" : "Food items"}</span>
+                    <span className="k">
+                      {th ? "อาหารทั้งหมด" : "Food items"}
+                    </span>
                     <span className="v">{fridge.inventoryCount ?? "—"}</span>
                   </div>
                   <div className="stat">
-                    <span className="k">{th ? "หมดอายุใน 3 วัน" : "Expiring within 3 days"}</span>
-                    <span className={`v${fridge.expiringSoonCount ? " warn" : ""}`}>
+                    <span className="k">
+                      {th ? "หมดอายุใน 3 วัน" : "Expiring within 3 days"}
+                    </span>
+                    <span
+                      className={`v${fridge.expiringSoonCount ? "warn" : ""}`}
+                    >
                       {fridge.expiringSoonCount ?? "—"}
                     </span>
                   </div>
                 </div>
-                <ChevronRight className="fcard-chevron" size={18} aria-hidden="true" />
+                <ChevronRight
+                  className="fcard-chevron"
+                  size={18}
+                  aria-hidden="true"
+                />
               </Link>
             );
           })}
@@ -145,31 +167,38 @@ export function FridgeHub({
         onOpenChange={setOpenCreate}
         title={t.createFridge}
       >
-        <form className="add-form" onSubmit={(event) => void handleCreate(event)}>
+        <form
+          className="add-form"
+          onSubmit={(event) => void handleCreate(event)}
+        >
           {error && <StatusAlert>{t.actionFailed}</StatusAlert>}
-          <fieldset disabled={creating}>
-            <label>
-              {t.fridgeName}
-              <input
-                value={name}
-                onChange={(event) => setName(event.target.value)}
-                placeholder={t.fridgeNamePlaceholder}
-                maxLength={80}
-                required
-              />
-            </label>
+          <fieldset disabled={creating} className="grid gap-2">
+            <Label htmlFor="hub-fridge-name">{t.fridgeName}</Label>
+            <Input
+              id="hub-fridge-name"
+              value={name}
+              onChange={(event) => setName(event.target.value)}
+              placeholder={t.fridgeNamePlaceholder}
+              maxLength={80}
+              required
+            />
           </fieldset>
           <div className="form-actions">
-            <button className="primary big" disabled={creating} type="submit">
+            <Button
+              variant="primary"
+              size="big"
+              disabled={creating}
+              type="submit"
+            >
               {creating ? t.creating : t.createFridge}
-            </button>
-            <button
+            </Button>
+            <Button
               type="button"
-              className="btn big"
+              size="big"
               onClick={() => setOpenCreate(false)}
             >
               {t.cancel}
-            </button>
+            </Button>
           </div>
         </form>
       </Sheet>

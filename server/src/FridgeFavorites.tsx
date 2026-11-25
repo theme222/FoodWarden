@@ -6,6 +6,9 @@ import { useFavorites, lineAction } from "./line-data";
 import type { Favorite } from "./line-data";
 import { categoryLabel, categories } from "./words";
 import { StatusAlert } from "./components/status-alert";
+import { Button } from "./components/ui/button";
+import { Card } from "./components/ui/card";
+import { Skeleton } from "./components/ui/skeleton";
 
 const copy = {
   th: {
@@ -101,15 +104,15 @@ function FavoriteFoodRow({
         <strong>{name}</strong>
         <p className="small">{item.count ? count : t.outOfStock}</p>
       </div>
-      <button
+      <Button
         type="button"
-        className="btn sm"
+        size="sm"
         disabled={preferences.busy}
         aria-label={t.remove + name}
         onClick={() => void preferences.remove(item.item_key)}
       >
         <Star fill="currentColor" size={18} aria-hidden="true" />
-      </button>
+      </Button>
     </li>
   );
 }
@@ -127,20 +130,23 @@ function FavoriteContents({
     return (
       <StatusAlert
         action={
-          <button
-            type="button"
-            className="btn sm"
-            onClick={() => void state.mutate()}
-          >
+          <Button type="button" size="sm" onClick={() => void state.mutate()}>
             {language === "th" ? "ลองใหม่" : "Retry"}
-          </button>
+          </Button>
         }
       >
         {t.loadError}
       </StatusAlert>
     );
   }
-  if (!state.data) return <output className="sub">{t.loading}</output>;
+  if (!state.data) {
+    return (
+      <div className="grid gap-2">
+        <output className="sub">{t.loading}</output>
+        <Skeleton className="h-12 w-full" />
+      </div>
+    );
+  }
   const selected = new Set(state.data.categories);
   return (
     <div className="flex flex-col gap-3">
@@ -191,12 +197,12 @@ export function FridgeFavorites({
   const preferences = useFavoritePreferences(fridgeId, language);
   const t = copy[language];
   return (
-    <section className="panel flex flex-col gap-3">
+    <Card className="flex flex-col gap-3">
       <h2 className="flex items-center gap-2">
         <Heart size={20} aria-hidden="true" /> {t.favorites}
       </h2>
       <p className="sub">{t.private}</p>
       <FavoriteContents language={language} preferences={preferences} />
-    </section>
+    </Card>
   );
 }

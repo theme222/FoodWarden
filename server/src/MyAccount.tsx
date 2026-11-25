@@ -6,13 +6,15 @@ import type { Language } from "./model";
 import { LineConnection } from "./LineConnection";
 import { useLineStatus, lineAction } from "./line-data";
 import { ThemeLanguagePicker } from "./components/theme-picker";
+import { Button } from "./components/ui/button";
+import { Card } from "./components/ui/card";
+import { Input } from "./components/ui/input";
 import type { ColorTheme } from "./state/dashboard-machine";
 
 const copy = {
   th: {
     title: "ของฉัน",
-    description:
-      "LINE และการแจ้งเตือนเฉพาะคุณ การเปลี่ยนที่นี่ไม่กระทบคนอื่นในบ้าน",
+    description: "LINE และการแจ้งเตือนเฉพาะคุณ การเปลี่ยนที่นี่ไม่กระทบคนอื่นในบ้าน",
     notifications: "การแจ้งเตือนของฉัน",
     morning: "สรุปตอนเช้า",
     morningEnabled: "ส่งสรุปให้ฉันทุกเช้า",
@@ -104,60 +106,62 @@ function NotificationPreferences({ language }: { language: Language }) {
   ] as const;
 
   return (
-    <form
-      onSubmit={(event) => void save(event)}
-      className="panel notification-preferences flex flex-col gap-3"
-    >
-      <h2 className="flex items-center gap-2">
-        <Clock size={20} aria-hidden="true" /> {t.notifications}
-      </h2>
-      <fieldset disabled={busy || !profile.data}>
-        <div className="subblock">
-          <h3>{t.morning}</h3>
-          <label className="chk">
-            <span>{t.morningEnabled}</span>
-            <input
-              type="checkbox"
-              checked={value.morning_enabled}
-              onChange={(e) => change("morning_enabled", e.target.checked)}
-            />
-          </label>
-          <label className="flex flex-col gap-1.5 font-medium">
-            {t.time}
-            <input
-              type="time"
-              pattern="(?:[01][0-9]|2[0-3]):[0-5][0-9]"
-              placeholder="HH:mm"
-              value={value.morning_time}
-              disabled={!value.morning_enabled}
-              onChange={(e) => change("morning_time", e.target.value)}
-              required
-            />
-          </label>
-          <p className="small">{t.morningHelp}</p>
-        </div>
-
-        <div className="subblock">
-          <h3>{t.instant}</h3>
-          {alerts.map(([key, label]) => (
-            <label className="chk" key={key}>
-              <span>{label}</span>
+    <Card className="notification-preferences">
+      <form
+        onSubmit={(event) => void save(event)}
+        className="flex flex-col gap-3"
+      >
+        <h2 className="flex items-center gap-2">
+          <Clock size={20} aria-hidden="true" /> {t.notifications}
+        </h2>
+        <fieldset disabled={busy || !profile.data}>
+          <div className="subblock">
+            <h3>{t.morning}</h3>
+            <label className="chk">
+              <span>{t.morningEnabled}</span>
               <input
                 type="checkbox"
-                checked={value[key]}
-                onChange={(e) => change(key, e.target.checked)}
+                checked={value.morning_enabled}
+                onChange={(e) => change("morning_enabled", e.target.checked)}
               />
             </label>
-          ))}
-        </div>
+            <label className="flex flex-col gap-1.5 font-medium">
+              {t.time}
+              <Input
+                type="time"
+                pattern="(?:[01][0-9]|2[0-3]):[0-5][0-9]"
+                placeholder="HH:mm"
+                value={value.morning_time}
+                disabled={!value.morning_enabled}
+                onChange={(e) => change("morning_time", e.target.value)}
+                required
+              />
+            </label>
+            <p className="small">{t.morningHelp}</p>
+          </div>
 
-        <div>
-          <button type="submit" className="primary">
-            {busy ? t.saving : t.save}
-          </button>
-        </div>
-      </fieldset>
-    </form>
+          <div className="subblock">
+            <h3>{t.instant}</h3>
+            {alerts.map(([key, label]) => (
+              <label className="chk" key={key}>
+                <span>{label}</span>
+                <input
+                  type="checkbox"
+                  checked={value[key]}
+                  onChange={(e) => change(key, e.target.checked)}
+                />
+              </label>
+            ))}
+          </div>
+
+          <div>
+            <Button type="submit" variant="primary">
+              {busy ? t.saving : t.save}
+            </Button>
+          </div>
+        </fieldset>
+      </form>
+    </Card>
   );
 }
 

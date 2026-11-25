@@ -1,7 +1,7 @@
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import type { Plugin } from "vite";
-import { SCALAR_ASSET_PATH, SCALAR_VERSION } from "./scalar-assets";
+import { SCALAR_ASSET_PATH, SCALAR_VERSION } from "./scalar-assets.ts";
 import path from "node:path";
 import tailwindcss from "@tailwindcss/vite";
 import react from "@vitejs/plugin-react";

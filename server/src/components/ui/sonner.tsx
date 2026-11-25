@@ -19,18 +19,20 @@ const Toaster = ({ ...props }: ToasterProps) => {
         info: <InfoIcon className="size-5 text-[var(--lime)]" />,
         warning: <TriangleAlertIcon className="size-5 text-[var(--soon)]" />,
         error: <OctagonXIcon className="size-5 text-[#FF8A75]" />,
-        loading: <Loader2Icon className="size-5 animate-spin text-[var(--lime)]" />,
+        loading: (
+          <Loader2Icon className="size-5 animate-spin text-[var(--lime)]" />
+        ),
       }}
       toastOptions={{
         classNames: {
           toast:
-            "rounded-full border-0 bg-[var(--dark)] text-[var(--on-dark)] px-5 py-2.5 shadow-none font-medium gap-3",
+            "rounded-md border-0 bg-[var(--dark)] text-[var(--on-dark)] px-5 py-2.5 shadow-none font-medium gap-3",
           title: "text-[0.95rem] font-semibold text-[var(--on-dark)]",
           description: "text-[0.85rem] text-[var(--on-dark-2)]",
           actionButton:
-            "!rounded-full !bg-[var(--lime)] !text-[var(--lime-ink)] !min-h-[38px] !px-4 !font-bold",
+            "!rounded-md !bg-[var(--lime)] !text-[var(--lime-ink)] !min-h-[38px] !px-4 !font-bold",
           cancelButton:
-            "!rounded-full !bg-white/15 !text-[var(--on-dark)] !min-h-[38px] !px-3.5",
+            "!rounded-md !bg-white/15 !text-[var(--on-dark)] !min-h-[38px] !px-3.5",
         },
       }}
       style={
@@ -38,7 +40,7 @@ const Toaster = ({ ...props }: ToasterProps) => {
           "--normal-bg": "var(--dark)",
           "--normal-text": "var(--on-dark)",
           "--normal-border": "transparent",
-          "--border-radius": "999px",
+          "--border-radius": "var(--radius)",
         } as React.CSSProperties
       }
       {...props}
