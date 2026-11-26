@@ -1,0 +1,12 @@
+[project]
+name = "foodwarden-3dmodel"
+version = "0.1.0"
+description = "Parametric 3D CAD models for FoodWarden Node D0 (Door Actuator)"
+requires-python = ">=3.11,<3.14"
+dependencies = [
+    "build123d>=0.8.0",
+    "trimesh>=4.4.0",
+    "matplotlib>=3.9.0",
+    "pillow>=10.0.0",
+    "numpy>=1.26.0",
+]

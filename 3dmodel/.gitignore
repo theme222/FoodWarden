@@ -1,0 +1,12 @@
+# Python / uv virtual environment
+.venv/
+__pycache__/
+*.py[cod]
+*$py.class
+.uv-cache/
+.pytest_cache/
+.ruff_cache/
+
+# Temporary / OS files
+.DS_Store
+*.tmp
