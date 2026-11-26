@@ -84,6 +84,7 @@ The FoodWarden system features two primary user-facing interfaces: the local PyQ
 | [`CBS.md`](CBS.md) | Camera ↔ Server | Bidirectional / Client-Server (`B`) | HTTPS (Bearer Token) | Telemetry sync, check-in cropped images returning bilingual metadata (`name_th`, `name_en`), check-out FEFO verification, and door event logs. |
 | [`SBG.md`](SBG.md) | Server ↔ Gemini | Bidirectional (`B`) | HTTPS (Gen AI SDK) | Context-enriched prompt calls to Gemini 3.5 Flash Lite returning bilingual metadata (`name_th`, `name_en`, `category`, `estimated_expiry_date`). |
 | [`SUL.md`](SUL.md) | Server → LINE | Unidirectional (`U`) | HTTPS POST | Outbound user alerts for food expiration, spoilage VOC spikes, door ajar warnings, and obstruction aborts. |
+| [`TIMING.md`](TIMING.md) | `'F'`, `'D'`, `'C'` → Collector | Unidirectional (`U`) | USB-UART / Local Log (`[TIMING]`) | Diagnostic `[TIMING]` log contract for measuring cross-subsystem end-to-end latency and Node `'F'` wake phase durations. |
 
 ---
 

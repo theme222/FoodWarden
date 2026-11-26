@@ -4,6 +4,7 @@
 #include <Adafruit_INA219.h>
 #include <Adafruit_LEDBackpack.h>
 #include <Arduino.h>
+#include <esp_timer.h>
 #include <freertos/FreeRTOS.h>
 #include <freertos/portmacro.h>
 #include <freertos/queue.h>
@@ -46,6 +47,12 @@ struct RtosState {
   volatile uint32_t last_limit_isr_ms;
   volatile uint32_t last_abort_isr_ms;
   volatile uint32_t last_debug_isr_ms;
+
+  volatile uint64_t limit_isr_us;
+  volatile uint64_t abort_isr_us;
+  volatile uint64_t stall_first_over_us;
+  volatile uint64_t stall_trip_us;
+  volatile uint64_t mqtt_rx_us;
 };
 
 // C++11 header-only single-instance storage without runtime static-init guards
@@ -74,9 +81,16 @@ RtosState StateStorage<Unused>::instance = {
     false,
     0,
     0,
+    0,
+    0,
+    0,
+    0,
+    0,
     0};
 
 inline RtosState& state() { return StateStorage<>::instance; }
+
+inline uint64_t nowUs() { return static_cast<uint64_t>(esp_timer_get_time()); }
 
 /**
  * @brief Creates or resets FreeRTOS queues and resets SharedDoorStatus defaults.
@@ -106,6 +120,11 @@ inline void initRtosPrimitives() {
   s.base_epoch_s          = 0;
   s.base_millis           = 0;
   s.time_synced           = false;
+  s.limit_isr_us          = 0;
+  s.abort_isr_us          = 0;
+  s.stall_first_over_us   = 0;
+  s.stall_trip_us         = 0;
+  s.mqtt_rx_us            = 0;
   portEXIT_CRITICAL(&s.status_mux);
 }
 
@@ -208,13 +227,17 @@ inline uint64_t getUnixTimestamp() {
 // ------------------------------------------------------------------------------
 
 static void IRAM_ATTR notifyFromIsr(uint32_t notify_bit,
-                                    volatile uint32_t& last_isr_ms) {
+                                    volatile uint32_t& last_isr_ms,
+                                    volatile uint64_t* stamp_us) {
   const uint32_t now_ms =
       static_cast<uint32_t>(xTaskGetTickCountFromISR() * portTICK_PERIOD_MS);
   if ((now_ms - last_isr_ms) < door_config::ISR_DEBOUNCE_MS) {
     return;
   }
   last_isr_ms = now_ms;
+  if (stamp_us != nullptr) {
+    *stamp_us = static_cast<uint64_t>(esp_timer_get_time());
+  }
 
   TaskHandle_t target = state().motor_task_handle;
   if (target != nullptr) {
@@ -228,17 +251,17 @@ static void IRAM_ATTR notifyFromIsr(uint32_t notify_bit,
 
 static void IRAM_ATTR onLimitSwitchIsr() {
   notifyFromIsr(door_types::NOTIFY_LIMIT_SWITCH_HIT,
-                state().last_limit_isr_ms);
+                state().last_limit_isr_ms, &state().limit_isr_us);
 }
 
 static void IRAM_ATTR onEmergencyAbortIsr() {
   notifyFromIsr(door_types::NOTIFY_MANUAL_ABORT_BTN,
-                state().last_abort_isr_ms);
+                state().last_abort_isr_ms, &state().abort_isr_us);
 }
 
 static void IRAM_ATTR onDebugCloseIsr() {
   notifyFromIsr(door_types::NOTIFY_DEBUG_CLOSE_BTN,
-                state().last_debug_isr_ms);
+                state().last_debug_isr_ms, nullptr);
 }
 
 /**

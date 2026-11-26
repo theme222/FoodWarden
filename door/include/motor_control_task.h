@@ -15,6 +15,13 @@
 #include "rtos_state.h"
 #include "types.h"
 
+#if __has_include("secrets.h")
+#include "secrets.h"
+#endif
+#ifndef DOOR_NODE_ID
+#define DOOR_NODE_ID "D0"
+#endif
+
 // ==============================================================================
 // Node 'D' (Door Closer Actuator) — vMotorControlTask (Priority 3, Core 1)
 // Owns the actuator Finite State Machine, TB6612FNG PWM/direction outputs,
@@ -42,10 +49,30 @@ struct MotorFsmContext {
   uint32_t ir_seal_start_ms;
   uint32_t active_timeout_ms;
   uint32_t buzzer_step_ms;
+  uint64_t beep_start_us;
+  uint64_t ir_seal_start_us;
   uint8_t buzzer_step;
   bool waiting_warning_beeps;
   bool buzzer_active;
 };
+
+inline const char* retractReasonName(RetractReason reason) {
+  switch (reason) {
+    case RetractReason::FOR_SUCCESS:
+      return "FOR_SUCCESS";
+    case RetractReason::FOR_OBSTRUCTION:
+      return "FOR_OBSTRUCTION";
+    case RetractReason::FOR_REMOTE_ABORT:
+      return "FOR_REMOTE_ABORT";
+    case RetractReason::FOR_MANUAL_ABORT:
+      return "FOR_MANUAL_ABORT";
+    case RetractReason::FOR_NET_LOSS:
+      return "FOR_NET_LOSS";
+    case RetractReason::NONE:
+      return "BOOT_HOMING";
+  }
+  return "UNKNOWN";
+}
 
 inline void enqueueDoorEvent(const door_types::DoorEventMsg& msg) {
   QueueHandle_t q = door_rtos::state().outgoing_queue;
@@ -94,10 +121,20 @@ inline void enterFaultLockout(MotorFsmContext& fsm, const char* reason,
 
 inline void finishHomingToIdle(MotorFsmContext& fsm, uint32_t now_ms) {
   door_controllers::motorShortBrake();
+  const uint64_t brake_us = door_rtos::nowUs();
   stopWarningBuzzer(fsm);
 
   const door_types::SharedDoorStatus snap = door_rtos::getSharedStatus();
   const RetractReason reason              = fsm.retract_reason;
+
+  const uint64_t isr_us = door_rtos::state().limit_isr_us;
+  if (isr_us > 0 && brake_us >= isr_us) {
+    door_rtos::state().limit_isr_us = 0;
+    Serial.printf("[TIMING] node=%s evt=LIMIT_ISR_BRAKE t_us=%llu isr_to_brake_us=%llu reason=%s\n",
+                  DOOR_NODE_ID, static_cast<unsigned long long>(brake_us),
+                  static_cast<unsigned long long>(brake_us - isr_us),
+                  retractReasonName(reason));
+  }
 
   fsm.state          = door_types::MotorState::IDLE;
   fsm.retract_reason = RetractReason::NONE;
@@ -110,6 +147,10 @@ inline void finishHomingToIdle(MotorFsmContext& fsm, uint32_t now_ms) {
         makeBaseEvent(door_types::DoorEventType::SUCCESS, fsm.active_cmd_id);
     evt.duration_ms     = now_ms - fsm.stroke_start_ms;
     evt.peak_current_ma = snap.peak_current_ma;
+    Serial.printf("[TIMING] node=%s evt=STROKE_SUCCESS t_us=%llu cmd_id=%s duration_ms=%lu peak_ma=%u\n",
+                  DOOR_NODE_ID, static_cast<unsigned long long>(brake_us),
+                  (fsm.active_cmd_id[0] != '\0') ? fsm.active_cmd_id : "-",
+                  static_cast<unsigned long>(evt.duration_ms), evt.peak_current_ma);
     enqueueDoorEvent(evt);
   } else if (reason == RetractReason::FOR_OBSTRUCTION) {
     door_types::DoorEventMsg evt = makeBaseEvent(
@@ -144,10 +185,50 @@ inline void finishHomingToIdle(MotorFsmContext& fsm, uint32_t now_ms) {
 inline void beginRetraction(MotorFsmContext& fsm, RetractReason reason,
                             const char* abort_cmd_id, uint32_t now_ms) {
   door_controllers::motorShortBrake();
+  const uint64_t brake_us = door_rtos::nowUs();
   stopWarningBuzzer(fsm);
+
+  if (reason == RetractReason::FOR_REMOTE_ABORT) {
+    const uint64_t rx_us = door_rtos::state().mqtt_rx_us;
+    const uint64_t delta = (rx_us > 0 && brake_us >= rx_us) ? (brake_us - rx_us) : 0;
+    const char* cid = (abort_cmd_id != nullptr && abort_cmd_id[0] != '\0')
+                          ? abort_cmd_id
+                          : ((fsm.active_cmd_id[0] != '\0') ? fsm.active_cmd_id : "-");
+    Serial.printf("[TIMING] node=%s evt=ABORT_BRAKE t_us=%llu cmd_id=%s rx_to_brake_us=%llu\n",
+                  DOOR_NODE_ID, static_cast<unsigned long long>(brake_us), cid,
+                  static_cast<unsigned long long>(delta));
+  } else if (reason == RetractReason::FOR_MANUAL_ABORT) {
+    const uint64_t isr_us = door_rtos::state().abort_isr_us;
+    door_rtos::state().abort_isr_us = 0;
+    const uint64_t delta = (isr_us > 0 && brake_us >= isr_us) ? (brake_us - isr_us) : 0;
+    Serial.printf("[TIMING] node=%s evt=S1_ISR_BRAKE t_us=%llu isr_to_brake_us=%llu\n",
+                  DOOR_NODE_ID, static_cast<unsigned long long>(brake_us),
+                  static_cast<unsigned long long>(delta));
+  } else if (reason == RetractReason::FOR_OBSTRUCTION) {
+    const uint64_t trip_us  = door_rtos::state().stall_trip_us;
+    const uint64_t first_us = door_rtos::state().stall_first_over_us;
+    door_rtos::state().stall_trip_us       = 0;
+    door_rtos::state().stall_first_over_us = 0;
+    const uint64_t trip_delta  = (trip_us > 0 && brake_us >= trip_us) ? (brake_us - trip_us) : 0;
+    const uint64_t first_delta = (first_us > 0 && brake_us >= first_us) ? (brake_us - first_us) : 0;
+    const door_types::SharedDoorStatus snap = door_rtos::getSharedStatus();
+    Serial.printf("[TIMING] node=%s evt=STALL_BRAKE t_us=%llu ma=%u trip_to_brake_us=%llu first_over_to_brake_us=%llu\n",
+                  DOOR_NODE_ID, static_cast<unsigned long long>(brake_us), snap.stall_current_ma,
+                  static_cast<unsigned long long>(trip_delta),
+                  static_cast<unsigned long long>(first_delta));
+  } else if (reason == RetractReason::FOR_SUCCESS && fsm.ir_seal_start_us > 0) {
+    const uint64_t seal_us = (brake_us >= fsm.ir_seal_start_us)
+                                 ? (brake_us - fsm.ir_seal_start_us)
+                                 : 0;
+    Serial.printf("[TIMING] node=%s evt=IR_RETRACT t_us=%llu cmd_id=%s seal_us=%llu\n",
+                  DOOR_NODE_ID, static_cast<unsigned long long>(brake_us),
+                  (fsm.active_cmd_id[0] != '\0') ? fsm.active_cmd_id : "-",
+                  static_cast<unsigned long long>(seal_us));
+  }
 
   fsm.retract_reason   = reason;
   fsm.ir_seal_start_ms = 0;
+  fsm.ir_seal_start_us = 0;
   if (abort_cmd_id != nullptr && abort_cmd_id[0] != '\0') {
     snprintf(fsm.abort_ack_id, sizeof(fsm.abort_ack_id), "%s", abort_cmd_id);
   }
@@ -202,10 +283,22 @@ inline void startClosingFromCommand(MotorFsmContext& fsm,
   // Sound 3-beep audible warning BEFORE energizing the CW motor drive.
   door_controllers::motorCoastStop();
   door_controllers::buzzerSetTone(door_config::WARNING_BEEP_FREQ_HZ);
+  const uint64_t fsm_us     = door_rtos::nowUs();
   fsm.buzzer_active         = true;
   fsm.waiting_warning_beeps = true;
   fsm.buzzer_step           = 0;
   fsm.buzzer_step_ms        = now_ms;
+  fsm.beep_start_us         = fsm_us;
+  fsm.ir_seal_start_us      = 0;
+
+  const uint64_t rx_us = door_rtos::state().mqtt_rx_us;
+  const uint64_t rx_delta =
+      (rx_us > 0 && fsm_us >= rx_us && strcmp(cmd.cmd_id, "debug-btn-s2") != 0)
+          ? (fsm_us - rx_us)
+          : 0;
+  Serial.printf("[TIMING] node=%s evt=CLOSING_START t_us=%llu cmd_id=%s rx_to_fsm_us=%llu\n",
+                DOOR_NODE_ID, static_cast<unsigned long long>(fsm_us), fsm.active_cmd_id,
+                static_cast<unsigned long long>(rx_delta));
 
   Serial.printf(
       "[FSM] CLOSING started (cmd_id=%s, timeout=%lu s) -> playing warning beeps\n",
@@ -309,6 +402,14 @@ inline void stepActiveMotorState(MotorFsmContext& fsm, uint32_t now_ms) {
         Serial.printf("[FSM] Warning beeps complete -> driving CW (ramp to %u)\n",
                       door_config::PWM_DUTY_CLOSING);
         door_controllers::motorDriveCW(0);
+        const uint64_t cw_us = door_rtos::nowUs();
+        const uint64_t beep_us = (fsm.beep_start_us > 0 && cw_us >= fsm.beep_start_us)
+                                     ? (cw_us - fsm.beep_start_us)
+                                     : 0;
+        Serial.printf("[TIMING] node=%s evt=MOTOR_CW_START t_us=%llu cmd_id=%s beep_us=%llu\n",
+                      DOOR_NODE_ID, static_cast<unsigned long long>(cw_us),
+                      (fsm.active_cmd_id[0] != '\0') ? fsm.active_cmd_id : "-",
+                      static_cast<unsigned long long>(beep_us));
       } else if ((fsm.buzzer_step % 2) == 1) {
         door_controllers::buzzerOff();
       } else {
@@ -348,6 +449,10 @@ inline void stepActiveMotorState(MotorFsmContext& fsm, uint32_t now_ms) {
     if (fsm.ir_seal_start_ms == 0) {
       if (ir_closed) {
         fsm.ir_seal_start_ms = (now_ms == 0) ? 1 : now_ms;
+        fsm.ir_seal_start_us = door_rtos::nowUs();
+        Serial.printf("[TIMING] node=%s evt=IR_SEAL_START t_us=%llu cmd_id=%s\n",
+                      DOOR_NODE_ID, static_cast<unsigned long long>(fsm.ir_seal_start_us),
+                      (fsm.active_cmd_id[0] != '\0') ? fsm.active_cmd_id : "-");
         Serial.printf("[FSM] IR door-closed -> sealing gasket for %lu ms\n",
                       static_cast<unsigned long>(
                           door_config::POST_IR_SEAL_DELAY_MS));

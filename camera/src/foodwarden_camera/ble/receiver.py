@@ -25,6 +25,7 @@ from foodwarden_camera.models.ble_fuc import (
     AntiReplayValidator,
     SensorPacket,
 )
+from foodwarden_camera.timing import log_timing
 
 logger = logging.getLogger(__name__)
 
@@ -147,6 +148,13 @@ class BLEReceiver:
             packet.header.node_id,
             packet.header.counter,
             packet.header.session_salt.hex()[:8],
+        )
+        log_timing(
+            "BLE_RX",
+            src=packet.header.node_id,
+            counter=packet.header.counter,
+            samples=len(packet.samples),
+            ts_s=newest_ts,
         )
 
         if self.on_telemetry_callback:

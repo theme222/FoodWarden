@@ -4,6 +4,7 @@
 #include <driver/gpio.h>
 #include <driver/rtc_io.h>
 #include <esp_sleep.h>
+#include <esp_timer.h>
 #include <freertos/FreeRTOS.h>
 #include <freertos/event_groups.h>
 #include <freertos/queue.h>
@@ -16,6 +17,13 @@
 #include "door_voc_filter.h"
 #include "sensors.h"
 #include "telemetry_types.h"
+
+#if __has_include("secrets.h")
+#include "secrets.h"
+#endif
+#ifndef FRIDGE_NODE_ID
+#define FRIDGE_NODE_ID "F0"
+#endif
 
 // Pins (ARCHITECTURE.md §1.B)
 #define PIN_BUTTON_S1 16 // not an RTC GPIO on the ESP32: cannot wake from deep sleep
@@ -158,6 +166,9 @@ static void wifiLedHoldOffInSleep() {
 
 static void goToSleep(uint32_t awake_ms) {
   bleGattShutdown();
+  const uint64_t sleep_us = (uint64_t)esp_timer_get_time();
+  Serial.printf("[TIMING] node=%s evt=SLEEP_ENTER t_us=%llu awake_us=%llu\n", FRIDGE_NODE_ID,
+                (unsigned long long)sleep_us, (unsigned long long)sleep_us);
   Serial.flush();
 
   const uint64_t cycle_ms = (uint64_t)SAMPLE_INTERVAL_S * 1000ULL;
@@ -173,12 +184,17 @@ static void goToSleep(uint32_t awake_ms) {
 
 static void vSensorTask(void *) {
   const uint32_t start_ms = millis();
+  const uint64_t wake_us = (uint64_t)esp_timer_get_time();
   NodeState &node = *g_state;
+
+  Serial.printf("[TIMING] node=%s evt=WAKE t_us=%llu cause=%d\n", FRIDGE_NODE_ID,
+                (unsigned long long)wake_us, (int)esp_sleep_get_wakeup_cause());
 
   wifiLedOff();
   sensorsInit(node.voc);                       // algorithm state lives in RTC memory
   matrixShareBus(sensorsShareMatrixBus());     // before any S1 readout can touch Wire
   const SensorReading reading = sensorsRead(); // always feeds the VOC algorithm
+  const uint64_t sensors_done_us = (uint64_t)esp_timer_get_time();
   g_last_reading = reading;
   xEventGroupSetBits(g_events, EVT_READING_READY);
 
@@ -195,6 +211,10 @@ static void vSensorTask(void *) {
   nodeStateAppend(node, sample);
   nodeStateNoteDoor(node, door_open); // light crossed the threshold -> send now
 
+  Serial.printf("[TIMING] node=%s evt=SENSORS_DONE t_us=%llu door=%d buf=%u read_us=%llu\n",
+                FRIDGE_NODE_ID, (unsigned long long)sensors_done_us, (int)door_open,
+                node.sample_count, (unsigned long long)(sensors_done_us - wake_us));
+
   Serial.printf("t=%llu temp_cdeg=%d rh=%.1f sraw=%u sgp_err=%d voc_raw=%u voc_tx=%u light=%u door=%d alert=%u "
                 "cooldown=%u buf=%u\n",
                 (unsigned long long)sample.timestamp_s, sample.temp_cdeg, reading.humidity_rh,
@@ -208,6 +228,7 @@ static void vSensorTask(void *) {
        EVT_FORCE_BLE) != 0;
 
   if (nodeStateShouldSend(node, force)) {
+    const uint64_t ble_start_us = (uint64_t)esp_timer_get_time();
     BleRequest request = {true};
     xEventGroupClearBits(g_events, EVT_BLE_DONE);
     xQueueSend(g_bleRequests, &request, portMAX_DELAY);
@@ -219,6 +240,10 @@ static void vSensorTask(void *) {
                                                  pdMS_TO_TICKS(guard_ms));
     const SendOutcome outcome = (done & EVT_BLE_DONE) ? g_ble_outcome : SEND_FAILED;
     nodeStateOnSendResult(node, outcome);
+    const uint64_t ble_done_us = (uint64_t)esp_timer_get_time();
+    Serial.printf("[TIMING] node=%s evt=BLE_DONE t_us=%llu outcome=%d counter=%lu session_us=%llu\n",
+                  FRIDGE_NODE_ID, (unsigned long long)ble_done_us, (int)outcome,
+                  (unsigned long)node.counter, (unsigned long long)(ble_done_us - ble_start_us));
     Serial.printf("ble outcome=%d counter=%lu buf=%u\n", (int)outcome,
                   (unsigned long)node.counter, node.sample_count);
   }

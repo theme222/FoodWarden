@@ -56,11 +56,24 @@ inline void sampleAndEvaluateCurrent(uint32_t now_ms,
   }
 
   const uint32_t elapsed_ms = now_ms - status.motion_start_ms;
+  const uint8_t prev_stall  = consecutive_stall_count;
   const bool tripped        = door_protocol::evaluateStallSample(
       elapsed_ms, current_ma, consecutive_stall_count);
+  if (!tripped) {
+    if (prev_stall == 0 && consecutive_stall_count > 0) {
+      rtos.stall_first_over_us = door_rtos::nowUs();
+    } else if (consecutive_stall_count == 0) {
+      rtos.stall_first_over_us = 0;
+    }
+  }
   door_rtos::updateCurrentMetrics(current_ma, true, tripped ? current_ma : 0);
 
   if (tripped && rtos.motor_task_handle != nullptr) {
+    const uint64_t trip_us = door_rtos::nowUs();
+    rtos.stall_trip_us     = trip_us;
+    if (rtos.stall_first_over_us == 0) {
+      rtos.stall_first_over_us = trip_us;
+    }
     Serial.printf("[INA219] Stall tripped (%u mA >= %u mA) -> notifying motor task\n",
                   current_ma, door_config::CURRENT_STALL_LIMIT_MA);
     consecutive_stall_count = 0;

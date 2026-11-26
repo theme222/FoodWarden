@@ -25,6 +25,7 @@ from foodwarden_camera.models.mqtt_cbd import (
     TimeSyncRequest,
     TimeSyncResponse,
 )
+from foodwarden_camera.timing import log_timing
 
 logger = logging.getLogger(__name__)
 
@@ -242,6 +243,12 @@ class DoorMQTTClient:
             envelope = DoorEventEnvelope.model_validate(data)
             self._record_contact(envelope.node_id, online=True)
             logger.info("Received door event from %s: %s", envelope.node_id, envelope.event.type)
+            log_timing(
+                "MQTT_RX_EVENT",
+                src=envelope.node_id,
+                type=envelope.event.type,
+                ack_cmd_id=envelope.ack_cmd_id or "-",
+            )
 
             if envelope.event.type == "SUCCESS":
                 self.set_door_state(is_open=False)
@@ -301,6 +308,7 @@ class DoorMQTTClient:
         """Publishes CLOSE_DOOR command (QoS 1) to fridge/door/cmd."""
         cmd = CloseDoorCommand(node_id=node_id, timeout_s=timeout_s)
         self._client.publish(CMD_TOPIC, cmd.model_dump_json(), qos=1)
+        log_timing("MQTT_TX_CMD", action="CLOSE_DOOR", cmd_id=cmd.cmd_id, dst=node_id)
         logger.info("Published CLOSE_DOOR command: cmd_id=%s, node_id=%s", cmd.cmd_id, node_id)
         return cmd
 
@@ -312,6 +320,7 @@ class DoorMQTTClient:
         """Publishes ABORT command (QoS 1) immediately to fridge/door/cmd."""
         cmd = AbortCommand(node_id=node_id, reason=reason)
         self._client.publish(CMD_TOPIC, cmd.model_dump_json(), qos=1)
+        log_timing("MQTT_TX_CMD", action="ABORT", cmd_id=cmd.cmd_id, dst=node_id)
         logger.warning("Published ABORT command: cmd_id=%s, reason=%s", cmd.cmd_id, reason)
         return cmd
 

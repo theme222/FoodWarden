@@ -29,6 +29,7 @@ from foodwarden_camera.models.cloud_cbs import (
     TelemetrySyncPayload,
     normalize_door_event_status,
 )
+from foodwarden_camera.timing import log_timing, monotonic_us
 
 logger = logging.getLogger(__name__)
 
@@ -307,21 +308,33 @@ class CloudClient:
 
     def sync_telemetry(self, payload: TelemetrySyncPayload) -> bool:
         """Uploads a batch of telemetry sensor readings to Server 'S'."""
+        newest_ts = payload.samples[-1].timestamp_s if payload.samples else 0
         if self.mock_cloud:
             logger.debug("[MOCK_CLOUD] Synced %d telemetry readings", len(payload.samples))
+            log_timing("CLOUD_TELEM_START", samples=len(payload.samples), ts_s=newest_ts)
+            log_timing("CLOUD_TELEM_DONE", ok=True, http_ms=0.0, ts_s=newest_ts)
             return True
 
         url = "/telemetry"
+        t0_us = monotonic_us()
+        log_timing("CLOUD_TELEM_START", t_us=t0_us, samples=len(payload.samples), ts_s=newest_ts)
         try:
             with self._get_client() as client:
                 resp = client.post(url, json=payload.to_cbs_dict())
+            t1_us = monotonic_us()
+            http_ms = (t1_us - t0_us) / 1000.0
             if resp.status_code in (200, 201):
                 logger.debug("Successfully synced %d telemetry readings", len(payload.samples))
+                log_timing("CLOUD_TELEM_DONE", t_us=t1_us, ok=True, http_ms=http_ms, ts_s=newest_ts)
                 return True
             logger.warning("Telemetry sync rejected: HTTP %d - %s", resp.status_code, resp.text)
+            log_timing("CLOUD_TELEM_DONE", t_us=t1_us, ok=False, http_ms=http_ms, ts_s=newest_ts)
             return False
         except (httpx.RequestError, OSError) as exc:
+            t1_us = monotonic_us()
+            http_ms = (t1_us - t0_us) / 1000.0
             logger.warning("Network connection error during telemetry sync: %s", exc)
+            log_timing("CLOUD_TELEM_DONE", t_us=t1_us, ok=False, http_ms=http_ms, ts_s=newest_ts)
             return False
 
     def sync_door_events_batch(self, events: list[DoorEventItem]) -> bool:

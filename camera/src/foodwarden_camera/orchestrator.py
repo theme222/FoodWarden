@@ -34,6 +34,7 @@ from foodwarden_camera.models.mqtt_cbd import (
 )
 from foodwarden_camera.mqtt.client import DoorMQTTClient
 from foodwarden_camera.storage.offline_queue import OfflineQueue
+from foodwarden_camera.timing import log_timing
 from foodwarden_camera.ui.i18n import STRINGS, pick, t
 from foodwarden_camera.ui.main_window import FoodWardenMainWindow
 from foodwarden_camera.vision.camera import WebcamCapture
@@ -571,7 +572,14 @@ class GatewayOrchestrator:
                     close_timeout_s,
                 )
                 self._is_door_closing = True
-                self.mqtt.send_close_door(node_id="D0", timeout_s=30)
+                close_cmd = self.mqtt.send_close_door(node_id="D0", timeout_s=30)
+                close_cmd_id = getattr(close_cmd, "cmd_id", "-")
+                log_timing(
+                    "SAFETY_CLOSE_TX",
+                    cmd_id=close_cmd_id,
+                    ajar_s=ajar_s,
+                    yolo_ms=self.detector.last_inference_time_ms,
+                )
                 self.window.show_door_closing_alert()
             else:
                 logger.debug(
@@ -587,7 +595,14 @@ class GatewayOrchestrator:
             )
             self._is_door_closing = False
             self._last_abort_at = time.monotonic()
-            self.mqtt.send_abort(node_id="D0", reason="HUMAN_APPROACH")
+            abort_cmd = self.mqtt.send_abort(node_id="D0", reason="HUMAN_APPROACH")
+            abort_cmd_id = getattr(abort_cmd, "cmd_id", "-")
+            log_timing(
+                "SAFETY_ABORT_TX",
+                cmd_id=abort_cmd_id,
+                conf=conf,
+                yolo_ms=self.detector.last_inference_time_ms,
+            )
             self.window.show_person_abort_alert()
 
     def _safety_loop(self) -> None:

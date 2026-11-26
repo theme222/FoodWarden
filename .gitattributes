@@ -1,0 +1,4 @@
+
+# Ignore documentation and the 3000 line html UXUI draft file
+interface/* linguist-documentation
+resources/* linguist-documentation

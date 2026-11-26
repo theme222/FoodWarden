@@ -2,6 +2,7 @@
 
 #include <Arduino.h>
 #include <NimBLEDevice.h>
+#include <esp_timer.h>
 #include <freertos/FreeRTOS.h>
 #include <freertos/event_groups.h>
 #include <sys/time.h>
@@ -167,6 +168,9 @@ SendOutcome bleGattRunSession(NodeState &state, uint32_t adv_timeout_ms) {
   xEventGroupClearBits(events, 0xFF);
 
   NimBLEAdvertising *adv = NimBLEDevice::getAdvertising();
+  const uint64_t adv_start_us = (uint64_t)esp_timer_get_time();
+  Serial.printf("[TIMING] node=%s evt=BLE_ADV_START t_us=%llu buf=%u\n", FRIDGE_NODE_ID,
+                (unsigned long long)adv_start_us, state.sample_count);
   adv->start();
 
   // 1. Wait for the Gateway to connect.
@@ -178,11 +182,20 @@ SendOutcome bleGattRunSession(NodeState &state, uint32_t adv_timeout_ms) {
     return SEND_NO_CONNECTION;
   }
 
+  const uint64_t conn_us = (uint64_t)esp_timer_get_time();
+  Serial.printf("[TIMING] node=%s evt=BLE_CONN t_us=%llu adv_us=%llu\n", FRIDGE_NODE_ID,
+                (unsigned long long)conn_us, (unsigned long long)(conn_us - adv_start_us));
+
   SendOutcome outcome = SEND_FAILED;
 
   // 2. Wait for the Gateway to write the time (FUC.md §6 step order).
   bits = xEventGroupWaitBits(events, EVT_TIME_WRITTEN | EVT_DISCONNECTED, pdFALSE, pdFALSE,
                              pdMS_TO_TICKS(TIME_SYNC_WAIT_MS));
+  if (bits & EVT_TIME_WRITTEN) {
+    const uint64_t sync_us = (uint64_t)esp_timer_get_time();
+    Serial.printf("[TIMING] node=%s evt=BLE_TIME_SYNC t_us=%llu sync_us=%llu\n", FRIDGE_NODE_ID,
+                  (unsigned long long)sync_us, (unsigned long long)(sync_us - conn_us));
+  }
   if (!(bits & EVT_DISCONNECTED)) {
     // 3. Encrypt and expose the telemetry. The counter is consumed here so a
     //    (salt, counter) pair is never used for two different packets.
@@ -216,6 +229,12 @@ SendOutcome bleGattRunSession(NodeState &state, uint32_t adv_timeout_ms) {
         outcome = SEND_OK;
       } else if (bits & EVT_READ) {
         outcome = SEND_OK;
+      }
+      if (outcome == SEND_OK) {
+        const uint64_t tx_ok_us = (uint64_t)esp_timer_get_time();
+        Serial.printf("[TIMING] node=%s evt=BLE_TX_OK t_us=%llu counter=%lu samples=%u tx_us=%llu\n",
+                      FRIDGE_NODE_ID, (unsigned long long)tx_ok_us, (unsigned long)counter,
+                      state.sample_count, (unsigned long long)(tx_ok_us - conn_us));
       }
     }
   }

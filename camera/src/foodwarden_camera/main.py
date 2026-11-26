@@ -19,6 +19,16 @@ logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s [%(levelname)s] (%(name)s) %(message)s",
 )
+_timing_log_file = os.getenv("TIMING_LOG_FILE", "").strip()
+if _timing_log_file:
+    _log_path = Path(_timing_log_file)
+    _log_path.parent.mkdir(parents=True, exist_ok=True)
+    _file_handler = logging.FileHandler(_log_path, encoding="utf-8")
+    _file_handler.setLevel(logging.INFO)
+    _file_handler.setFormatter(
+        logging.Formatter("%(asctime)s [%(levelname)s] (%(name)s) %(message)s")
+    )
+    logging.getLogger().addHandler(_file_handler)
 logger = logging.getLogger("foodwarden_camera")
 
 

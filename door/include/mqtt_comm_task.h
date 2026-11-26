@@ -62,6 +62,14 @@ inline void handleIncomingMqttMessage(char* topic, uint8_t* payload,
       Serial.println("[MQTTS] Ignored invalid or foreign command payload");
       return;
     }
+    const uint64_t rx_us = door_rtos::nowUs();
+    door_rtos::state().mqtt_rx_us = rx_us;
+    Serial.printf("[TIMING] node=%s evt=MQTT_RX t_us=%llu action=%s cmd_id=%s\n",
+                  DOOR_NODE_ID, static_cast<unsigned long long>(rx_us),
+                  (cmd.action == door_types::CommandAction::ABORT) ? "ABORT"
+                                                                   : "CLOSE_DOOR",
+                  cmd.cmd_id);
+
     if (cmd.action == door_types::CommandAction::ABORT) {
       Serial.printf("[MQTTS <- CMD] ABORT (cmd_id=%s, reason=%s)\n",
                     cmd.cmd_id, cmd.reason);
@@ -146,6 +154,24 @@ inline bool connectMqttWithTls(WiFiClientSecure& tls_client, PubSubClient& mqtt)
   return true;
 }
 
+inline const char* doorEventTypeName(door_types::DoorEventType type) {
+  switch (type) {
+    case door_types::DoorEventType::CLOSING:
+      return "CLOSING";
+    case door_types::DoorEventType::SUCCESS:
+      return "SUCCESS";
+    case door_types::DoorEventType::OBSTRUCTION_ERROR:
+      return "OBSTRUCTION_ERROR";
+    case door_types::DoorEventType::ABORTED:
+      return "ABORTED";
+    case door_types::DoorEventType::TIMEOUT_ERROR:
+      return "TIMEOUT_ERROR";
+    case door_types::DoorEventType::FAULT_LOCKOUT:
+      return "FAULT_LOCKOUT";
+  }
+  return "UNKNOWN";
+}
+
 inline void flushOutgoingDoorEvents(PubSubClient& mqtt) {
   QueueHandle_t out_q = door_rtos::state().outgoing_queue;
   if (out_q == nullptr || !mqtt.connected()) {
@@ -157,6 +183,11 @@ inline void flushOutgoingDoorEvents(PubSubClient& mqtt) {
     const size_t n = door_protocol::serializeDoorEventJson(
         DOOR_NODE_ID, evt, json_buf, sizeof(json_buf));
     if (n > 0 && mqtt.publish(door_config::TOPIC_DOOR_EVENT, json_buf)) {
+      const uint64_t tx_us = door_rtos::nowUs();
+      Serial.printf("[TIMING] node=%s evt=MQTT_TX_EVENT t_us=%llu type=%s ack_cmd_id=%s\n",
+                    DOOR_NODE_ID, static_cast<unsigned long long>(tx_us),
+                    doorEventTypeName(evt.type),
+                    (evt.ack_cmd_id[0] != '\0') ? evt.ack_cmd_id : "-");
       Serial.printf("[MQTTS -> EVENT] %s\n", json_buf);
       xQueueReceive(out_q, &evt, 0);
     } else {
