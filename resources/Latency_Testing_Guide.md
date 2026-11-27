@@ -183,6 +183,40 @@ Usually this is `/dev/ttyUSB0`. All commands below assume `/dev/ttyUSB0` (replac
 
 ---
 
+## Path 6: BLE Packet Delivery Rate (`pdr`, 0 USB Ports)
+
+* **Rubric Category:** Packet Delivery Rate between Sensor Node (`'F'`) and Gateway (`'C'`) + repeated-window variation (`Mean`, `SD`, `Min`, `Max`).
+* **Hardware Plugged Into Pi-top USB:** **NONE (0 USB ports needed!)** — Node `'F'` runs completely wirelessly on battery so you can seal it inside the real refrigerator.
+* **How It Works:** Node `'F'` increments its monotonic `counter` once per BLE transmission attempt (before advertising), so any missed connection (`SEND_NO_CONNECTION`) or dropped transfer produces a sequence gap on Node `'C'`. `measure_latency.py pdr` tails Node `'C'`'s `BLE_RX` / `BLE_RX_ERR` logs and computes PDR and mean RSSI across consecutive fixed-size attempt windows (e.g., 10 windows × 20 attempts = 200 attempts).
+
+### Step-by-Step Procedure
+1. Ensure Node `'F'` has the updated firmware flashed (which increments `counter` at the start of each BLE session) and disconnect its USB cable so it runs on battery.
+2. Confirm Node `'C'` is running in Terminal 1 with `TIMING_LOG_FILE=/tmp/foodwarden-c.log`.
+3. **Run A — Open-Air Baseline (~1 m from Pi-top, door open):**
+   ```bash
+   cd ~/Code/FoodWarden/camera
+   uv run python deploy/measure_latency.py pdr \
+     --camera-log /tmp/foodwarden-c.log \
+     --window 20 \
+     --trials 5 \
+     --csv ~/latency_results/path6_pdr_open_air.csv
+   ```
+   *(Tip: To speed up collection in open air, shining a light on Node `'F'`'s LDR makes it attempt a BLE send every 5 s instead of every 30 s — 100 attempts takes ~8.5 minutes instead of ~50 minutes.)*
+4. **Run B — Sealed Closed Refrigerator (Real Deployment Condition):**
+   * Place battery-powered Node `'F'` inside the closed refrigerator compartment and close the door.
+   * Run the collector (in the dark, Node `'F'` transmits every 30 s, so `--window 20 --trials 6` = 120 attempts ≈ 60 minutes, or leave `--trials 0` overnight during your 24-hour uptime run and press `Ctrl+C` when finished):
+   ```bash
+   cd ~/Code/FoodWarden/camera
+   uv run python deploy/measure_latency.py pdr \
+     --camera-log /tmp/foodwarden-c.log \
+     --window 20 \
+     --trials 6 \
+     --csv ~/latency_results/path6_pdr_closed_fridge.csv
+   ```
+5. Compare the Markdown summary tables (`Windowed BLE PDR (%)` and `BLE RSSI (dBm)`) between **Open-Air Baseline** and **Sealed Closed Refrigerator** in your final report's Analysis & Comparison section.
+
+---
+
 ## Reporting Checklist (For Final Report — Rubric Section 5.IV)
 
 To secure the full **4/4 points** on Quantitative Metrics:

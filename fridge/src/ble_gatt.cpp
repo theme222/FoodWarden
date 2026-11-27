@@ -167,10 +167,15 @@ SendOutcome bleGattRunSession(NodeState &state, uint32_t adv_timeout_ms) {
   packetReady = false;
   xEventGroupClearBits(events, 0xFF);
 
+  // Consume one sequence counter per transmission attempt (node_state.h) BEFORE
+  // advertising so failed connections (SEND_NO_CONNECTION) leave a visible gap
+  // for Gateway 'C' PDRTracker while keeping every (salt, counter) IV unique.
+  const uint32_t counter = nodeStateNextCounter(state);
+
   NimBLEAdvertising *adv = NimBLEDevice::getAdvertising();
   const uint64_t adv_start_us = (uint64_t)esp_timer_get_time();
-  Serial.printf("[TIMING] node=%s evt=BLE_ADV_START t_us=%llu buf=%u\n", FRIDGE_NODE_ID,
-                (unsigned long long)adv_start_us, state.sample_count);
+  Serial.printf("[TIMING] node=%s evt=BLE_ADV_START t_us=%llu counter=%lu buf=%u\n", FRIDGE_NODE_ID,
+                (unsigned long long)adv_start_us, (unsigned long)counter, state.sample_count);
   adv->start();
 
   // 1. Wait for the Gateway to connect.
@@ -197,10 +202,8 @@ SendOutcome bleGattRunSession(NodeState &state, uint32_t adv_timeout_ms) {
                   (unsigned long long)sync_us, (unsigned long long)(sync_us - conn_us));
   }
   if (!(bits & EVT_DISCONNECTED)) {
-    // 3. Encrypt and expose the telemetry. The counter is consumed here so a
-    //    (salt, counter) pair is never used for two different packets.
+    // 3. Encrypt and expose the telemetry using this attempt's unique counter.
     uint8_t packet[TELEMETRY_MAX_PACKET_LEN];
-    const uint32_t counter = nodeStateNextCounter(state);
     const size_t len = buildEncryptedPacket(AES_KEY, FRIDGE_NODE_ID, state.session_salt, counter,
                                             state.samples, state.sample_count, packet,
                                             sizeof(packet));

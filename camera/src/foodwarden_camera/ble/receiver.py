@@ -43,16 +43,19 @@ class PDRTracker:
         self.missed_count: int = 0
         self.corrupted_count: int = 0
         self.replay_dropped_count: int = 0
+        self.last_missed_delta: int = 0
         self._last_counter_per_node: dict[str, int] = {}
 
     def record_received(self, node_id: str, counter: int, is_new_session: bool) -> None:
         """Updates sequence tracking and records packet delivery."""
         self.received_count += 1
+        self.last_missed_delta = 0
         if not is_new_session and node_id in self._last_counter_per_node:
             last_cnt = self._last_counter_per_node[node_id]
             if counter > last_cnt + 1:
                 missed = counter - last_cnt - 1
                 self.missed_count += missed
+                self.last_missed_delta = missed
                 logger.warning(
                     "Detected sequence gap on %s: missed %d packets (%d -> %d)",
                     node_id,
@@ -109,6 +112,7 @@ class BLEReceiver:
         self._connected: bool = False
         self._thread: threading.Thread | None = None
         self.last_contact_time: float | None = None
+        self._last_rssi: int | None = None
 
     @property
     def is_connected(self) -> bool:
@@ -124,6 +128,16 @@ class BLEReceiver:
         except (InvalidTag, ValueError) as exc:
             logger.warning("Failed to decrypt BLE telemetry packet: %s", exc)
             self.pdr_tracker.record_corrupted()
+            log_timing(
+                "BLE_RX_ERR",
+                kind="corrupted",
+                pdr_rx=self.pdr_tracker.received_count,
+                pdr_missed=self.pdr_tracker.missed_count,
+                pdr_corrupt=self.pdr_tracker.corrupted_count,
+                pdr_replay=self.pdr_tracker.replay_dropped_count,
+                pdr_pct=round(self.pdr_tracker.packet_delivery_rate * 100.0, 2),
+                rssi=self._last_rssi,
+            )
             return None
 
         newest_ts = packet.samples[-1].timestamp_s if packet.samples else int(time.time())
@@ -134,6 +148,18 @@ class BLEReceiver:
                 "Dropped BLE telemetry packet from %s: %s", packet.header.node_id, reason
             )
             self.pdr_tracker.record_replay_dropped()
+            log_timing(
+                "BLE_RX_ERR",
+                src=packet.header.node_id,
+                kind="replay",
+                counter=packet.header.counter,
+                pdr_rx=self.pdr_tracker.received_count,
+                pdr_missed=self.pdr_tracker.missed_count,
+                pdr_corrupt=self.pdr_tracker.corrupted_count,
+                pdr_replay=self.pdr_tracker.replay_dropped_count,
+                pdr_pct=round(self.pdr_tracker.packet_delivery_rate * 100.0, 2),
+                rssi=self._last_rssi,
+            )
             return None
 
         is_new_session = reason == "new_session"
@@ -143,11 +169,12 @@ class BLEReceiver:
         )
 
         logger.info(
-            "Successfully decrypted %d samples from %s (counter=%d, session_salt=%s)",
+            "Successfully decrypted %d samples from %s (counter=%d, session_salt=%s, pdr=%.2f%%)",
             len(packet.samples),
             packet.header.node_id,
             packet.header.counter,
             packet.header.session_salt.hex()[:8],
+            self.pdr_tracker.packet_delivery_rate * 100.0,
         )
         log_timing(
             "BLE_RX",
@@ -155,6 +182,14 @@ class BLEReceiver:
             counter=packet.header.counter,
             samples=len(packet.samples),
             ts_s=newest_ts,
+            salt=packet.header.session_salt.hex()[:8],
+            new_session=is_new_session,
+            missed_delta=self.pdr_tracker.last_missed_delta,
+            pdr_rx=self.pdr_tracker.received_count,
+            pdr_missed=self.pdr_tracker.missed_count,
+            pdr_corrupt=self.pdr_tracker.corrupted_count,
+            pdr_pct=round(self.pdr_tracker.packet_delivery_rate * 100.0, 2),
+            rssi=self._last_rssi,
         )
 
         if self.on_telemetry_callback:
@@ -214,11 +249,12 @@ class BLEReceiver:
             logger.debug("Node 'F' not found during scan window (sensor may be in deep sleep)")
             return
 
+        self._last_rssi = rssis.get(device.address)
         logger.info(
             "Discovered Node 'F' at %s (name=%s, rssi=%s). Connecting...",
             device.address,
             device.name,
-            rssis.get(device.address, "unknown"),
+            self._last_rssi if self._last_rssi is not None else "unknown",
         )
 
         packet_received = asyncio.Event()

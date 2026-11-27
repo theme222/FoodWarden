@@ -10,6 +10,7 @@ ESP32 connected to the Pi-top [4] via USB-UART at a time:
   3. door-close     : Node 'C' log + Node 'D' (USB) -> Door-Ajar -> CLOSE_DOOR -> Motor
   4. door-local     : Node 'D' (USB) only           -> Limit ISR, S1 ISR, INA219 Stall
   5. f-power        : Node 'F' (USB) only           -> Wake / Sensor / BLE durations (E3)
+  6. pdr            : 0 USB ports (Node 'C' log)    -> Windowed BLE PDR & RSSI variation
 
 All cross-node timestamps share the Pi-top's single CLOCK_MONOTONIC clock
 (time.perf_counter_ns() // 1000), avoiding cross-device clock skew and the
@@ -530,6 +531,107 @@ class FPowerCorrelator:
         return _collect_stats(self.trials, metrics)
 
 
+class PDRCorrelator:
+    """Path 6: 0-USB-port windowed BLE Packet Delivery Rate & RSSI analyzer."""
+
+    def __init__(self, window_size: int = 20, src_node: str | None = None) -> None:
+        self.window_size = max(1, int(window_size))
+        self.src_node = src_node
+        self._salt: str | None = None
+        self._win_start: int | None = None
+        self._win_rx: int = 0
+        self._win_corrupt: int = 0
+        self._win_replay: int = 0
+        self._win_rssis: list[int] = []
+        self.trials: list[dict[str, Any]] = []
+
+    def _close_window(self) -> dict[str, Any]:
+        assert self._win_start is not None
+        win_end = self._win_start + self.window_size - 1
+        missed = max(0, self.window_size - self._win_rx)
+        pdr_pct = (self._win_rx / self.window_size) * 100.0
+        rssi_mean = statistics.fmean(self._win_rssis) if self._win_rssis else None
+        trial = {
+            "trial": len(self.trials) + 1,
+            "counter_start": self._win_start,
+            "counter_end": win_end,
+            "attempts": self.window_size,
+            "received": self._win_rx,
+            "missed": missed,
+            "corrupted": self._win_corrupt,
+            "replay_dropped": self._win_replay,
+            "pdr_pct": _r(pdr_pct),
+            "rssi_mean_dbm": _r(rssi_mean),
+        }
+        self.trials.append(trial)
+        self._win_start += self.window_size
+        self._win_rx = 0
+        self._win_corrupt = 0
+        self._win_replay = 0
+        self._win_rssis = []
+        return trial
+
+    def feed(self, rec: TimingRecord) -> dict[str, Any] | None:
+        if not rec.node.startswith("C"):
+            return None
+
+        if rec.evt == "BLE_RX_ERR":
+            src = rec.fields.get("src")
+            if self.src_node and src and src != self.src_node:
+                return None
+            kind = rec.fields.get("kind")
+            if kind == "corrupted":
+                self._win_corrupt += 1
+            elif kind == "replay":
+                self._win_replay += 1
+            return None
+
+        if rec.evt != "BLE_RX":
+            return None
+
+        src = rec.fields.get("src")
+        if self.src_node and src != self.src_node:
+            return None
+
+        counter = rec.get_int("counter")
+        if counter is None:
+            return None
+
+        salt = rec.fields.get("salt")
+        is_new_session = rec.get_int("new_session", 0) == 1
+        salt_changed = salt is not None and self._salt is not None and salt != self._salt
+
+        # Reset partial window on cold boot / new session so reboot doesn't skew PDR
+        if self._win_start is None or is_new_session or salt_changed or counter < self._win_start:
+            self._salt = salt
+            self._win_start = counter
+            self._win_rx = 0
+            self._win_corrupt = 0
+            self._win_replay = 0
+            self._win_rssis = []
+
+        last_closed: dict[str, Any] | None = None
+        while counter >= self._win_start + self.window_size:
+            last_closed = self._close_window()
+
+        self._win_rx += 1
+        rssi = rec.get_int("rssi")
+        if rssi is not None:
+            self._win_rssis.append(rssi)
+
+        if counter == self._win_start + self.window_size - 1:
+            last_closed = self._close_window()
+
+        return last_closed
+
+    def summarize(self) -> list[MetricStats]:
+        metrics = [
+            ("Windowed BLE PDR", "pdr_pct", "%"),
+            ("BLE RSSI (Mean/Window)", "rssi_mean_dbm", "dBm"),
+        ]
+        return _collect_stats(self.trials, metrics)
+
+
 def _r(val: float | None) -> float | None:
     return round(val, 3) if val is not None else None
 
@@ -637,7 +739,7 @@ def _log_tail_thread(
                 out_q.put(rec)
 
 
-def _build_correlator(mode: str) -> Any:
+def _build_correlator(mode: str, *, window_size: int = 20) -> Any:
     if mode == "f-to-dashboard":
         return FToDashboardCorrelator()
     if mode == "vision-abort":
@@ -648,17 +750,19 @@ def _build_correlator(mode: str) -> Any:
         return DoorLocalCorrelator()
     if mode == "f-power":
         return FPowerCorrelator()
+    if mode == "pdr":
+        return PDRCorrelator(window_size=window_size)
     raise ValueError(f"Unknown mode: {mode}")
 
 
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(
-        description="FoodWarden single-USB-port [TIMING] latency collector (interface/TIMING.md)."
+        description="FoodWarden single-USB-port [TIMING] latency & PDR collector (interface/TIMING.md)."
     )
     parser.add_argument(
         "mode",
-        choices=["f-to-dashboard", "vision-abort", "door-close", "door-local", "f-power"],
-        help="Isolated measurement path to run (max 1 USB-UART node required).",
+        choices=["f-to-dashboard", "vision-abort", "door-close", "door-local", "f-power", "pdr"],
+        help="Isolated measurement path to run (0 USB ports for pdr; max 1 USB-UART node otherwise).",
     )
     parser.add_argument(
         "--serial",
@@ -674,10 +778,16 @@ def main(argv: list[str] | None = None) -> int:
         help="Path to Node 'C' log file (set TIMING_LOG_FILE when launching foodwarden-camera).",
     )
     parser.add_argument(
+        "--window",
+        type=int,
+        default=20,
+        help="Attempted BLE packets per PDR window in 'pdr' mode (default: 20).",
+    )
+    parser.add_argument(
         "--trials",
         type=int,
         default=20,
-        help="Target number of completed trials before stopping (0 = run until Ctrl+C).",
+        help="Target number of completed trials/windows before stopping (0 = run until Ctrl+C).",
     )
     parser.add_argument("--csv", type=Path, default=None, help="Output CSV path for raw trials.")
     parser.add_argument(
@@ -687,24 +797,26 @@ def main(argv: list[str] | None = None) -> int:
     )
     args = parser.parse_args(argv)
 
-    needs_camera = args.mode in ("f-to-dashboard", "vision-abort", "door-close")
-    if not args.serial:
+    needs_serial = args.mode != "pdr"
+    needs_camera = args.mode in ("f-to-dashboard", "vision-abort", "door-close", "pdr")
+    if needs_serial and not args.serial:
         parser.error(f"--serial is required for mode '{args.mode}'.")
     if needs_camera and not args.camera_log:
         parser.error(f"--camera-log is required for mode '{args.mode}'.")
 
-    correlator = _build_correlator(args.mode)
+    correlator = _build_correlator(args.mode, window_size=args.window)
     rec_q: queue.Queue[TimingRecord] = queue.Queue()
     stop_evt = threading.Event()
     threads: list[threading.Thread] = []
 
-    t_serial = threading.Thread(
-        target=_serial_reader_thread,
-        args=(args.serial, args.baud, rec_q, stop_evt),
-        daemon=True,
-        name="SerialTimingReader",
-    )
-    threads.append(t_serial)
+    if args.serial:
+        t_serial = threading.Thread(
+            target=_serial_reader_thread,
+            args=(args.serial, args.baud, rec_q, stop_evt),
+            daemon=True,
+            name="SerialTimingReader",
+        )
+        threads.append(t_serial)
 
     if args.camera_log is not None:
         t_log = threading.Thread(
@@ -719,7 +831,7 @@ def main(argv: list[str] | None = None) -> int:
         t.start()
 
     print(
-        f"[measure_latency] Mode={args.mode} | serial={args.serial} | "
+        f"[measure_latency] Mode={args.mode} | serial={args.serial or 'none'} | "
         f"camera_log={args.camera_log or 'none'} | target_trials={args.trials or 'unlimited'}"
     )
     print("[measure_latency] Listening for [TIMING] events... Press Ctrl+C to finish early.")
@@ -734,11 +846,12 @@ def main(argv: list[str] | None = None) -> int:
             if args.verbose:
                 print(f"  <- {rec.node} {rec.evt} t_us={rec.t_us} {rec.fields}")
 
-            trial = correlator.feed(rec)
-            if trial is not None:
+            prev_n = len(correlator.trials)
+            correlator.feed(rec)
+            for trial in correlator.trials[prev_n:]:
                 print(f"[TRIAL {trial['trial']}] {trial}")
-                if args.trials > 0 and len(correlator.trials) >= args.trials:
-                    break
+            if args.trials > 0 and len(correlator.trials) >= args.trials:
+                break
     except KeyboardInterrupt:
         print("\n[measure_latency] Stopped by user.")
     finally:

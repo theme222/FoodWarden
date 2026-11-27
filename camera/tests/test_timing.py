@@ -150,3 +150,63 @@ def test_door_close_and_local_and_f_power_correlators() -> None:
         fp.feed(rec)
     assert len(fp.trials) == 1
     assert fp.trials[0]["sample_only_awake_ms"] == 350.0
+
+
+def test_pdr_correlator_windows_gaps_and_reboots() -> None:
+    ml = _load_measure_module()
+    corr = ml.PDRCorrelator(window_size=5)
+
+    # Window 1 (counters 1..5): 1, 2, 3, 4, 5 all arrive -> 100% PDR
+    for c in (1, 2, 3, 4, 5):
+        rec = ml.parse_timing_line(
+            f"[TIMING] node=C0 evt=BLE_RX t_us={c * 1000} src=F0 counter={c} "
+            f"samples=6 ts_s={1795000000 + c} salt=aabbccdd new_session={1 if c == 1 else 0} rssi=-62",
+            host_t_us=c * 1000,
+        )
+        assert rec is not None
+        corr.feed(rec)
+    assert len(corr.trials) == 1
+    assert corr.trials[0]["pdr_pct"] == 100.0
+    assert corr.trials[0]["missed"] == 0
+    assert corr.trials[0]["rssi_mean_dbm"] == -62.0
+
+    # Window 2 (counters 6..10): counter 7 and 10 are missed; 1 corrupted error logged.
+    # Packet 11 arrives -> closes Window 2 (rx=3/5 = 60%) and starts Window 3.
+    err_rec = ml.parse_timing_line(
+        "[TIMING] node=C0 evt=BLE_RX_ERR t_us=7500 kind=corrupted pdr_corrupt=1",
+        host_t_us=7500,
+    )
+    assert err_rec is not None
+    corr.feed(err_rec)
+
+    for c in (6, 8, 9, 11):
+        rec = ml.parse_timing_line(
+            f"[TIMING] node=C0 evt=BLE_RX t_us={c * 1000} src=F0 counter={c} "
+            f"samples=6 ts_s={1795000000 + c} salt=aabbccdd new_session=0 rssi=-74",
+            host_t_us=c * 1000,
+        )
+        assert rec is not None
+        corr.feed(rec)
+    assert len(corr.trials) == 2
+    assert corr.trials[1]["counter_start"] == 6
+    assert corr.trials[1]["counter_end"] == 10
+    assert corr.trials[1]["received"] == 3
+    assert corr.trials[1]["missed"] == 2
+    assert corr.trials[1]["corrupted"] == 1
+    assert corr.trials[1]["pdr_pct"] == 60.0
+    assert corr.trials[1]["rssi_mean_dbm"] == -74.0
+
+    # Node F cold-boots with a new salt -> partial Window 3 resets cleanly without closing
+    reboot_rec = ml.parse_timing_line(
+        "[TIMING] node=C0 evt=BLE_RX t_us=99000 src=F0 counter=1 samples=1 "
+        "ts_s=1795000200 salt=11223344 new_session=1 rssi=-68",
+        host_t_us=99000,
+    )
+    assert reboot_rec is not None
+    assert corr.feed(reboot_rec) is None
+    assert len(corr.trials) == 2
+
+    stats = corr.summarize()
+    assert len(stats) == 2
+    assert stats[0].mean == 80.0
+

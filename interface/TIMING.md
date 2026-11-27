@@ -45,7 +45,7 @@ Every timing record is a single ASCII line containing the exact tag **`[TIMING]`
 |---|---|---|
 | `WAKE` | Start of `vSensorTask` after boot / deep-sleep wake | `cause=<int>` (`esp_sleep_get_wakeup_cause()`) |
 | `SENSORS_DONE` | Immediately after `sensorsRead()` completes (LDR + SHT31 + SGP40) | `door=<0\|1>` `buf=<uint8>` `read_us=<uint64>` |
-| `BLE_ADV_START` | Immediately before `adv->start()` | `buf=<uint8>` |
+| `BLE_ADV_START` | Immediately before `adv->start()` (counter already incremented per attempt) | `counter=<uint32>` `buf=<uint8>` |
 | `BLE_CONN` | Immediately after `EVT_CONNECTED` is received | `adv_us=<uint64>` |
 | `BLE_TIME_SYNC` | Immediately after `EVT_TIME_WRITTEN` is received | `sync_us=<uint64>` |
 | `BLE_TX_OK` | Immediately after `notify()` or `EVT_READ` succeeds (`SEND_OK`) | `counter=<uint32>` `samples=<uint8>` `tx_us=<uint64>` |
@@ -88,7 +88,8 @@ Every timing record is a single ASCII line containing the exact tag **`[TIMING]`
 
 | `evt` | Emitted When | Extra Fields |
 |---|---|---|
-| `BLE_RX` | Inside `BLEReceiver.handle_raw_telemetry()` after AES-128-GCM decrypt & replay check | `src=<NODE_ID>` `counter=<uint32>` `samples=<int>` `ts_s=<int>` |
+| `BLE_RX` | Inside `BLEReceiver.handle_raw_telemetry()` after AES-128-GCM decrypt & replay check | `src=<NODE_ID>` `counter=<uint32>` `samples=<int>` `ts_s=<int>` `salt=<hex8>` `new_session=<0\|1>` `missed_delta=<int>` `pdr_rx=<int>` `pdr_missed=<int>` `pdr_corrupt=<int>` `pdr_pct=<float>` `rssi=<int\|->` |
+| `BLE_RX_ERR` | Inside `BLEReceiver.handle_raw_telemetry()` when a BLE packet fails AES-GCM decrypt or anti-replay validation | `kind=<corrupted\|replay>` `pdr_rx=<int>` `pdr_missed=<int>` `pdr_corrupt=<int>` `pdr_replay=<int>` `pdr_pct=<float>` `rssi=<int\|->` (`src`, `counter` on replay) |
 | `CLOUD_TELEM_START` | Inside `CloudClient.sync_telemetry()` immediately before `POST /telemetry` | `samples=<int>` `ts_s=<int>` |
 | `CLOUD_TELEM_DONE` | Inside `CloudClient.sync_telemetry()` immediately after HTTP response | `ok=<0\|1>` `http_ms=<float>` `ts_s=<int>` |
 | `SAFETY_CLOSE_TX` | Inside `GatewayOrchestrator._evaluate_safety_step()` right before/after `send_close_door()` | `cmd_id=<str>` `ajar_s=<float>` `yolo_ms=<float>` |
@@ -115,6 +116,7 @@ vision-abort     | Node 'D' only   | Log('C') + Serial('D')                     
 door-close       | Node 'D' only   | Log('C') + Serial('D')                       | Door-Ajar -> MQTTS CLOSE_DOOR -> Motor
 door-local       | Node 'D' only   | Serial('D') only                             | Limit ISR, S1 ISR, INA219 Stall -> Brake
 f-power          | Node 'F' only   | Serial('F') only                             | Wake / Sensor / BLE phase durations (E3)
+pdr              | None (0 USB)    | Log('C') only (Node 'F' wireless on battery) | Windowed BLE PDR (%) & RSSI variation
 ```
 
 ### Correlation Keys
